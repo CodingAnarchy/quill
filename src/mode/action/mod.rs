@@ -8,14 +8,15 @@
 //! Grown past the ~1,000-line convention itself (#714), this is now a directory
 //! module split into cohesive files — the palette types ([`palette`]), the
 //! [`Command`] enum and its Settings/style pickers ([`command`]), the [`Action`]
-//! registry with the export/git targets ([`registry`]), and the [`AiAction`]
-//! descriptor table ([`ai`]) — each re-exported here so the public surface, and
-//! every caller, is unchanged.
+//! registry with the export/git targets ([`registry`]), its row-per-action table
+//! ([`table`]), and the [`AiAction`] descriptor table ([`ai`]) — each re-exported
+//! here so the public surface, and every caller, is unchanged.
 
 mod ai;
 mod command;
 mod palette;
 mod registry;
+mod table;
 
 pub use ai::{AiAction, AiCost, ModelWeight, Needs};
 pub use command::{

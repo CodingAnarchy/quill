@@ -726,22 +726,10 @@ impl AiAction {
         self.spec().slug
     }
 
-    /// The full run-action label (`"AI · Character bible"`) — the AI half of
-    /// [`Action::label`](super::Action::label), a descriptor lookup (#563).
-    pub(crate) fn label(self) -> &'static str {
-        self.spec().label
-    }
-
     /// The AI palette's short label + one-line blurb, or `None` for an action that
     /// never lists in the AI palette directly (none today). Descriptor lookup.
     pub(crate) fn palette_entry(self) -> Option<(&'static str, &'static str)> {
         self.spec().palette
-    }
-
-    /// Whether the authorial assistant (#392) may run this action as a tool — the
-    /// descriptor field that CLOSES the hand-maintained allowlist (#1069).
-    pub(crate) fn assistant_runnable(self) -> bool {
-        self.spec().assistant_runnable
     }
 
     /// The JSON property name of this action's free-text argument (#390), or `None`.

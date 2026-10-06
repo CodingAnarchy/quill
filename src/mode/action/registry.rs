@@ -1,9 +1,10 @@
 //! The unified run-action registry (#225): the [`Action`] enum with its
-//! `ALL`/`name`/`group`/`label` tables and resolvers, plus the export targets
-//! ([`ExportFormat`], [`ExportScope`]) and the version-control [`GitAction`] set.
-//! Split out of `action.rs` to keep each file under the ~1,000-line convention;
-//! re-exported from the module root, so callers are unaffected. Pure move.
+//! `ALL`/`name`/`group`/`label` accessors and resolvers (all read from the one
+//! row-per-action table in `table.rs`), plus the export targets ([`ExportFormat`],
+//! [`ExportScope`]) and the version-control [`GitAction`] set. Re-exported from
+//! the module root, so callers are unaffected.
 
+use super::table::{rows, ActionSpec, ALL_ACTIONS};
 use super::{AiAction, Needs};
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
@@ -15,7 +16,7 @@ use super::{AiAction, Needs};
 /// of actions depending on repo/remote state, and several entries are interactive
 /// prompts or spawn async work — neither fits the flat, fire-and-forget registry
 /// yet. It can join once the registry models context-dependent availability.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Save the active chapter / continuous window (Ctrl-S).
     Save,
@@ -271,405 +272,40 @@ pub enum Action {
 }
 
 impl Action {
-    /// Every action, grouped in menu order — the registry. Ordered so each
-    /// [`group`](Action::group) is contiguous, so the run-action menu emits one
-    /// header per group (#514). Names are stable regardless of this order.
-    pub(crate) const ALL: &'static [Self] = &[
-        // Project
-        Self::Save,
-        Self::ProjectFind,
-        Self::SwitchBook,
-        Self::ManageBooks,
-        Self::SeriesTree,
-        Self::RenameProject,
-        Self::BookDetails,
-        Self::SetGoals,
-        Self::ImportNotes,
-        Self::NewProjectFromNotes,
-        Self::ImportManuscript,
-        Self::ImportReviewComments,
-        Self::Drafts,
-        Self::ArchiveProject,
-        Self::RestoreArchive,
-        Self::BrowseBackups,
-        // Export
-        Self::Export(ExportFormat::Markdown),
-        Self::Export(ExportFormat::Docx),
-        Self::Export(ExportFormat::Scriv),
-        Self::Export(ExportFormat::Vellum),
-        Self::Export(ExportFormat::Epub),
-        Self::Export(ExportFormat::Pdf),
-        Self::Export(ExportFormat::PdfPrint),
-        Self::PdfWrapCover,
-        Self::ReviewCopy,
-        Self::PreflightExport,
-        Self::PrepareForKdp,
-        Self::PrepareForIngramSpark,
-        Self::ExportBible,
-        Self::RevisionPlan,
-        Self::BrowseFonts,
-        Self::SetExportStyle,
-        // Reports
-        Self::ProgressReport,
-        Self::AnalysisReport,
-        Self::WritingHistory,
-        Self::HealthTrend,
-        // AI
-        Self::EnableAi,
-        Self::Ai(AiAction::Ask),
-        Self::Ai(AiAction::Characters),
-        Self::Ai(AiAction::Continuity),
-        Self::Ai(AiAction::Setting),
-        Self::Ai(AiAction::Plot),
-        Self::Ai(AiAction::Theme),
-        Self::Ai(AiAction::Scaffold),
-        Self::Ai(AiAction::Naming),
-        Self::Ai(AiAction::Style),
-        Self::Ai(AiAction::Brainstorm),
-        Self::Ai(AiAction::DraftCharacters),
-        Self::Ai(AiAction::DraftSetting),
-        Self::Ai(AiAction::Voice),
-        Self::Ai(AiAction::Submission),
-        Self::Ai(AiAction::Marketing),
-        Self::Ai(AiAction::Social),
-        Self::Ai(AiAction::AdCreative),
-        Self::Ai(AiAction::Portrait),
-        Self::Ai(AiAction::Scene),
-        Self::Ai(AiAction::SemanticFind),
-        Self::Ai(AiAction::Echo),
-        Self::Ai(AiAction::Triage),
-        Self::Ai(AiAction::Dashboard),
-        Self::Ai(AiAction::CoOccurrence),
-        Self::Ai(AiAction::AskHistory),
-        Self::Ai(AiAction::Thesaurus),
-        Self::Ai(AiAction::NameGen),
-        Self::Ai(AiAction::Editorial),
-        Self::Ai(AiAction::Accuracy),
-        Self::Ai(AiAction::Relationship),
-        Self::Ai(AiAction::Foreshadow),
-        Self::Ai(AiAction::FactCheck),
-        Self::Ai(AiAction::Pacing),
-        Self::RefreshBibles,
-        Self::QueuePasses,
-        Self::BackgroundBibleUpdate,
-        Self::RefreshSeriesBible,
-        Self::DescribeConfig,
-        Self::SwitchBackend,
-        Self::ManageModels,
-        Self::SetClaudeKey,
-        Self::SetImageKey,
-        Self::Assistant,
-        // Bible
-        Self::BrowseBible,
-        Self::ViewResearch,
-        Self::Corkboard,
-        Self::ManuscriptCorkboard,
-        // Editing
-        Self::GoToLine,
-        Self::RecentEditBack,
-        Self::RecentEditForward,
-        Self::LastInsertion,
-        Self::AcceptWord,
-        Self::ViewDictionary,
-        Self::NextMisspelling,
-        Self::PrevMisspelling,
-        Self::StyleFlagSweep,
-        Self::ToggleProximityRepeats,
-        Self::SplitChapter,
-        Self::MergeChapter,
-        Self::AddAnnotation,
-        Self::ReviewAnnotations,
-        Self::RemoveAnnotation,
-        Self::ClearAnnotations,
-        Self::InsertSnippet,
-        Self::StartSprint,
-        Self::StopSprint,
-        Self::SetSessionTarget,
-        // View
-        Self::ToggleTypewriter,
-        Self::ToggleFocus,
-        Self::ToggleParagraphIndent,
-        Self::ToggleAnnotationMargin,
-        Self::ToggleDailyCue,
-        Self::FoldAll,
-        Self::ExpandAll,
-        Self::ToggleComposition,
-        Self::ToggleGalley,
-        Self::Settings,
-        // Help
-        Self::UserGuide,
-        Self::QuickStart,
-    ];
+    /// Every action, grouped in menu order — the registry, flattened from
+    /// the `GROUPS` table. Each [`group`](Action::group) is contiguous, so the run-action
+    /// menu emits one header per group (#514). Names are stable regardless of this
+    /// order.
+    pub(crate) const ALL: &'static [Self] = &ALL_ACTIONS;
+
+    /// This action's registry row and group.
+    fn entry(self) -> (&'static str, &'static ActionSpec) {
+        #[allow(
+            clippy::expect_used,
+            reason = "GROUPS lists every Action variant (the completeness test \
+                      enumerates the enum exhaustively), so the lookup always resolves"
+        )]
+        rows()
+            .find(|(_, spec)| spec.action == self)
+            .expect("every Action has a row in the registry")
+    }
 
     /// The stable name the run-action command matches and workflows (#89)
-    /// reference in config — never change these without a migration.
+    /// reference in config — never change these without a migration. The AI
+    /// slugs come from `AiAction::SPECS` (#563).
     pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Save => "save",
-            Self::Export(ExportFormat::Markdown) => "export:markdown",
-            Self::Export(ExportFormat::Docx) => "export:docx",
-            Self::Export(ExportFormat::Scriv) => "export:scriv",
-            Self::Export(ExportFormat::Vellum) => "export:vellum",
-            Self::Export(ExportFormat::Epub) => "export:epub",
-            Self::Export(ExportFormat::Pdf) => "export:pdf",
-            Self::Export(ExportFormat::PdfPrint) => "export:pdf-print",
-            Self::PdfWrapCover => "export:pdf-wrap-cover",
-            Self::ProgressReport => "report:progress",
-            Self::AnalysisReport => "report:analysis",
-            Self::WritingHistory => "report:history",
-            Self::RevisionPlan => "export:revision-plan",
-            Self::HealthTrend => "report:health-trend",
-            // The AI slugs are the single source in `AiAction::SPECS` (#563).
-            Self::Ai(a) => a.slug(),
-            Self::EnableAi => "ai:enable",
-            Self::UserGuide => "guide",
-            Self::QuickStart => "quickstart",
-            Self::ImportNotes => "import",
-            Self::NewProjectFromNotes => "new-from-notes",
-            Self::ImportManuscript => "import:manuscript",
-            Self::ImportReviewComments => "import:review-comments",
-            Self::ArchiveProject => "archive",
-            Self::RestoreArchive => "archive:restore",
-            Self::BrowseBackups => "backups:browse",
-            Self::StartSprint => "sprint:start",
-            Self::StopSprint => "sprint:stop",
-            Self::SetSessionTarget => "session:target",
-            Self::SwitchBook => "book:switch",
-            Self::ManageBooks => "book:manage",
-            Self::SeriesTree => "tree",
-            Self::RenameProject => "project:rename",
-            Self::BookDetails => "book:details",
-            Self::SetGoals => "goals:set",
-            Self::RefreshSeriesBible => "bible:series",
-            Self::RefreshBibles => "bible:refresh-all",
-            Self::QueuePasses => "bible:queue",
-            Self::BackgroundBibleUpdate => "bible:background-update",
-            Self::ProjectFind => "find:project",
-            Self::Drafts => "drafts",
-            Self::DescribeConfig => "config:describe",
-            Self::AcceptWord => "dict:accept",
-            Self::ViewDictionary => "dict:view",
-            Self::GoToLine => "goto:line",
-            Self::RecentEditBack => "goto:recent-back",
-            Self::RecentEditForward => "goto:recent-forward",
-            Self::LastInsertion => "goto:last-insertion",
-            Self::NextMisspelling => "spell:next",
-            Self::PrevMisspelling => "spell:prev",
-            Self::StyleFlagSweep => "style:sweep",
-            Self::ToggleProximityRepeats => "style:proximity-repeats",
-            Self::ToggleTypewriter => "view:typewriter",
-            Self::ToggleFocus => "view:focus",
-            Self::ToggleParagraphIndent => "view:paragraph-indent",
-            Self::ToggleAnnotationMargin => "view:annotation-margin",
-            Self::ToggleDailyCue => "view:daily-cue",
-            Self::FoldAll => "view:fold-all",
-            Self::ExpandAll => "view:expand-all",
-            Self::ToggleComposition => "view:composition",
-            Self::ToggleGalley => "view:galley",
-            Self::Corkboard => "view:corkboard",
-            Self::ManuscriptCorkboard => "view:corkboard-all",
-            Self::SplitChapter => "chapter:split",
-            Self::MergeChapter => "chapter:merge",
-            Self::AddAnnotation => "annotate",
-            Self::ReviewAnnotations => "annotate:review",
-            Self::RemoveAnnotation => "annotate:remove",
-            Self::ClearAnnotations => "annotate:clear",
-            Self::SwitchBackend => "ai:backend",
-            Self::ManageModels => "ai:models",
-            Self::SetClaudeKey => "ai:set-key",
-            Self::SetImageKey => "image:set-key",
-            Self::Assistant => "assistant",
-            Self::BrowseBible => "bible:browse",
-            Self::ViewResearch => "research:view",
-            Self::InsertSnippet => "snippet",
-            Self::BrowseFonts => "fonts:browse",
-            Self::SetExportStyle => "style:set",
-            Self::Settings => "settings",
-            Self::ExportBible => "export:bible",
-            Self::PreflightExport => "export:preflight",
-            Self::PrepareForKdp => "export:kdp",
-            Self::PrepareForIngramSpark => "export:ingramspark",
-            Self::ReviewCopy => "export:review",
-        }
+        self.entry().1.name
     }
 
     /// The collapsible group this action sits under in the run-action menu (#514).
-    /// `ALL` is ordered so each group's actions are contiguous, so the menu emits
-    /// one header per group as it iterates. AI passes and the AI-powered helpers
-    /// gather under one "AI" heading, the large block the grouping is meant to tame.
-    pub(crate) const fn group(self) -> &'static str {
-        match self {
-            Self::Save
-            | Self::ProjectFind
-            | Self::SwitchBook
-            | Self::ManageBooks
-            | Self::SeriesTree
-            | Self::RenameProject
-            | Self::BookDetails
-            | Self::SetGoals
-            | Self::ImportNotes
-            | Self::NewProjectFromNotes
-            | Self::ImportManuscript
-            | Self::ImportReviewComments
-            | Self::Drafts
-            | Self::ArchiveProject
-            | Self::RestoreArchive
-            | Self::BrowseBackups => "Project",
-            Self::Export(_)
-            | Self::PdfWrapCover
-            | Self::ReviewCopy
-            | Self::PreflightExport
-            | Self::PrepareForKdp
-            | Self::PrepareForIngramSpark
-            | Self::ExportBible
-            | Self::RevisionPlan
-            | Self::BrowseFonts
-            | Self::SetExportStyle => "Export",
-            Self::ProgressReport
-            | Self::AnalysisReport
-            | Self::WritingHistory
-            | Self::HealthTrend => "Reports",
-            Self::Ai(_)
-            | Self::EnableAi
-            | Self::RefreshBibles
-            | Self::QueuePasses
-            | Self::BackgroundBibleUpdate
-            | Self::RefreshSeriesBible
-            | Self::DescribeConfig
-            | Self::SwitchBackend
-            | Self::ManageModels
-            | Self::SetClaudeKey
-            | Self::SetImageKey
-            | Self::Assistant => "AI",
-            // Reference views into the story: the bible browser and research
-            // notebook (local reads/edits, not AI operations) and the corkboards.
-            Self::BrowseBible
-            | Self::ViewResearch
-            | Self::Corkboard
-            | Self::ManuscriptCorkboard => "Bible",
-            Self::GoToLine
-            | Self::RecentEditBack
-            | Self::RecentEditForward
-            | Self::LastInsertion
-            | Self::AcceptWord
-            | Self::ViewDictionary
-            | Self::NextMisspelling
-            | Self::PrevMisspelling
-            | Self::StyleFlagSweep
-            | Self::ToggleProximityRepeats
-            | Self::SplitChapter
-            | Self::MergeChapter
-            | Self::AddAnnotation
-            | Self::ReviewAnnotations
-            | Self::RemoveAnnotation
-            | Self::ClearAnnotations
-            | Self::InsertSnippet
-            | Self::StartSprint
-            | Self::StopSprint
-            | Self::SetSessionTarget => "Editing",
-            Self::ToggleTypewriter
-            | Self::ToggleFocus
-            | Self::ToggleParagraphIndent
-            | Self::ToggleAnnotationMargin
-            | Self::ToggleDailyCue
-            | Self::FoldAll
-            | Self::ExpandAll
-            | Self::ToggleComposition
-            | Self::ToggleGalley
-            | Self::Settings => "View",
-            Self::UserGuide | Self::QuickStart => "Help",
-        }
+    pub(crate) fn group(self) -> &'static str {
+        self.entry().0
     }
 
-    /// Human label for the run-action menu.
+    /// Human label for the run-action menu. The AI labels come from
+    /// `AiAction::SPECS` (#563).
     pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Save => "Save",
-            Self::Export(ExportFormat::Markdown) => "Export → Markdown",
-            Self::Export(ExportFormat::Docx) => "Export → Word (.docx)",
-            Self::Export(ExportFormat::Scriv) => "Export → Scrivener",
-            Self::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
-            Self::Export(ExportFormat::Epub) => "Export → EPUB",
-            Self::Export(ExportFormat::Pdf) => "Export → PDF",
-            Self::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
-            Self::PdfWrapCover => "Export → PDF wrap cover (front + spine + back)",
-            Self::ProgressReport => "Progress report",
-            Self::AnalysisReport => "Analysis report",
-            Self::WritingHistory => "Writing history",
-            Self::RevisionPlan => "Export revision plan (chapter-ordered, ranked)",
-            Self::HealthTrend => "Export health trend (across drafts)",
-            // The AI labels are the single source in `AiAction::SPECS` (#563).
-            Self::Ai(a) => a.label(),
-            Self::EnableAi => "Enable AI assistance",
-            Self::UserGuide => "User's guide",
-            Self::QuickStart => "Quick-start (first-run card)",
-            Self::ImportNotes => "Import notes → story bible",
-            Self::NewProjectFromNotes => "New project from a folder of notes",
-            Self::ImportManuscript => "Import a manuscript → new project",
-            Self::ImportReviewComments => "Import review comments (.docx) → annotations",
-            Self::ArchiveProject => "Archive project… (.zip backup)",
-            Self::RestoreArchive => "Restore project from archive…",
-            Self::BrowseBackups => "Browse backups…",
-            Self::StartSprint => "Start a writing sprint",
-            Self::StopSprint => "Stop the writing sprint",
-            Self::SetSessionTarget => "Set a session word target",
-            Self::SwitchBook => "Switch book",
-            Self::ManageBooks => "Manage books (series)…",
-            Self::SeriesTree => "Project tree",
-            Self::RenameProject => "Rename project",
-            Self::BookDetails => "Book details…",
-            Self::SetGoals => "Set writing goals",
-            Self::RefreshSeriesBible => "Refresh series bible",
-            Self::RefreshBibles => "Refresh all bibles",
-            Self::QueuePasses => "Queue bible passes (resumable)",
-            Self::BackgroundBibleUpdate => "Queue a background bible update (batch, ~24h)",
-            Self::ProjectFind => "Find across manuscript",
-            Self::Drafts => "Drafts (alt versions / branches)…",
-            Self::DescribeConfig => "Configure by description",
-            Self::AcceptWord => "Add word to dictionary",
-            Self::ViewDictionary => "View project dictionary",
-            Self::GoToLine => "Go to line…",
-            Self::RecentEditBack => "Go to a recent edit (back)",
-            Self::RecentEditForward => "Go to a recent edit (forward)",
-            Self::LastInsertion => "Go to last insertion",
-            Self::NextMisspelling => "Next misspelling",
-            Self::PrevMisspelling => "Previous misspelling",
-            Self::StyleFlagSweep => "Style-flag sweep (pick a category)",
-            Self::ToggleProximityRepeats => "Proximity repeats — mark nearby echoes (toggle)",
-            Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
-            Self::ToggleFocus => "Focus mode (toggle)",
-            Self::ToggleParagraphIndent => "Paragraph indent (toggle)",
-            Self::ToggleAnnotationMargin => "Annotation margin (toggle)",
-            Self::ToggleDailyCue => "Daily goal cue (toggle)",
-            Self::FoldAll => "Fold all sections",
-            Self::ExpandAll => "Expand all sections",
-            Self::ToggleComposition => "Composition mode — distraction-free (toggle)",
-            Self::ToggleGalley => "Proofread — galley reading mode (toggle)",
-            Self::Corkboard => "Corkboard (scene overview)",
-            Self::ManuscriptCorkboard => "Corkboard — whole manuscript",
-            Self::SplitChapter => "Split chapter at cursor",
-            Self::MergeChapter => "Merge chapter into the one above",
-            Self::AddAnnotation => "Annotate selection",
-            Self::ReviewAnnotations => "Review annotations",
-            Self::RemoveAnnotation => "Remove annotation at cursor",
-            Self::ClearAnnotations => "Remove all annotations here…",
-            Self::SwitchBackend => "Switch AI backend (Claude / local)",
-            Self::ManageModels => "Local AI models",
-            Self::SetClaudeKey => "Set Claude API key (keychain)",
-            Self::SetImageKey => "Set image API key (keychain)",
-            Self::Assistant => "Authorial assistant",
-            Self::BrowseBible => "Browse story bible",
-            Self::ViewResearch => "View research notebook",
-            Self::InsertSnippet => "Insert snippet…",
-            Self::BrowseFonts => "Browse & download fonts…",
-            Self::SetExportStyle => "Set export style…",
-            Self::Settings => "Settings…",
-            Self::ExportBible => "Export story bible → Markdown",
-            Self::PreflightExport => "Export preflight (publish health check)",
-            Self::PrepareForKdp => "Prepare for KDP (preflight + print PDF + EPUB)",
-            Self::PrepareForIngramSpark => "Prepare for IngramSpark (preflight + print PDF + EPUB)",
-            Self::ReviewCopy => "Export review copy (numbered lines + annotations as comments)",
-        }
+        self.entry().1.label
     }
 
     /// The dedicated key binding that runs this action outside the palette, for the
@@ -684,25 +320,8 @@ impl Action {
     /// dedicated key in dispatch.
     ///
     /// [`on_key_ctrl`]: crate::app::App::on_key_ctrl
-    pub(crate) const fn shortcut(self) -> Option<&'static str> {
-        match self {
-            Self::Save => Some("Ctrl-S"),
-            // Ctrl-E opens the export menu; the individual format is then chosen
-            // there, so every export target shares the one export-menu key.
-            Self::Export(_) => Some("Ctrl-E"),
-            Self::ProgressReport => Some("Ctrl-R"),
-            Self::AnalysisReport => Some("Ctrl-T"),
-            // Ctrl-A opens the AI palette when AI is ready, or offers to enable it
-            // when it's off — both reachable from the one key.
-            Self::Ai(_) | Self::EnableAi => Some("Ctrl-A"),
-            Self::ToggleComposition => Some("Ctrl-\\"),
-            Self::UserGuide => Some("F1"),
-            // The story-bible browser has a dedicated function key (like the guide),
-            // dispatched in `on_key` rather than `on_key_ctrl` (the Ctrl-letter space
-            // is full), so the Ctrl-K "Browse story bible" row shows it.
-            Self::BrowseBible => Some("F2"),
-            _ => None,
-        }
+    pub(crate) fn shortcut(self) -> Option<&'static str> {
+        self.entry().1.shortcut
     }
 
     /// The `Ctrl-`_letter_ action a top-level editing keypress runs, or `None` for a
@@ -731,7 +350,9 @@ impl Action {
     /// Look up an action by its stable [`name`](Action::name) — the resolver a
     /// workflow (#226) uses to turn a config step token into an action.
     pub(crate) fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|a| a.name() == name)
+        rows()
+            .find(|(_, spec)| spec.name == name)
+            .map(|(_, spec)| spec.action)
     }
 
     /// Whether this action completes synchronously, so a workflow (#226) can run
@@ -770,39 +391,10 @@ impl Action {
     /// Excluded: the thesaurus and image passes (they need cursor context the
     /// assistant has no way to give), local-only Triage, the modal pickers (book
     /// switch, tree, project find, annotate, model manager, the notes importers),
-    /// and the off-manuscript copy generators, kept out of autonomous reach.
+    /// and the off-manuscript copy generators, kept out of autonomous reach. A
+    /// registry-row flag; the AI passes' value comes from `AiAction::SPECS` (#1069).
     pub(crate) fn assistant_runnable(self) -> bool {
-        // The AI passes' runnability is a descriptor field (#1069): the analysis
-        // passes that surface findings (no prose) and the arg-taking generative
-        // helpers are runnable, the image/thesaurus passes, local views, and
-        // off-manuscript copy generators are not — all decided once in `AiAction::SPECS`,
-        // never a hand-maintained allowlist here that could drift from the pass set.
-        if let Self::Ai(a) = self {
-            return a.assistant_runnable();
-        }
-        matches!(
-            self,
-            Self::Save
-                | Self::Export(_)
-                | Self::PdfWrapCover
-                | Self::ReviewCopy
-                | Self::ExportBible
-                | Self::PreflightExport
-                | Self::PrepareForKdp
-                | Self::PrepareForIngramSpark
-                | Self::ProgressReport
-                | Self::AnalysisReport
-                | Self::WritingHistory
-                | Self::UserGuide
-                | Self::AcceptWord
-                | Self::NextMisspelling
-                | Self::PrevMisspelling
-                | Self::ToggleTypewriter
-                | Self::ToggleFocus
-                | Self::ToggleParagraphIndent
-                | Self::ToggleAnnotationMargin
-                | Self::SwitchBackend
-        )
+        self.entry().1.assistant_runnable
     }
 
     /// The JSON property name of this action's single free-text argument (#390),
@@ -823,7 +415,7 @@ impl Action {
 }
 
 /// A manuscript export target (#7), chosen from the export palette.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportFormat {
     /// A single compiled Markdown document (#190).
     Markdown,
