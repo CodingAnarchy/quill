@@ -12,8 +12,6 @@ use super::*;
 
 use std::path::Path;
 
-use crate::text::count_matches;
-
 /// How the two panes are arranged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SplitDir {
@@ -501,10 +499,30 @@ impl App {
     /// off the per-chapter disk reads.
     pub(super) fn cache_focus_words(&mut self) {
         if let Some(i) = self.chapter_index_of(&self.buffer) {
-            let todo = count_matches(&self.buffer.text(), self.project.manifest.todo_marker());
+            let todo = self.focus_todo_count();
             self.project.set_chapter_words(i, self.buffer.word_count());
             self.project.set_chapter_todo(i, todo);
         }
+    }
+
+    /// The TODO-marker count of the focused buffer's text, memoized on its content
+    /// revision ([`focus_todo`](Self::focus_todo)): the save path refreshes the
+    /// cache ([`cache_focus_words`](Self::cache_focus_words)) and then rolls the
+    /// manuscript count up ([`count_todo`](Self::count_todo)), and a clean chapter
+    /// switch flushes an unchanged buffer — each of those scans the text once at
+    /// most, and a repeat over the same revision is a comparison.
+    pub(super) fn focus_todo_count(&self) -> usize {
+        let rev = self.buffer.revision();
+        if let Some((cached_rev, n)) = self.focus_todo.get() {
+            if cached_rev == rev {
+                return n;
+            }
+        }
+        let n = self
+            .buffer
+            .count_matches(self.project.manifest.todo_marker());
+        self.focus_todo.set(Some((rev, n)));
+        n
     }
 
     /// The manifest index of the chapter a pane's `buffer` is showing.

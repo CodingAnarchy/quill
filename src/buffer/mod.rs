@@ -16,6 +16,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::atomic;
 use crate::frontmatter::FrontMatter;
 use crate::syntax::Syntax;
+use crate::text;
 
 mod history;
 mod motions;
@@ -240,7 +241,11 @@ impl Buffer {
             .as_ref()
             .ok_or_else(|| std::io::Error::other("no file path set"))?;
 
-        let body = normalize_trailing_newline(&self.rope.to_string());
+        // One copy of the rope (not a `to_string` and then a normalized second
+        // copy): materialize it, then trim the trailing newlines in place.
+        let mut body = String::new();
+        self.text_into(&mut body);
+        normalize_trailing_newline_in_place(&mut body);
         let front = self
             .front_matter
             .as_ref()
@@ -883,6 +888,32 @@ impl Buffer {
         total
     }
 
+    /// How many times `needle` occurs in the document under the default match
+    /// rule — exactly [`text::count_matches`] over [`text`](Self::text), but
+    /// without materializing the whole document: it scans line by line over the
+    /// rope's chunks, like [`word_count`](Self::word_count). A needle with no
+    /// `\n` can never match across a line break (matching is per character), so
+    /// the per-line counts sum to the whole-text count. A needle that does span
+    /// lines falls back to the whole-text scan.
+    pub fn count_matches(&self, needle: &str) -> usize {
+        if needle.contains('\n') {
+            return text::count_matches(&self.text(), needle);
+        }
+        let mut total = 0;
+        let mut line = String::new();
+        for chunk in self.rope.chunks() {
+            let mut rest = chunk;
+            while let Some(nl) = rest.find('\n') {
+                line.push_str(&rest[..nl]);
+                total += text::count_matches(&line, needle);
+                line.clear();
+                rest = &rest[nl + 1..];
+            }
+            line.push_str(rest);
+        }
+        total + text::count_matches(&line, needle)
+    }
+
     // --- Syntax ------------------------------------------------------------
 
     /// The live Markdown parse, for highlighting and (later) the outline.
@@ -937,11 +968,16 @@ pub fn count_words(text: &str) -> usize {
 /// continuous view's per-chapter split so both write files the same way.
 pub fn normalize_trailing_newline(text: &str) -> String {
     let mut content = text.to_string();
+    normalize_trailing_newline_in_place(&mut content);
+    content
+}
+
+/// [`normalize_trailing_newline`] on an owned string, without copying it.
+fn normalize_trailing_newline_in_place(content: &mut String) {
     content.truncate(content.trim_end_matches('\n').len());
     if !content.is_empty() {
         content.push('\n');
     }
-    content
 }
 
 /// Quill's manuscript format is Markdown. A path with no extension gets `.md`;

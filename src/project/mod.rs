@@ -20,10 +20,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::annotation::{Annotation, AnnotationFile};
+use crate::annotation::Annotation;
 use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
 
+mod annotations;
 mod goals;
 mod io;
 mod lock;
@@ -33,6 +34,9 @@ mod structure;
 mod template;
 mod words;
 
+use annotations::load_annotations;
+#[cfg(test)]
+pub use annotations::write_count as annotation_writes;
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
 pub use io::read_existing;
@@ -130,6 +134,10 @@ pub struct Project {
     /// keyed by chapter file name. Loaded from `annotations.toml` at the project
     /// root at open; kept out of the chapter `.md` files so exports stay clean.
     annotations: Vec<Annotation>,
+    /// Set while a change to `annotations` hasn't reached `annotations.toml` yet
+    /// (a write failed), so the next write-back retries even when the notes it's
+    /// handed already match memory (see [`Project::set_annotations`]).
+    annotations_unsaved: bool,
     /// The advisory single-instance lock (#871), held from open until the project
     /// is dropped. `Some` when this process owns the project; `None` when it was
     /// opened read-only because another instance already held it (see `read_only`),
@@ -260,6 +268,7 @@ impl Project {
             dictionary,
             dictionary_gen: next_dictionary_gen(),
             annotations,
+            annotations_unsaved: false,
             lock,
             read_only,
             busy_holder,
@@ -394,6 +403,7 @@ impl Project {
             dictionary: HashSet::new(),
             dictionary_gen: next_dictionary_gen(),
             annotations: Vec::new(),
+            annotations_unsaved: false,
             lock,
             read_only: false,
             busy_holder: None,
@@ -666,65 +676,6 @@ impl Project {
         Ok(true)
     }
 
-    /// The inline annotations (#302) anchored in chapter `file`, as live buffer
-    /// ranges (chapter-local offsets == buffer offsets in the single-chapter
-    /// view), in document order. Out-of-range offsets are the caller's to clamp.
-    pub fn annotations_for(&self, file: &str) -> Vec<crate::annotation::Live> {
-        let mut live: Vec<_> = self
-            .annotations
-            .iter()
-            .filter(|a| a.chapter == file)
-            .map(|a| crate::annotation::Live {
-                chapter: file.to_string(),
-                start: a.start,
-                end: a.end,
-                note: a.note.clone(),
-                replies: a.replies.clone(),
-                resolved: a.resolved,
-                reviewer: a.reviewer.clone(),
-            })
-            .collect();
-        live.sort_by_key(|a| (a.start, a.end));
-        live
-    }
-
-    /// Replace chapter `file`'s annotations with `live` (byte ranges + notes) and
-    /// write the whole side file (#302). Other chapters' annotations are kept.
-    /// Removing the file when nothing is left keeps the project tidy.
-    pub fn set_chapter_annotations(
-        &mut self,
-        file: &str,
-        live: &[crate::annotation::Live],
-    ) -> std::io::Result<()> {
-        self.annotations.retain(|a| a.chapter != file);
-        for a in live {
-            self.annotations.push(Annotation {
-                chapter: file.to_string(),
-                start: a.start,
-                end: a.end,
-                note: a.note.clone(),
-                replies: a.replies.clone(),
-                resolved: a.resolved,
-                reviewer: a.reviewer.clone(),
-            });
-        }
-        let path = self.root.join(ANNOTATIONS_NAME);
-        if self.annotations.is_empty() {
-            // Nothing left anywhere — remove the side file rather than write `[]`.
-            return match fs::remove_file(&path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-                _ => Ok(()),
-            };
-        }
-        self.annotations
-            .sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
-        let file = AnnotationFile {
-            items: self.annotations.clone(),
-        };
-        let text = toml::to_string_pretty(&file).map_err(std::io::Error::other)?;
-        atomic::write(&path, text.as_bytes())
-    }
-
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
         self.chapter_path(self.active_index())
@@ -782,6 +733,7 @@ impl Project {
             dictionary: HashSet::new(),
             dictionary_gen: next_dictionary_gen(),
             annotations: Vec::new(),
+            annotations_unsaved: false,
             // An in-memory scratch project owns nothing on disk, so it holds no
             // instance lock and is writable (never read-only).
             lock: None,
@@ -808,16 +760,6 @@ fn load_dictionary(root: &Path) -> HashSet<String> {
         .map(|l| l.trim().to_lowercase())
         .filter(|l| !l.is_empty())
         .collect()
-}
-
-/// Read the inline annotations side file (#302). Best-effort: a missing or
-/// malformed file yields no annotations rather than failing the open.
-fn load_annotations(root: &Path) -> Vec<Annotation> {
-    fs::read_to_string(root.join(ANNOTATIONS_NAME))
-        .ok()
-        .and_then(|text| toml::from_str::<AnnotationFile>(&text).ok())
-        .map(|f| f.items)
-        .unwrap_or_default()
 }
 
 /// Recursively gather `.md` files under `dir` into `out`, skipping the `unused/`

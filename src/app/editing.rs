@@ -593,6 +593,7 @@ impl App {
             let result = m.save(&mut self.project);
             self.manuscript = Some(m);
             result.map_err(|e| format!("Save failed: {e}"))?;
+            self.adopt_view_annotations_if_stale();
             self.persist_annotations();
         } else {
             self.buffer
@@ -600,6 +601,9 @@ impl App {
                 .map_err(|e| format!("Save failed: {e}"))?;
             self.cache_focus_words();
             self.refresh_split_sibling();
+            // A save in the same burst as a chapter switch must persist the new
+            // chapter's notes, not the previous chapter's set (which has none).
+            self.adopt_view_annotations_if_stale();
             self.persist_annotations();
         }
         Ok(())

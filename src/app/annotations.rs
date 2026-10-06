@@ -47,6 +47,10 @@ impl App {
     /// were anchored against — a layout change goes through
     /// [`reload_annotations_for_view`](Self::reload_annotations_for_view) instead.
     pub(crate) fn reanchor_annotations(&mut self) {
+        // A layout change earlier in this same input burst (a chapter switch, the
+        // view toggle) hasn't been reconciled yet: adopt the new layout's notes
+        // first, so the deltas below map *them* — not the previous layout's.
+        self.adopt_view_annotations_if_stale();
         // Snapshot annotations for any edit group that opened, before the deltas
         // below move them — keeps the undo history aligned with the buffer's (#370).
         self.note_annotation_undo_point();
@@ -89,6 +93,27 @@ impl App {
     /// discard them — and the fresh buffer has no annotation undo history.
     pub(crate) fn reload_annotations_for_view(&mut self) {
         self.edit_buffer_mut().drain_anchor_edits();
+        self.annotations = self.load_annotations_for_view();
+        self.annotations_context = self.annotation_context();
+        self.clear_annotation_history();
+    }
+
+    /// Adopt the current layout's notes when the live set still belongs to a
+    /// previous one — the layout changed (a chapter switch, entering or leaving the
+    /// continuous view) earlier in the input burst, before the settle-time
+    /// [`sync_annotations`](Self::sync_annotations) reloaded them. A keystroke-path
+    /// persist in that window (switching *through* a chapter, or saving right after
+    /// switching into it) would otherwise write the loaded chapters' notes from the
+    /// previous layout's set, which has none of theirs — erasing them on disk.
+    ///
+    /// Unlike [`reload_annotations_for_view`](Self::reload_annotations_for_view) it
+    /// leaves the pending edit deltas in place: every layout change builds a fresh
+    /// buffer, so the deltas recorded since are all against the notes loaded here,
+    /// and the next re-anchor folds them in.
+    pub(crate) fn adopt_view_annotations_if_stale(&mut self) {
+        if self.annotation_context() == self.annotations_context {
+            return;
+        }
         self.annotations = self.load_annotations_for_view();
         self.annotations_context = self.annotation_context();
         self.clear_annotation_history();
@@ -866,25 +891,37 @@ impl App {
     /// Persist annotations for the chapters in `bases` (#370). Taken explicitly so
     /// the continuous-view seams can persist while the manuscript is moved out of
     /// `self` (save / reslide / leaving the view).
+    ///
+    /// All of the window's chapters go to the project in one batch, so the side
+    /// file is written at most once per call (not once per loaded chapter), and not
+    /// at all when no chapter's notes changed — the common case on a chapter switch
+    /// or a save, which would otherwise pay the side file's `fsync`s every time.
     pub(crate) fn persist_annotations_to(&mut self, bases: &[(String, usize)]) {
-        for (file, base) in bases {
-            let local: Vec<Live> = self
-                .annotations
-                .iter()
-                .filter(|a| &a.chapter == file)
-                .map(|a| Live {
-                    chapter: file.clone(),
-                    start: a.start.saturating_sub(*base),
-                    end: a.end.saturating_sub(*base),
-                    note: a.note.clone(),
-                    replies: a.replies.clone(),
-                    resolved: a.resolved,
-                    reviewer: a.reviewer.clone(),
-                })
-                .collect();
-            if let Err(e) = self.project.set_chapter_annotations(file, &local) {
-                self.message = Some(format!("Couldn't save annotations: {e}"));
-            }
+        let updates: Vec<(&str, Vec<Live>)> = bases
+            .iter()
+            .map(|(file, base)| {
+                let local = self
+                    .annotations
+                    .iter()
+                    .filter(|a| &a.chapter == file)
+                    .map(|a| Live {
+                        chapter: file.clone(),
+                        start: a.start.saturating_sub(*base),
+                        end: a.end.saturating_sub(*base),
+                        note: a.note.clone(),
+                        replies: a.replies.clone(),
+                        resolved: a.resolved,
+                        reviewer: a.reviewer.clone(),
+                    })
+                    .collect();
+                (file.as_str(), local)
+            })
+            .collect();
+        let batch = updates
+            .iter()
+            .map(|(file, local)| (*file, local.as_slice()));
+        if let Err(e) = self.project.set_annotations(batch) {
+            self.message = Some(format!("Couldn't save annotations: {e}"));
         }
     }
 

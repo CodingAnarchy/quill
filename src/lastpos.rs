@@ -34,13 +34,19 @@ fn path(root: &Path) -> PathBuf {
     root.join(DIR).join(FILE)
 }
 
-/// Write the position sidecar (best-effort), creating `.quill/` if needed. Goes
-/// through [`atomic::write`] like the recovery sidecar, so an interrupted write
-/// can't leave a torn record over a previous good one.
+/// Write the position sidecar (best-effort), creating `.quill/` if needed.
+///
+/// Goes through [`atomic::write_hint`] — temp + rename, so a crash of Quill can't
+/// leave a torn record over a previous good one, but *without* the two `fsync`s a
+/// durable [`atomic::write`] pays (several ms each on macOS). This record is a
+/// convenience rewritten on every save, never a source of truth: if a power cut
+/// leaves it missing, stale, or empty, [`read`] treats that as "no record" and the
+/// next open simply starts at the top — the author loses a cursor position, never
+/// a word. Chapters, the manifest, and annotations stay on the durable path.
 pub fn write(root: &Path, pos: &Position) -> std::io::Result<()> {
     let json = serde_json::to_string(pos).map_err(std::io::Error::other)?;
     fs::create_dir_all(root.join(DIR))?;
-    atomic::write(&path(root), json.as_bytes())
+    atomic::write_hint(&path(root), json.as_bytes())
 }
 
 /// The recorded last position, if a parseable sidecar is present. A missing or

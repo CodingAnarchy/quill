@@ -234,6 +234,8 @@ impl App {
             session_base_removed: 0,
             tally_day: crate::date::iso(crate::date::today()),
             last_history_snapshot: std::cell::RefCell::new(None),
+            last_position: std::cell::RefCell::new(None),
+            focus_todo: std::cell::Cell::new(None),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
             image: ai::image::ImageSettings::load(),

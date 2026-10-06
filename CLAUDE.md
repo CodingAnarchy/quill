@@ -150,9 +150,11 @@ What they assert:
 - `switching_books_is_fast_in_a_series` (`project.rs`) — switching the active
   book of a multi-book series (#329) caches the target book's chapters once
   (the bounded work `open` does for one book), never the whole series (~10ms).
-- `navigation_is_fast_in_a_series_sized_project` (`app/tests/chapters.rs`) —
-  switching chapters in a 600-chapter (series-sized) project reads/parses one
-  chapter file, never work proportional to the project (~0.5ms/switch).
+- `navigation_is_fast_in_a_series_sized_project`
+  (`app/tests/chapters_counts_and_perf.rs`) — switching chapters in a
+  600-chapter (series-sized) project reads/parses one chapter file, never work
+  proportional to the project (~0.5ms/switch). Some chapters carry annotations,
+  and it asserts a clean switch never rewrites (and fsyncs) `annotations.toml`.
 - `tree_rows_are_fast_for_a_series` (`app/tests/books.rs`) — building the series
   tree navigator's rows (#330) reads only cached per-chapter metadata, never
   files; fast (~70µs) even with every book of an 800-chapter series expanded.

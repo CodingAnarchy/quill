@@ -6,7 +6,6 @@ use super::*;
 
 use crate::frontmatter::Band;
 use crate::project::Analysis;
-use crate::text::count_matches;
 
 /// The cached effective word lists (#119) and the `[analysis]` section they were
 /// built from — see [`App::analysis_word_lists`].
@@ -454,18 +453,19 @@ impl App {
     /// Reads the cached per-chapter TODO counts (#867) — populated at open and
     /// refreshed for the active chapter on its save — so a save's roll-up costs no
     /// per-chapter disk reads. The active chapter is counted live from the buffer,
-    /// since its cache lags the in-flight edits until the next save.
+    /// since its cache lags the in-flight edits until the next save — memoized on
+    /// the buffer's content revision ([`Self::focus_todo_count`]), so the save path
+    /// doesn't re-scan text `cache_focus_words` just counted.
     pub(crate) fn count_todo(&self) -> usize {
         let active = self.project.active_index();
         // Count the active chapter live only when its buffer is focused; with a
         // reference pane focused (#165) the buffer is a bible entry / note, so use
         // its cached count instead of counting markers in the reference file.
         let live_active = self.focus_shows_active_chapter();
-        let marker = self.project.manifest.todo_marker();
         (0..self.chapter_count())
             .map(|i| {
                 if i == active && live_active {
-                    count_matches(&self.buffer.text(), marker)
+                    self.focus_todo_count()
                 } else {
                     self.project.chapter_todo(i)
                 }

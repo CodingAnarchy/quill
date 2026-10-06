@@ -141,3 +141,62 @@ fn a_mid_codepoint_offset_does_not_panic_at_startup() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+/// Mark the position sidecar with trailing whitespace (still valid JSON): any
+/// rewrite drops it, so its survival proves the save skipped the write.
+fn mark_position(dir: &Path) -> String {
+    let path = dir.join(".quill").join("position.json");
+    let marked = format!("{} ", fs::read_to_string(&path).unwrap());
+    fs::write(&path, &marked).unwrap();
+    marked
+}
+
+#[test]
+fn a_save_with_the_cursor_unmoved_does_not_rewrite_the_position() {
+    let (mut app, dir) = two_chapter_app("resume-unchanged");
+    app.on_key(key(KeyCode::Right));
+    app.on_key(ctrl('s'));
+    let marked = mark_position(&dir);
+    let read_pos = || fs::read_to_string(dir.join(".quill").join("position.json")).unwrap();
+
+    // Saving again with the cursor where it was leaves the record untouched.
+    app.on_key(ctrl('s'));
+    app.on_key(ctrl('s'));
+    assert_eq!(read_pos(), marked, "unchanged position, no rewrite");
+
+    // Moving the cursor and saving writes the new spot.
+    app.on_key(key(KeyCode::Right));
+    let cursor = app.buffer.cursor_byte();
+    app.on_key(ctrl('s'));
+    assert_ne!(read_pos(), marked);
+    assert_eq!(lastpos::read(&dir).unwrap().cursor, cursor);
+}
+
+#[test]
+fn a_position_read_at_launch_is_not_rewritten_by_a_save_there() {
+    let dir = app_scratch_dir("resume-read-seed");
+    let dir = TempProject::new(dir);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+    lastpos::write(
+        &dir,
+        &lastpos::Position {
+            chapter_file: "one.md".into(),
+            cursor: 3,
+        },
+    )
+    .unwrap();
+    let marked = mark_position(&dir);
+
+    let mut app = open_test_app(&dir);
+    app.restore_position();
+    app.on_key(ctrl('s'));
+    assert_eq!(
+        fs::read_to_string(dir.join(".quill").join("position.json")).unwrap(),
+        marked
+    );
+}
