@@ -349,12 +349,13 @@ is a tested guarantee, not an accident.)
 | Format | Unknown keys on re-save | Why |
 | --- | --- | --- |
 | Chapter front matter | **Preserved** verbatim | The `---` block is kept byte-for-byte and edited surgically — one key at a time — so an unknown key and your hand formatting survive untouched. |
-| `book.toml` manifest | **Dropped** | The manifest is a typed structure re-serialized whole on save, so a key this version doesn't model is not written back. |
+| `book.toml` manifest | **Preserved** at the top level; **dropped** inside a known table | The manifest is a typed structure re-serialized whole on save. Top-level keys and tables it doesn't model — your `[quill]` overrides, or a newer version's additive field — are carried over from the file on disk. A key this version doesn't model *inside* a table it does (`[goals]`, a `[[chapters]]` or `[[books]]` entry, …) is not written back. Comments and hand formatting are not kept on these saves. |
 | `config.toml` | **Dropped** on rewrite | Config is typed like the manifest; Quill rarely rewrites the home config, but when it does an unmodeled key is not carried. |
 
-The practical consequence of the *drop* rows: if a newer Quill adds a manifest or
-config field and you then open and **save** that project in an older Quill, the
-newer field is lost (its default takes over). Reading alone never loses anything;
+The practical consequence of the *drop* entries: if a newer Quill adds a config
+field, or a field inside one of the manifest's known tables, and you then open and
+**save** that project in an older Quill, the newer field is lost (its default
+takes over). Reading alone never loses anything;
 only a save from the older version does. Front matter has no such caveat — its
 unknown keys always round-trip.
 

@@ -10,10 +10,12 @@
 //! branch).
 
 use serde::{Deserialize, Serialize};
+use toml::{Table, Value};
 
 use crate::export::pdf::PrintConfig;
 use crate::export::ExportStyle;
 
+use super::extra_keys::{self, field_names};
 use super::{Analysis, ChapterEntry, Goals, Manifest, Part};
 
 mod books;
@@ -147,11 +149,7 @@ impl Manifest {
     pub(super) fn from_toml_value(
         value: toml::Value,
     ) -> Result<(Self, Vec<Book>, usize), toml::de::Error> {
-        let is_series = value
-            .get("books")
-            .and_then(|b| b.as_array())
-            .is_some_and(|b| !b.is_empty());
-        if is_series {
+        if is_series(value.get("books")) {
             let series: SeriesFile = value.try_into()?;
             // `is_series` was true, so the `[[books]]` array was non-empty and
             // deserializes to a non-empty Vec; `if let` binds the first book without
@@ -230,10 +228,56 @@ impl Manifest {
     }
 }
 
+/// Whether a `book.toml`'s `books` entry marks a multi-book series (#328): a
+/// non-empty array. Anything else is the flat single-book manifest.
+fn is_series(books: Option<&Value>) -> bool {
+    books
+        .and_then(Value::as_array)
+        .is_some_and(|b| !b.is_empty())
+}
+
+/// The top-level keys of `text` (the `book.toml` on disk) that its manifest shape
+/// doesn't model — the `[quill]` config-override table (#710) and any additive key
+/// a newer 1.x wrote (#1097). The shape is read from the text itself (flat vs.
+/// `[[books]]`), so converting a standalone to a series carries its keys across.
+/// Empty text (no file yet) has none.
+pub(super) fn unknown_keys(text: &str) -> Result<Table, toml::de::Error> {
+    if text.trim().is_empty() {
+        return Ok(Table::new());
+    }
+    let doc: Table = toml::from_str(text)?;
+    let known = if is_series(doc.get("books")) {
+        field_names::<SeriesFile>()
+    } else {
+        field_names::<Manifest>()
+    };
+    Ok(extra_keys::unknown(doc, known))
+}
+
+/// Serialize the project's manifest for `book.toml`: the flat [`Manifest`] for a
+/// standalone novel (`books` empty), the `[[books]]` series file otherwise, with
+/// `extra` — the unmodeled top-level keys from [`unknown_keys`] — re-attached so
+/// a structural save never erases them. With no extra keys the output is exactly
+/// the typed serialization. Called by [`Project::save_manifest`].
+pub(super) fn manifest_to_toml(
+    manifest: &Manifest,
+    books: &[Book],
+    active_book: usize,
+    extra: &Table,
+) -> Result<String, toml::ser::Error> {
+    if books.is_empty() {
+        let text = toml::to_string_pretty(manifest)?;
+        extra_keys::append(text, extra, field_names::<Manifest>())
+    } else {
+        let text = series_to_toml(manifest, books, active_book)?;
+        extra_keys::append(text, extra, field_names::<SeriesFile>())
+    }
+}
+
 /// Serialize a multi-book project to the `[[books]]` form (#328): fold the live
 /// active book back into the series list and write the series file. Called by
-/// [`Project::save_manifest`] for a multi-book project.
-pub(super) fn series_to_toml(
+/// [`manifest_to_toml`] for a multi-book project.
+fn series_to_toml(
     manifest: &Manifest,
     books: &[Book],
     active_book: usize,
@@ -270,7 +314,10 @@ pub(super) mod tests {
     use crate::testutil::perf_budget_ms;
 
     use super::super::{Project, CURRENT_FORMAT_VERSION};
-    use super::{Analysis, Book, ChapterEntry, ExportStyle, Goals, Manifest, Part, PrintConfig};
+    use super::{
+        series_to_toml, Analysis, Book, ChapterEntry, ExportStyle, Goals, Manifest, Part,
+        PrintConfig,
+    };
 
     pub(super) fn temp_dir(name: &str) -> PathBuf {
         crate::testutil::scratch_dir("series", name)
@@ -596,6 +643,22 @@ file = \"b2/one.md\"
             reopened.manifest.print.as_ref().expect("print kept").trim,
             Some("5x8".into())
         );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // A series with no `[quill]` table or other unknown root key saves exactly the
+    // typed `[[books]]` serialization — carrying unknown keys adds no format churn.
+    #[test]
+    fn a_series_with_nothing_unknown_saves_byte_for_byte_as_before() {
+        let dir = temp_dir("series-bytes");
+        write_series(&dir);
+        let project = Project::open(&dir).unwrap();
+
+        project.save_manifest().unwrap();
+        let text = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        let typed = series_to_toml(&project.manifest, &project.books, project.active_book).unwrap();
+        assert_eq!(text, typed);
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -10,6 +10,7 @@ mod dictionary;
 mod failed_reads;
 mod goals;
 mod manifest;
+mod overrides;
 mod parts;
 mod perf;
 
