@@ -1,7 +1,8 @@
 //! When the annotations side file is (and isn't) written: a clean chapter switch
 //! leaves `annotations.toml` alone, a moved note still persists on a switch or a
 //! save, the continuous view writes its whole window in one go, and switching
-//! *through* a chapter within one input burst never erases its notes.
+//! *through* a chapter (or adding a note right after entering one) within one
+//! input burst never erases its notes.
 
 use super::*;
 use crate::buffer::Cursor;
@@ -136,6 +137,28 @@ fn switching_through_a_chapter_in_one_burst_keeps_its_notes() {
     for f in ["c0.md", "c1.md", "c2.md"] {
         assert_eq!(reopened.annotations_for(f).len(), 1, "{f} kept its note");
     }
+}
+
+#[test]
+fn adding_a_note_in_the_same_burst_as_a_switch_keeps_the_chapters_notes() {
+    // A switch, then a note created before the settle-time reload: the new note
+    // must join the entered chapter's existing notes, not replace them.
+    let (mut app, dir) = three_annotated("anno-switch-then-add");
+    app.on_key(ctrl('n')); // into c1 ("beta"), its note not yet loaded
+    app.create_annotation(0, 2, "fresh".into());
+    let reopened = Project::open(&dir).unwrap();
+    let notes: Vec<String> = reopened
+        .annotations_for("c1.md")
+        .into_iter()
+        .map(|a| a.note)
+        .collect();
+    assert_eq!(
+        notes.len(),
+        2,
+        "c1 kept its note and gained the new one: {notes:?}"
+    );
+    assert!(notes.iter().any(|n| n == "note 1") && notes.iter().any(|n| n == "fresh"));
+    assert_eq!(reopened.annotations_for("c0.md").len(), 1, "c0 untouched");
 }
 
 #[test]

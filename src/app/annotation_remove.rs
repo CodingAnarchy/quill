@@ -11,6 +11,9 @@ impl App {
     /// every one overlapping the selection. A cursor sitting just past an annotated
     /// word still counts as on it, matching how annotating picks the word there.
     pub(crate) fn remove_annotation_at_cursor(&mut self) {
+        // The live set may still be the previous chapter's when a chapter switch
+        // landed earlier in this input burst; load this view's notes first.
+        self.adopt_view_annotations_if_stale();
         let (from, to) = if let Mode::Visual { anchor, linewise } = self.mode {
             self.selection_bytes(anchor, linewise)
         } else {
@@ -40,6 +43,9 @@ impl App {
     /// Ask before removing every annotation on the loaded chapter(s): the active
     /// chapter, or the whole continuous window.
     pub(crate) fn start_clear_annotations(&mut self) {
+        // The live set may still be the previous chapter's when a chapter switch
+        // landed earlier in this input burst; load this view's notes first.
+        self.adopt_view_annotations_if_stale();
         let count = self.annotations.len();
         if count == 0 {
             self.message = Some("No annotations here.".into());
@@ -61,6 +67,9 @@ impl App {
     /// Remove every annotation on the loaded chapter(s) — the confirmed
     /// [`start_clear_annotations`](Self::start_clear_annotations).
     pub(crate) fn clear_annotations(&mut self) {
+        // The live set may still be the previous chapter's when a chapter switch
+        // landed earlier in this input burst; load this view's notes first.
+        self.adopt_view_annotations_if_stale();
         let removed = self.annotations.len();
         self.annotations.clear();
         self.persist_annotations();

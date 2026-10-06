@@ -284,6 +284,9 @@ impl App {
         if note.is_empty() {
             return;
         }
+        // The live set may still be the previous chapter's when a chapter switch
+        // landed earlier in this input burst; load this view's notes first.
+        self.adopt_view_annotations_if_stale();
         let (chapter, _base) = self.owning_chapter(start);
         self.annotations.push(Live {
             chapter,
@@ -302,6 +305,9 @@ impl App {
     /// Open the annotation review list for the loaded chapter(s) (#370: the active
     /// chapter, or the whole continuous window), or report when there are none.
     pub(crate) fn open_annotation_review(&mut self) {
+        // The live set may still be the previous chapter's when a chapter switch
+        // landed earlier in this input burst; load this view's notes first.
+        self.adopt_view_annotations_if_stale();
         if self.annotations.is_empty() {
             self.message = Some("No annotations here.".into());
             return;
