@@ -62,6 +62,7 @@ impl App {
             bool_row(SettingBool::Typewriter, self.typewriter),
             bool_row(SettingBool::FocusMode, self.focus_mode),
             bool_row(SettingBool::ParagraphIndent, self.paragraph_indent),
+            bool_row(SettingBool::AnnotationMargin, self.annotation_margin),
             PaletteItem::new(
                 "Analysis stopwords",
                 format!("Currently: {}", self.stopwords_label()),

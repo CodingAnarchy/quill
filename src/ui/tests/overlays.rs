@@ -451,3 +451,80 @@ fn the_replace_all_preview_shows_a_per_chapter_breakdown_with_context() {
         "the first match's context snippet is shown:\n{screen}"
     );
 }
+
+/// Open the annotation prompt on the opening word ("Night") and type `note` into it.
+fn annotate_with(app: &mut App, note: &str) {
+    app.start_annotation_range(0, 5);
+    assert!(matches!(app.mode, Mode::Prompt(_)), "the note prompt opens");
+    for c in note.chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+}
+
+#[test]
+fn a_long_annotation_note_wraps_instead_of_running_off_screen() {
+    // A note longer than the status line used to be clipped at the right edge, so
+    // the author couldn't see what they were typing. It now word-wraps upward.
+    let mut app = app_with("Night fell.\n");
+    let words: Vec<String> = (1..=20).map(|i| format!("word{i}")).collect();
+    annotate_with(&mut app, &words.join(" "));
+    let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+    terminal.draw(|f| draw(f, &app)).unwrap();
+    let screen = render(&app, 40, 16);
+
+    for w in &words {
+        assert!(screen.contains(w), "'{w}' is visible:\n{screen}");
+    }
+    let rows: Vec<&str> = screen.lines().collect();
+    assert!(
+        rows[15].contains("word20"),
+        "the note ends on the bottom row"
+    );
+    assert!(
+        rows[11].starts_with("Note on"),
+        "the label heads the wrapped note:\n{screen}"
+    );
+    // The caret follows the end of the text onto the last wrapped row.
+    let pos = terminal.get_cursor_position().unwrap();
+    assert_eq!(pos.y, 15);
+    assert_eq!(usize::from(pos.x), rows[15].trim_end().len());
+    // The wrapped rows stay legible; the editor above them dims.
+    let buf = terminal.backend().buffer().clone();
+    assert!(!buf[(0, 11)].modifier.contains(Modifier::DIM));
+    assert!(buf[(1, 1)].modifier.contains(Modifier::DIM));
+}
+
+#[test]
+fn an_overlong_annotation_note_scrolls_to_keep_the_caret_in_view() {
+    // Past the row cap the prompt stops growing and scrolls: the latest text and
+    // the caret stay on screen, the opening rows scroll off the top.
+    let mut app = app_with("Night fell.\n");
+    let words: Vec<String> = (1..=80).map(|i| format!("w{i:02}")).collect();
+    annotate_with(&mut app, &words.join(" "));
+    let screen = render(&app, 30, 20);
+
+    assert!(
+        screen.contains("w80"),
+        "the end of the note is visible:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Note on"),
+        "the label scrolled off:\n{screen}"
+    );
+    let note_rows = screen.lines().filter(|l| l.starts_with('w')).count();
+    assert_eq!(note_rows, 8, "the prompt stops at its row cap:\n{screen}");
+    assert!(
+        screen.contains("Night fell"),
+        "the editor stays above it:\n{screen}"
+    );
+}
+
+#[test]
+fn a_short_prompt_stays_on_the_status_line() {
+    let mut app = app_with("Night fell.\n");
+    annotate_with(&mut app, "check this");
+    let screen = render(&app, 60, 10);
+    let rows: Vec<&str> = screen.lines().collect();
+    assert!(rows[9].contains("Note on") && rows[9].contains("check this"));
+    assert!(rows[8].trim().is_empty(), "no extra row:\n{screen}");
+}

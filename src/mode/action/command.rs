@@ -154,6 +154,8 @@ pub enum SettingBool {
     FocusMode,
     /// First-line paragraph indent (`editor.paragraph_indent`).
     ParagraphIndent,
+    /// The annotation margin beside the prose (`editor.annotation_margin`).
+    AnnotationMargin,
 }
 
 impl SettingBool {
@@ -166,6 +168,7 @@ impl SettingBool {
             Self::Typewriter => "editor.typewriter",
             Self::FocusMode => "editor.focus_mode",
             Self::ParagraphIndent => "editor.paragraph_indent",
+            Self::AnnotationMargin => "editor.annotation_margin",
         }
     }
 
@@ -178,6 +181,7 @@ impl SettingBool {
             Self::Typewriter => "Typewriter scrolling",
             Self::FocusMode => "Focus mode",
             Self::ParagraphIndent => "Paragraph indent",
+            Self::AnnotationMargin => "Annotation margin",
         }
     }
 }

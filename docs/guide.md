@@ -421,7 +421,11 @@ When the review copy comes back marked up, "Import review copy" (also in the
 Ctrl-K menu) reads the returned .docx and turns your editor's Word comments into
 inline annotations, anchored to the exact phrase each one sits on — the round
 trip from export to editorial feedback, with the notes landing where you can act
-on them. "Review annotations" (Ctrl-K) opens the notes as a list you can work
+on them. Each note also shows in the margin beside the prose, level with the line
+it's on, so it stays in view while you write ("Annotation margin (toggle)" hides
+it). "Remove annotation at cursor" deletes the note you're on, and "Remove all
+annotations here…" clears the chapter's notes after a y/N confirm.
+"Review annotations" (Ctrl-K) opens the notes as a list you can work
 through: reply to a note and resolve it when it's handled, and — when a
 manuscript comes back marked up by several reviewers — sort the list, filter by
 reviewer or status, and jump to the next open one.
