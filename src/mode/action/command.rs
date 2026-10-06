@@ -156,6 +156,8 @@ pub enum SettingBool {
     ParagraphIndent,
     /// The annotation margin beside the prose (`editor.annotation_margin`).
     AnnotationMargin,
+    /// The below-daily-goal status-bar cue (`editor.daily_nudge`).
+    DailyNudge,
 }
 
 impl SettingBool {
@@ -169,6 +171,7 @@ impl SettingBool {
             Self::FocusMode => "editor.focus_mode",
             Self::ParagraphIndent => "editor.paragraph_indent",
             Self::AnnotationMargin => "editor.annotation_margin",
+            Self::DailyNudge => "editor.daily_nudge",
         }
     }
 
@@ -182,6 +185,7 @@ impl SettingBool {
             Self::FocusMode => "Focus mode",
             Self::ParagraphIndent => "Paragraph indent",
             Self::AnnotationMargin => "Annotation margin",
+            Self::DailyNudge => "Daily goal cue",
         }
     }
 }

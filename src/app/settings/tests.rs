@@ -55,9 +55,9 @@ fn the_menu_lists_every_knob() {
         panic!("the setter opens a palette");
     };
     // Theme, width, smart typography, auto-pair, vim, autosave, typewriter,
-    // focus, paragraph indent, annotation margin, stopwords, theme colors, key
-    // bindings.
-    assert_eq!(p.items.len(), 13);
+    // focus, paragraph indent, annotation margin, daily goal cue, stopwords, theme
+    // colors, key bindings.
+    assert_eq!(p.items.len(), 14);
     assert_eq!(p.title, "Settings");
 }
 

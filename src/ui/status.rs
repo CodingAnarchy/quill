@@ -278,8 +278,9 @@ fn session_target_tag(app: &App) -> String {
 }
 
 /// The ambient below-target cue (#1012): when the daily nudge is on, a daily
-/// target is set, today's net is under it, and the author hasn't dismissed it,
-/// a quiet tag shows how far short the day is (e.g. "◈ 180 to daily goal · Esc").
+/// target is set, and today's net is under it, a quiet tag shows how far short
+/// the day is (e.g. "◈ 180 to daily goal"). Hidden or restored with the "Daily
+/// goal cue" toggle, never by a stray Esc.
 /// Reads only the cached daily tally + goal (`daily_target_shortfall`), so it's
 /// O(1) per frame — no manuscript walk. Empty (nothing rendered) whenever the cue
 /// shouldn't show, so the bar is unchanged for authors who never set a target or
@@ -289,9 +290,7 @@ fn daily_nudge_tag(app: &App) -> String {
         return String::new();
     }
     app.daily_target_shortfall()
-        .map_or_else(String::new, |short| {
-            format!(" · ◈ {short} to daily goal · Esc")
-        })
+        .map_or_else(String::new, |short| format!(" · ◈ {short} to daily goal"))
 }
 
 /// While browsing, the bar describes the *selected* chapter: its title, and
