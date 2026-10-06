@@ -6,13 +6,109 @@
 //! (in `mod.rs`) assembles these into the drawn line.
 
 use ratatui::{
+    layout::Rect,
     style::{Modifier, Style},
-    text::Span,
+    text::{Line, Span},
+    widgets::{Clear, Paragraph},
+    Frame,
 };
+
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::buffer::count_words;
-use crate::mode::{Mode, Search, SearchStage};
+use crate::mode::{Mode, PromptState, Search, SearchStage};
+use crate::theme::Theme;
+use crate::wrap::{row_starts_first_indent, visual_pos};
+
+/// The most rows a wrapped prompt grows to. A long annotation note wraps upward
+/// over the dimmed editor instead of running off the right edge; past this cap it
+/// scrolls to keep the caret's row in view rather than swallowing the screen.
+const MAX_PROMPT_ROWS: usize = 8;
+
+/// The prompt's soft-wrapped layout at `width` cells: the byte offsets into
+/// `input` where each visual row starts (row 0 follows the label, so it's
+/// narrower by the label's width), and the caret's `(row, column)` with the
+/// label counted on row 0. A caret sitting just past a full final row gets a
+/// fresh empty row of its own, so the block cursor never falls off the edge.
+fn prompt_layout(prompt: &PromptState, width: u16) -> (Vec<usize>, (usize, usize)) {
+    let width = usize::from(width);
+    let label_w = prompt.label.width();
+    let mut starts = row_starts_first_indent(&prompt.input, width, label_w);
+    let (mut row, mut col) = visual_pos(&prompt.input, &starts, prompt.caret);
+    if row == 0 {
+        col += label_w;
+    }
+    if width > 0 && col >= width {
+        row += 1;
+        col = 0;
+        if row == starts.len() {
+            starts.push(prompt.input.len());
+        }
+    }
+    (starts, (row, col))
+}
+
+/// How many rows the prompt occupies on a `screen`, counting up from its bottom
+/// line: the wrapped row count, capped at [`MAX_PROMPT_ROWS`] and the screen.
+pub(super) fn prompt_height(prompt: &PromptState, screen: Rect) -> u16 {
+    let (starts, _) = prompt_layout(prompt, screen.width);
+    let rows = starts.len().min(MAX_PROMPT_ROWS);
+    u16::try_from(rows)
+        .unwrap_or(u16::MAX)
+        .min(screen.height)
+        .max(1)
+}
+
+/// Draw the open prompt, word-wrapped: the label then the typed text, growing
+/// upward from the status line `status` (whose bottom is the screen's) as the
+/// input wraps, with the block cursor at the caret (#706). y/N confirmations
+/// carry no input, so they stay one row with the caret right after the label.
+pub(super) fn draw_prompt(
+    frame: &mut Frame,
+    status: Rect,
+    screen: Rect,
+    prompt: &PromptState,
+    theme: &Theme,
+) {
+    let style = Style::default().fg(theme.on_accent).bg(theme.match_current);
+    let (starts, (caret_row, caret_col)) = prompt_layout(prompt, status.width);
+    let height = prompt_height(prompt, screen);
+    let shown = usize::from(height);
+    // Scroll so the caret's row stays visible once the note outgrows the cap.
+    let first = (caret_row + 1).saturating_sub(shown);
+    let area = Rect {
+        x: status.x,
+        y: status.bottom().saturating_sub(height),
+        width: status.width,
+        height,
+    };
+
+    let input = prompt.input.as_str();
+    let lines: Vec<Line> = (first..(first + shown).min(starts.len()))
+        .map(|i| {
+            let end = starts.get(i + 1).copied().unwrap_or(input.len());
+            let text = Span::styled(&input[starts[i]..end], style);
+            if i == 0 {
+                Line::from(vec![Span::styled(prompt.label.as_str(), style), text])
+            } else {
+                Line::from(text)
+            }
+        })
+        .collect();
+    // Wipe the editor rows the prompt grows over, so no prose shows beside a short row.
+    frame.render_widget(Clear, area);
+    frame.render_widget(Paragraph::new(lines), area);
+
+    let col = area
+        .x
+        .saturating_add(u16::try_from(caret_col).unwrap_or(u16::MAX))
+        .min(area.right().saturating_sub(1));
+    let row = area
+        .y
+        .saturating_add(u16::try_from(caret_row - first).unwrap_or(0));
+    frame.set_cursor_position((col, row));
+}
 
 /// The status-bar line for the find/replace mode (#144): the query, a match
 /// count, and the keys available at the current step.

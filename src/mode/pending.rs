@@ -258,6 +258,8 @@ pub enum Pending {
     /// (#889). Enter appends it to the thread and re-opens the review list; an empty
     /// reply (or Esc) cancels, re-opening the list unchanged.
     AnnotateReply { index: usize },
+    /// y/N: remove every annotation on the loaded chapter(s).
+    ClearAnnotations,
     /// Text input: the one-line synopsis for a scene on the corkboard (#636 / #701).
     /// The target is resolved when the prompt opens — `chapter` is the card's
     /// chapter on the manuscript-wide board (`None` on the per-chapter board), and

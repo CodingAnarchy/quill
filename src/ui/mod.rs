@@ -28,7 +28,9 @@ mod status;
 pub use assistant::AssistantWrapCache;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
-use status::{editor_status_bar, mode_chip, nav_status_bar, search_status};
+use status::{
+    draw_prompt, editor_status_bar, mode_chip, nav_status_bar, prompt_height, search_status,
+};
 // Galley proofreading pagination (#1003): the read-only paged view's page-advance math,
 // shared with the app-layer Space/Backspace paging so render and paging step in lockstep.
 pub use editor::{galley_last_top, galley_next_top, galley_prev_top};
@@ -134,7 +136,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             draw_drafts(f, r, menu, &app.list_layout);
         }),
         Mode::QuickSwitch(switch) => modal(frame, area, |f, r| draw_quick_switch(f, r, switch)),
-        Mode::Prompt(_) => dim_backdrop(frame, area),
+        // A long prompt wraps upward over the editor; keep all its rows undimmed.
+        Mode::Prompt(prompt) => dim_backdrop(frame, area, prompt_height(prompt, area)),
         _ => {}
     }
 }
@@ -190,7 +193,7 @@ fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
 /// overlay's own renderer. The single place every box overlay gets visual depth,
 /// so they're all treated alike rather than each opting in.
 fn modal(frame: &mut Frame, screen: Rect, draw_box: impl FnOnce(&mut Frame, Rect)) {
-    dim_backdrop(frame, screen);
+    dim_backdrop(frame, screen, 1);
     let inner = modal_area(screen);
     // The shadow sits down-and-right of the box, over the dimmed editor; shade
     // glyphs render on any terminal, so the depth survives a limited palette.
@@ -214,13 +217,13 @@ fn modal_area(screen: Rect) -> Rect {
     }
 }
 
-/// De-emphasize the editor behind a modal by dimming every cell above the status
-/// line (#349). O(area), about what the live word count already costs per frame.
+/// De-emphasize the editor behind a modal by dimming every cell above the bottom
+/// `keep` rows — the status line, or every row of a wrapped prompt (#349). O(area), about what the live word count already costs per frame.
 /// `Modifier::DIM` degrades gracefully — a terminal that ignores it just shows the
 /// editor at normal brightness, with the framed, shadowed overlay still on top.
-fn dim_backdrop(frame: &mut Frame, screen: Rect) {
+fn dim_backdrop(frame: &mut Frame, screen: Rect, keep: u16) {
     let buf = frame.buffer_mut();
-    let bottom = screen.bottom().saturating_sub(1); // keep the status line legible
+    let bottom = screen.bottom().saturating_sub(keep); // keep the status line legible
     for y in screen.top()..bottom {
         for x in screen.left()..screen.right() {
             let cell = &mut buf[(x, y)];
@@ -752,25 +755,7 @@ impl Pane for StatusBar<'_> {
         let theme = app.theme;
 
         if let Mode::Prompt(prompt_state) = &app.mode {
-            // Label plus any typed text (empty for y/N confirmations) — two
-            // borrowed spans, no per-frame allocation.
-            let style = Style::default().fg(theme.on_accent).bg(theme.match_current);
-            let prompt = Paragraph::new(Line::from(vec![
-                Span::styled(prompt_state.label.as_str(), style),
-                Span::styled(prompt_state.input.as_str(), style),
-            ]));
-            frame.render_widget(prompt, area);
-            // Draw the caret at its position within the typed text (#706); the
-            // text prompts accept caret movement, so the block cursor has to
-            // follow it rather than sit at the end. y/N confirmations carry no
-            // input, so the caret rests right after the label.
-            let before =
-                prompt_state.label.width() + prompt_state.input[..prompt_state.caret].width();
-            let col = area
-                .x
-                .saturating_add(before as u16)
-                .min(area.right().saturating_sub(1));
-            frame.set_cursor_position((col, area.y));
+            draw_prompt(frame, area, frame.area(), prompt_state, &theme);
             return;
         }
 

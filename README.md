@@ -1001,9 +1001,18 @@ Revision is a conversation with yourself, and an `xxx` marker is too blunt for i
 
 To leave one, select the text (Vim Visual mode, then **`m`**) or put the cursor
 on a word, then run **Annotate selection** from the `Ctrl-K` palette; type the
-note and press Enter. The annotated span gets a tinted background. Notes stay on
-their phrase as you edit around them — type before a note and it slides along;
-delete the text it's pinned to and the note goes with it.
+note and press Enter — a long note wraps onto more rows as you type, so you can
+see all of it. The annotated span gets a tinted background, and the note itself
+shows in the **margin** to the right of the prose, level with the line it's on,
+so your notes stay in view while you write (it appears when the terminal has room
+beside the column; **Annotation margin (toggle)** in the palette, or
+`annotation_margin` in the config, turns it off). Notes stay on their phrase as
+you edit around them — type before a note and it slides along; delete the text
+it's pinned to and the note goes with it.
+
+To remove a note without opening the list, put the cursor on it (or select across
+several) and run **Remove annotation at cursor**; **Remove all annotations
+here…** clears every note on the chapter after a y/N confirm.
 
 **Review annotations** (also in the palette) opens the chapter's notes as a list:
 **↑↓** to move, **Enter** to jump to one, **`d`** to delete it, **Esc** to close.

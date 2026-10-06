@@ -8,6 +8,7 @@ use super::*;
 use crate::buffer::Buffer;
 use crate::project::Project;
 
+mod annotation_margin;
 mod corkboard_outline;
 mod editor_render;
 mod fenced_code;

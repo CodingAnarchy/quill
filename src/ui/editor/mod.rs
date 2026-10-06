@@ -20,6 +20,7 @@ use crate::buffer::Buffer;
 mod focus;
 mod galley;
 mod header;
+mod margin;
 mod rows;
 
 pub use galley::{galley_last_top, galley_next_top, galley_prev_top};
@@ -53,15 +54,19 @@ impl Pane for Editor<'_> {
 /// single-pane view and the focused half of a split).
 pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // The prose column, with a blank top row (the EditMeta banner draws there).
-    let column = centered_column(
-        Rect {
-            x: area.x,
-            y: area.y + 1,
-            width: area.width,
-            height: area.height.saturating_sub(1),
-        },
-        app.focus_width,
-    );
+    let body = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+    let mut column = centered_column(body, app.focus_width);
+    // The annotation margin needs room beside the prose; nudge the column left
+    // to open one when the centered gutter is too narrow.
+    let margin = margin::wanted(app);
+    if margin {
+        column = margin::make_room(body, column);
+    }
 
     let buffer = app.edit_buffer();
     // Feed navigation the same wrap column the screen uses (#143), so visual
@@ -144,6 +149,9 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         app.scroll_offset.get(),
         Some(&mut editor_layout),
     );
+    if margin {
+        margin::draw(frame, body, app, &editor_layout);
+    }
     drop(editor_layout);
     // Store the offset the renderer actually applied (clamped to the content), so a
     // wheel-up right after over-scrolling responds immediately (#764).
