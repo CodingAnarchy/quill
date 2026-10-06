@@ -1,7 +1,8 @@
 //! The AI actions reachable from the AI palette: the [`AiAction`] enum, its cost
 //! profile ([`AiCost`]), and the [`AiActionSpec`] descriptor table (`SPECS`) that
 //! is the single source for each action's slug, cost, bible key, finding kind,
-//! labels, assistant-runnability, and free-text argument (#563/#1069). Split out of
+//! labels, assistant-runnability, free-text argument, and the backend it needs
+//! ([`Needs`]) (#563/#1069). Split out of
 //! `action.rs` to keep each file under the ~1,000-line convention; re-exported from
 //! the module root, so callers are unaffected.
 
@@ -138,6 +139,25 @@ pub enum ModelWeight {
     Light,
 }
 
+/// Which backend an [`AiAction`] needs to run — the one descriptor fact that the
+/// availability check ([`App::action_status`](crate::app::App::action_status)), the
+/// enable-AI on-ramp (#602), and the workflow sync/async split
+/// ([`Action::is_sync`](super::Action::is_sync)) all derive from, instead of each
+/// hand-listing its own (drift-prone) subset of the actions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Needs {
+    /// No backend: a local view over already-collected data (triage, the health
+    /// dashboard, …). Runs with AI off, synchronously, sending nothing.
+    Local,
+    /// The `[ai]` backend: gated on `[ai] enabled` and the configured backend being
+    /// ready (or a local-routing fallback). With AI off, running one opens the
+    /// in-app enable on-ramp (#602). Runs asynchronously.
+    Ai,
+    /// The image backend, which carries its own `[image]` opt-in and key, separate
+    /// from the text AI — so AI being off never routes it to the on-ramp.
+    Image,
+}
+
 /// The single source of truth for an [`AiAction`]'s parallel data (#563): the
 /// hand-listed facts that used to live in seven independent, drift-prone tables —
 /// the slug, cost profile, model weight, bible key, finding kind, run-action + palette
@@ -189,10 +209,14 @@ pub struct AiActionSpec {
     /// the actions that take one (the question for Ask, the concern for Accuracy, …),
     /// or `None`. The single source the assistant's tool schema and its dispatch read.
     pub(crate) text_arg: Option<&'static str>,
+    /// Which backend this action needs ([`Needs`]) — the single source the
+    /// availability gate, the enable-AI on-ramp (#602), and the workflow sync/async
+    /// split derive from.
+    pub(crate) needs: Needs,
 }
 
 /// Shorthand for a finding-surfacing pass row: manuscript-costed, its finding kind,
-/// runnable by the assistant. Keeps the SPECS table readable — the analysis passes
+/// runnable by the assistant, needing the `[ai]` backend. Keeps the SPECS table readable — the analysis passes
 /// share every field except slug/weight/label/palette/kind/arg.
 const fn findings_spec(
     action: AiAction,
@@ -214,6 +238,7 @@ const fn findings_spec(
         palette: Some(palette),
         assistant_runnable: true,
         text_arg,
+        needs: Needs::Ai,
     }
 }
 
@@ -227,6 +252,7 @@ const fn plain_spec(
     slug: &'static str,
     cost: AiCost,
     weight: ModelWeight,
+    needs: Needs,
     label: &'static str,
     palette: Option<(&'static str, &'static str)>,
 ) -> AiActionSpec {
@@ -241,14 +267,16 @@ const fn plain_spec(
         palette,
         assistant_runnable: false,
         text_arg: None,
+        needs,
     }
 }
 
 impl AiAction {
     /// The descriptor table — every [`AiAction`] with its full row, in palette order.
     /// The single place the action set is enumerated: slug, cost, weight, bible key,
-    /// finding kind, run-action + palette labels, assistant-runnability (#1069), and
-    /// the free-text argument. Everything derivable reads from here.
+    /// finding kind, run-action + palette labels, assistant-runnability (#1069), the
+    /// free-text argument, and the backend it needs. Everything derivable reads from
+    /// here.
     pub(crate) const SPECS: &'static [AiActionSpec] = &[
         AiActionSpec {
             assistant_runnable: true,
@@ -258,6 +286,7 @@ impl AiAction {
                 "ai:ask",
                 AiCost::None,
                 ModelWeight::Heavy,
+                Needs::Ai,
                 "AI · Ask the manuscript",
                 Some((
                     "Ask the manuscript",
@@ -378,6 +407,7 @@ impl AiAction {
                 "ai:brainstorm",
                 AiCost::None,
                 ModelWeight::Heavy,
+                Needs::Ai,
                 "AI · Brainstorm ideas",
                 Some((
                     "Brainstorm ideas",
@@ -393,6 +423,7 @@ impl AiAction {
                 "ai:draft-characters",
                 AiCost::None,
                 ModelWeight::Heavy,
+                Needs::Ai,
                 "AI · Draft characters",
                 Some((
                     "Draft characters",
@@ -408,6 +439,7 @@ impl AiAction {
                 "ai:draft-setting",
                 AiCost::None,
                 ModelWeight::Heavy,
+                Needs::Ai,
                 "AI · Draft setting",
                 Some((
                     "Draft setting",
@@ -432,6 +464,7 @@ impl AiAction {
             "ai:submission",
             AiCost::Manuscript,
             ModelWeight::Heavy,
+            Needs::Ai,
             "AI · Submission material",
             Some((
                 "Submission material",
@@ -443,6 +476,7 @@ impl AiAction {
             "ai:marketing",
             AiCost::Manuscript,
             ModelWeight::Light,
+            Needs::Ai,
             "AI · Marketing copy",
             Some((
                 "Marketing copy",
@@ -454,6 +488,7 @@ impl AiAction {
             "ai:social",
             AiCost::Manuscript,
             ModelWeight::Light,
+            Needs::Ai,
             "AI · Social posts",
             Some((
                 "Social posts",
@@ -465,6 +500,7 @@ impl AiAction {
             "ai:ad-creative",
             AiCost::Manuscript,
             ModelWeight::Light,
+            Needs::Ai,
             "AI · Ad creative",
             Some((
                 "Ad creative",
@@ -476,6 +512,7 @@ impl AiAction {
             "ai:portrait",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Image,
             "AI · Character portraits",
             Some((
                 "Character portraits",
@@ -487,6 +524,7 @@ impl AiAction {
             "ai:scene",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Image,
             "AI · Scene illustration",
             Some((
                 "Scene illustration",
@@ -498,6 +536,7 @@ impl AiAction {
             "triage",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Local,
             "Revision triage",
             Some((
                 "Revision triage",
@@ -509,6 +548,7 @@ impl AiAction {
             "health",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Local,
             "Manuscript health dashboard",
             Some((
                 "Manuscript health",
@@ -520,6 +560,7 @@ impl AiAction {
             "cooccurrence",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Local,
             "Motif & character co-occurrence",
             Some((
                 "Motif & character co-occurrence",
@@ -531,17 +572,21 @@ impl AiAction {
             "ai:ask-history",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Local,
             "AI · Ask history",
             Some((
                 "Ask history",
                 "Re-open a past Ask — answer + jumpable citations (local)",
             )),
         ),
+        // The embedding passes run on-device but are gated like the text passes
+        // (`[ai] enabled` + a ready backend), so they need the `[ai]` backend.
         plain_spec(
             Self::SemanticFind,
             "ai:find-similar",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Ai,
             "AI · Find similar scenes",
             Some((
                 "Find similar scenes",
@@ -555,6 +600,7 @@ impl AiAction {
                 "ai:echo",
                 AiCost::None,
                 ModelWeight::Heavy,
+                Needs::Ai,
                 "AI · Echo & near-duplicate detection",
                 Some((
                     "Echo & near-duplicate detection",
@@ -567,6 +613,7 @@ impl AiAction {
             "ai:thesaurus",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Ai,
             "AI · Word search (thesaurus)",
             Some((
                 "Word search",
@@ -578,6 +625,7 @@ impl AiAction {
             "ai:name",
             AiCost::None,
             ModelWeight::Heavy,
+            Needs::Ai,
             "AI · Name generator",
             Some((
                 "Name generator",
@@ -701,6 +749,12 @@ impl AiAction {
         self.spec().text_arg
     }
 
+    /// Which backend this action needs ([`Needs`]) — a descriptor lookup, so the
+    /// availability gate, the enable-AI on-ramp, and `is_sync` can't drift apart.
+    pub(crate) fn needs(self) -> Needs {
+        self.spec().needs
+    }
+
     /// Resolve an AI action from its stable [`slug`](Self::slug) — the inverse used
     /// to rehydrate a durable pass queue (#923) from the slugs it stores.
     pub(crate) fn from_slug(slug: &str) -> Option<Self> {
@@ -744,7 +798,7 @@ impl AiAction {
 
 #[cfg(test)]
 mod tests {
-    use super::AiAction;
+    use super::{AiAction, Needs};
 
     /// Every `AiAction` variant, hand-listed. The completeness test below asserts
     /// this list matches the enum (via `SPECS` coverage + count), so adding a
@@ -811,5 +865,58 @@ mod tests {
             AiAction::SPECS.len(),
             ALL_ACTIONS.len(),
         );
+    }
+
+    /// Every action's backend classification, written out by hand. `needs` drives
+    /// the availability gate, the enable-AI on-ramp (#602), and the workflow
+    /// sync/async split, so a misclassified row silently changes all three. This
+    /// table must cover every variant (checked against `ALL_ACTIONS`), so a new
+    /// action has to state — and have reviewed — which backend it needs.
+    #[test]
+    fn every_ai_action_needs_the_expected_backend() {
+        const EXPECTED: &[(AiAction, Needs)] = &[
+            (AiAction::Ask, Needs::Ai),
+            (AiAction::Characters, Needs::Ai),
+            (AiAction::Continuity, Needs::Ai),
+            (AiAction::Setting, Needs::Ai),
+            (AiAction::Plot, Needs::Ai),
+            (AiAction::Theme, Needs::Ai),
+            (AiAction::Scaffold, Needs::Ai),
+            (AiAction::Naming, Needs::Ai),
+            (AiAction::Style, Needs::Ai),
+            (AiAction::Brainstorm, Needs::Ai),
+            (AiAction::DraftCharacters, Needs::Ai),
+            (AiAction::DraftSetting, Needs::Ai),
+            (AiAction::Voice, Needs::Ai),
+            (AiAction::Submission, Needs::Ai),
+            (AiAction::Marketing, Needs::Ai),
+            (AiAction::Social, Needs::Ai),
+            (AiAction::AdCreative, Needs::Ai),
+            (AiAction::Portrait, Needs::Image),
+            (AiAction::Scene, Needs::Image),
+            (AiAction::Triage, Needs::Local),
+            (AiAction::Dashboard, Needs::Local),
+            (AiAction::CoOccurrence, Needs::Local),
+            (AiAction::AskHistory, Needs::Local),
+            (AiAction::SemanticFind, Needs::Ai),
+            (AiAction::Echo, Needs::Ai),
+            (AiAction::Thesaurus, Needs::Ai),
+            (AiAction::NameGen, Needs::Ai),
+            (AiAction::Editorial, Needs::Ai),
+            (AiAction::Accuracy, Needs::Ai),
+            (AiAction::Relationship, Needs::Ai),
+            (AiAction::Foreshadow, Needs::Ai),
+            (AiAction::FactCheck, Needs::Ai),
+            (AiAction::Pacing, Needs::Ai),
+        ];
+        for action in ALL_ACTIONS {
+            let expected = EXPECTED.iter().find(|(a, _)| a == action).map(|&(_, n)| n);
+            assert_eq!(
+                Some(action.needs()),
+                expected,
+                "{action:?} must be classified in EXPECTED with the backend it needs",
+            );
+        }
+        assert_eq!(EXPECTED.len(), ALL_ACTIONS.len(), "one row per variant");
     }
 }

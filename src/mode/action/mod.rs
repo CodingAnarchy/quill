@@ -17,7 +17,7 @@ mod command;
 mod palette;
 mod registry;
 
-pub use ai::{AiAction, AiCost, ModelWeight};
+pub use ai::{AiAction, AiCost, ModelWeight, Needs};
 pub use command::{
     Command, FontTarget, PortraitChoice, SettingBool, SettingPicker, SettingTextKnob, StylePicker,
     StyleTextKnob,
