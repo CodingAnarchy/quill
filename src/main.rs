@@ -64,7 +64,6 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::app::App;
-use crate::buffer::Buffer;
 use crate::project::Project;
 
 /// Whether the enhanced keyboard protocol was pushed at startup (#348), so
@@ -190,35 +189,25 @@ fn main() -> io::Result<()> {
         },
     };
 
+    // Startup loads a dozen config sections (the editor's, then onboarding's);
+    // parse the config and manifest once for all of them. Dropped before the
+    // event loop, so later loads read the files fresh.
+    let config_session = config::LoadSession::begin();
     // A foreseeable data-path failure at startup — a malformed manifest, an
     // unreadable chapter, a directory we can't write — exits with a clear,
     // single-line message instead of a panic or Rust's `Error: Custom {…}`
     // debug dump (#264). The terminal isn't in raw mode yet, so stderr is clean.
-    let (project, buffer) = match load_project(&dir) {
-        Ok(loaded) => loaded,
+    // `launch` opens the project on the chapter the author was last in, then
+    // makes the on-open offers (crash recovery, damage restore, pass-queue resume).
+    let mut app = match App::launch(&dir) {
+        Ok(app) => app,
         Err(e) => {
             eprintln!("quill: cannot open project at {}: {e}", dir.display());
             std::process::exit(1);
         }
     };
     // Remember this project so the in-app project browser (#270) can offer it.
-    let (root, title) = (project.root.clone(), project.manifest.title.clone());
-    let mut app = App::new(buffer, project);
-    // Resume today's word-delta counters from the history log.
-    app.load_history();
-    // Resume where the last clean session left off — active chapter + cursor
-    // (#588). Before offering recovery, so a crash sidecar still targets its own
-    // chapter and isn't overridden by the resume.
-    app.restore_position();
-    // If a previous session left unsaved work behind (a crash), offer it back.
-    app.offer_recovery();
-    // If the project itself looks damaged (an unreadable manifest / missing chapter
-    // files), offer to restore from the latest local backup (#934). After recovery,
-    // which takes precedence — it's a no-op while that prompt is up.
-    app.offer_backup_restore_on_damage();
-    // If a durable pass queue was interrupted (a crash mid-run), offer to resume it
-    // (#923) — after the recovery/backup offers, which take precedence.
-    app.offer_pass_queue_resume();
+    let (root, title) = (app.project.root.clone(), app.project.manifest.title.clone());
     // Reconcile any background bible batches submitted in a previous session (#950):
     // a batch can take hours, so its results are polled and applied at launch (and on
     // idle) rather than in-session. Non-blocking — it just kicks off the poll worker.
@@ -227,6 +216,7 @@ fn main() -> io::Result<()> {
     // After recovery, so a crash prompt takes precedence and the card waits for a
     // clean slate (it's a no-op when a prompt/overlay is already up).
     app.maybe_offer_onboarding();
+    drop(config_session);
     recent::record(&root, &title);
 
     // Drop restores the terminal on a normal or `?`-error exit, but the release
@@ -256,27 +246,6 @@ fn main() -> io::Result<()> {
         println!("{recap}");
     }
     result
-}
-
-/// Open the project at `dir` — opening an existing one (a directory with a
-/// manifest) or initializing a new one in an empty directory — and load its
-/// active chapter. Every foreseeable failure (a malformed manifest, an
-/// unreadable chapter, a directory that can't be created or written) comes back
-/// as an `Err` carrying a clear message, never a panic (#264).
-fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
-    // Recover from a crash mid backup-restore swap (#1179) before deciding
-    // open-vs-create: if a previous restore was interrupted between its two renames,
-    // the real project is stranded in a hidden sibling and `dir` is gone — move it
-    // back, or the missing `dir` below would scaffold a fresh empty project over the
-    // author's book. A cheap no-op on every normal launch.
-    App::reconcile_interrupted_restore(dir);
-    let project = if Project::manifest_path(dir).exists() {
-        Project::open(dir)?
-    } else {
-        Project::create(dir)?
-    };
-    let buffer = Buffer::from_path(project.active_path())?;
-    Ok((project, buffer))
 }
 
 /// The project directory for a no-path launch (#423/#526), or `None` if the
@@ -623,11 +592,11 @@ mod tests {
     }
 
     #[test]
-    fn load_project_reports_a_malformed_manifest_instead_of_panicking() {
+    fn launch_reports_a_malformed_manifest_instead_of_panicking() {
         let dir = tmpdir("bad-manifest");
         // A manifest that exists but is broken TOML: opened, not re-created.
         std::fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
-        let err = load_project(&dir)
+        let err = App::launch(&dir)
             .err()
             .expect("a malformed manifest should be an error");
         assert!(
@@ -750,10 +719,10 @@ mod tests {
     }
 
     #[test]
-    fn load_project_initializes_an_empty_directory() {
+    fn launch_initializes_an_empty_directory() {
         let dir = tmpdir("fresh");
-        let (project, _buffer) = load_project(&dir).expect("an empty dir becomes a new project");
-        assert!(Project::manifest_path(&project.root).exists());
+        let app = App::launch(&dir).expect("an empty dir becomes a new project");
+        assert!(Project::manifest_path(&app.project.root).exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 

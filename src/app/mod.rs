@@ -79,6 +79,7 @@ mod chapters;
 mod configure;
 mod cooccurrence;
 mod counts;
+mod launch;
 mod persistence;
 mod project_ops;
 mod project_search;
@@ -122,6 +123,9 @@ impl App {
         // App), so a project's overrides take effect the moment it opens and replace
         // the prior project's when another is opened in place.
         crate::config::set_project_dir(Some(project.root.clone()));
+        // Every section below (editor, theme, workflows, triggers, snippets, AI,
+        // image, backup) reads the same two files: parse each once for the batch.
+        let _config_session = crate::config::LoadSession::begin();
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
         let smart_typography = editor.smart_typography;

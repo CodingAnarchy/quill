@@ -337,7 +337,7 @@ pub struct App {
     /// off `&self`; `None` until the first write this session.
     pub(super) last_history_snapshot: std::cell::RefCell<Option<history::Snapshot>>,
     /// The resume position [`persist_position`](Self::persist_position) last wrote
-    /// (or [`restore_position`](Self::restore_position) read), keyed by project
+    /// (or [`resume_cursor`](Self::resume_cursor) read at launch), keyed by project
     /// root, so a save that leaves the cursor where it was skips rewriting the
     /// sidecar. A `RefCell` because the best-effort persist runs off `&self`.
     pub(super) last_position: RefCell<Option<(PathBuf, lastpos::Position)>>,

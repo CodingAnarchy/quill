@@ -11,7 +11,6 @@ use crate::recovery;
 use std::time::{Duration, Instant};
 
 use super::App;
-use crate::project::Project;
 
 /// The fewest seconds between two recovery-sidecar writes while edits keep
 /// arriving. Each write copies the buffer, serializes it, and does a durable
@@ -155,26 +154,24 @@ impl App {
         }
     }
 
-    /// At launch, resume the last editing position a clean exit recorded (#588):
-    /// activate the saved chapter and place the cursor at the saved byte offset.
-    /// A record for a chapter that no longer exists is ignored (start at the top);
-    /// an offset past the current end of the file is clamped, so a chapter edited
-    /// smaller elsewhere still lands somewhere valid. Never fails loudly — with no
-    /// (or an unusable) record the open just stays at chapter 0, top of file.
-    pub fn restore_position(&mut self) {
-        let Some(pos) = lastpos::read(&self.project.root) else {
+    /// At launch, resume the cursor at the last editing position a clean exit
+    /// recorded (#588). The launch ([`App::launch`]) has already loaded the
+    /// remembered chapter when it still exists; this places the cursor at the
+    /// saved byte offset in it. An offset past the current end of the file is
+    /// clamped (and one inside a multi-byte character floored), so a chapter
+    /// edited smaller elsewhere still lands somewhere valid. A record for a chapter
+    /// that isn't the active one — it's gone, or wouldn't load — leaves the cursor
+    /// at the top. Also notes the record as what's on disk, so a later save that
+    /// lands back here needn't rewrite it.
+    pub(super) fn resume_cursor(&mut self, pos: Option<lastpos::Position>) {
+        let Some(pos) = pos else {
             return;
         };
-        // What's on disk now: a later save that lands back here needn't rewrite it.
-        *self.last_position.borrow_mut() = Some((self.project.root.clone(), pos.clone()));
-        let Some(index) = self.project.index_of_file(&pos.chapter_file) else {
-            return; // that chapter is gone — start at the top
-        };
-        self.activate_chapter(index); // a no-op when it's already active
         if self.project.active_file() == pos.chapter_file {
             let clamped = pos.cursor.min(self.buffer.len_bytes());
             self.buffer.cursor = self.buffer.cursor_at_byte(clamped);
         }
+        *self.last_position.borrow_mut() = Some((self.project.root.clone(), pos));
     }
 
     /// Capture or clear the recovery sidecar on the idle cadence. The
@@ -361,8 +358,9 @@ impl App {
     /// restore confirm targeting it; otherwise it's a clean no-op (nothing to offer,
     /// or the project is intact). Skipped when a prompt/overlay is already up (the
     /// crash-recovery offer takes precedence), so the two never fight over the
-    /// screen. Reads only the chapter files' existence + the backups dir — never a
-    /// re-parse of the manuscript — so it costs an open next to nothing.
+    /// screen. Reads only what the open recorded about each chapter file plus the
+    /// backups dir — no chapter file is touched again — so it costs an open next
+    /// to nothing.
     pub fn offer_backup_restore_on_damage(&mut self) {
         // Don't pre-empt an already-open prompt/overlay (e.g. the crash-recovery
         // offer, which is about *unsaved* work and comes first).
@@ -395,22 +393,18 @@ impl App {
 
     /// Whether the open project's files look intact (#934): its manifest parses and
     /// every chapter file the manifest references exists and reads. A missing or
-    /// unreadable chapter, or a manifest that no longer parses, reads as damaged —
-    /// the signal the on-open restore offer keys on. A missing chapter file counts:
-    /// [`try_chapter_body`](crate::project::Project::try_chapter_body) reads it as
-    /// the legitimate "empty chapter" (`Ok("")`), so existence is checked
-    /// separately. Checks file existence + a cheap read probe, never a full re-parse
-    /// of the prose, so it stays proportional to the chapter *count*, not the
-    /// novel's size.
+    /// unreadable chapter reads as damaged — the signal the on-open restore offer
+    /// keys on. A missing chapter file counts even though it loads as the
+    /// legitimate "empty chapter".
+    ///
+    /// Answered from what the open already learned, with no file I/O: the manifest
+    /// parsed (or the project wouldn't be open — a `book.toml` that won't parse
+    /// fails the open itself, before this runs), and the per-chapter cache pass at
+    /// open recorded every file that was missing or unreadable
+    /// ([`chapters_intact`](crate::project::Project::chapters_intact)). It used to re-open the whole project and
+    /// re-read every chapter to find out, doubling the cost of a launch.
     fn project_looks_intact(&self) -> bool {
-        // The manifest must still parse — a corrupt `book.toml` is damage even when
-        // the in-memory project (opened earlier) is fine.
-        if Project::open(&self.project.root).is_err() {
-            return false;
-        }
-        (0..self.chapter_count()).all(|i| {
-            self.project.chapter_path(i).is_file() && self.project.try_chapter_body(i).is_ok()
-        })
+        self.project.chapters_intact()
     }
 
     /// How the recovery prompt names what it found: one chapter by title, or a

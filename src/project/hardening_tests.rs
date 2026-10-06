@@ -341,6 +341,57 @@ fn try_chapter_body_distinguishes_error_from_empty() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// The open's cache pass records which chapter files were missing or unreadable
+// (#934), so the on-open damage check is a lookup, not a second open + re-read.
+#[test]
+fn open_records_missing_and_unreadable_chapters() {
+    let dir = temp_dir("damage-record");
+    seed_project(&dir);
+    assert!(Project::open(&dir).unwrap().chapters_intact(), "intact");
+
+    // Missing: the file is gone but the manifest still lists it.
+    fs::remove_file(dir.join("one.md")).unwrap();
+    assert!(!Project::open(&dir).unwrap().chapters_intact(), "missing");
+
+    // Unreadable: a directory where the file should be (a hard read error).
+    fs::create_dir(dir.join("one.md")).unwrap();
+    assert!(
+        !Project::open(&dir).unwrap().chapters_intact(),
+        "unreadable"
+    );
+
+    fs::remove_dir(dir.join("one.md")).ok();
+    fs::remove_dir_all(&dir).ok();
+}
+
+// In a series, the record covers every book; the damage check asks about the
+// active book's chapters, so it follows a book switch.
+#[test]
+fn the_damage_record_follows_the_active_book() {
+    let dir = temp_dir("damage-series");
+    fs::create_dir_all(dir.join("b1")).unwrap();
+    fs::create_dir_all(dir.join("b2")).unwrap();
+    fs::write(dir.join("b1/one.md"), "fine\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"S\"\n\n\
+         [[books]]\ntitle = \"One\"\n\n[[books.chapters]]\ntitle = \"A\"\nfile = \"b1/one.md\"\n\n\
+         [[books]]\ntitle = \"Two\"\n\n[[books.chapters]]\ntitle = \"B\"\nfile = \"b2/one.md\"\n",
+    )
+    .unwrap();
+    let mut project = Project::open(&dir).unwrap();
+    assert!(project.chapters_intact(), "the active book is whole");
+    project.set_active_book(1);
+    assert!(!project.chapters_intact(), "book two's chapter is missing");
+    // Written since: the switch back and forth re-reads it, clearing the record.
+    fs::write(dir.join("b2/one.md"), "now here\n").unwrap();
+    project.set_active_book(0);
+    project.set_active_book(1);
+    assert!(project.chapters_intact());
+
+    fs::remove_dir_all(&dir).ok();
+}
+
 // --- write_chapters_atomic swap loop (#262/#974) ----------------------------
 
 /// Seed a minimal two-chapter project so the multi-file atomic write has two

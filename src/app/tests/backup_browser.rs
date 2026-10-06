@@ -174,12 +174,15 @@ fn enter_opens_a_confirm_before_restoring() {
 
 #[test]
 fn a_damaged_project_offers_restore_from_the_latest_backup_on_open() {
-    let (mut app, _dir) = two_chapter_app("bb-damaged");
+    let (app, dir) = two_chapter_app("bb-damaged");
     let (data, bdir) = with_backups_dir(&app, "bb-damaged-data");
     seed_backup(&app, &bdir, "Book-2000-01-01-000000.zip", 3600);
+    drop(app);
 
-    // Damage the project: delete a chapter file the manifest still references.
-    fs::remove_file(app.project.root.join("two.md")).unwrap();
+    // Damage the project: delete a chapter file the manifest still references,
+    // then open it — the damage check reads what the open found.
+    fs::remove_file(dir.join("two.md")).unwrap();
+    let mut app = open_test_app(&dir);
 
     app.offer_backup_restore_on_damage();
     assert!(
@@ -217,9 +220,10 @@ fn an_intact_project_offers_nothing_on_open() {
 fn a_damaged_project_with_no_backup_reports_rather_than_offering() {
     // Damage but no backup to restore from: the author is told, not dropped into a
     // dead confirm.
-    let (mut app, _dir) = two_chapter_app("bb-damaged-nobak");
+    let dir = two_chapter_dir("bb-damaged-nobak");
+    fs::remove_file(dir.join("two.md")).unwrap();
+    let mut app = open_test_app(&dir);
     let (data, _bdir) = with_backups_dir(&app, "bb-damaged-nobak-data");
-    fs::remove_file(app.project.root.join("two.md")).unwrap();
 
     app.offer_backup_restore_on_damage();
     assert!(
@@ -234,6 +238,61 @@ fn a_damaged_project_with_no_backup_reports_rather_than_offering() {
         "reported the missing backup: {:?}",
         app.message
     );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn an_unreadable_chapter_offers_restore_on_launch() {
+    // A chapter file that exists but won't read (a directory in its place — a
+    // hard read error, unlike a missing file) is damage too. Driven through the
+    // real launch sequence, which makes the offer itself.
+    let (app, dir) = two_chapter_app("bb-unreadable");
+    let (data, bdir) = with_backups_dir(&app, "bb-unreadable-data");
+    seed_backup(&app, &bdir, "Book-2000-01-01-000000.zip", 3600);
+    drop(app);
+
+    fs::remove_file(dir.join("two.md")).unwrap();
+    fs::create_dir(dir.join("two.md")).unwrap();
+    let app = launch_test_app(&dir);
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmRestoreBackup)),
+        "an unreadable chapter offers a restore at launch"
+    );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn a_missing_chapter_offers_restore_on_launch() {
+    // The launch path end to end: a chapter file deleted while Quill was closed.
+    let (app, dir) = two_chapter_app("bb-missing-launch");
+    let (data, bdir) = with_backups_dir(&app, "bb-missing-launch-data");
+    seed_backup(&app, &bdir, "Book-2000-01-01-000000.zip", 3600);
+    drop(app);
+
+    fs::remove_file(dir.join("two.md")).unwrap();
+    let app = launch_test_app(&dir);
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmRestoreBackup)),
+        "a missing chapter offers a restore at launch"
+    );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn an_intact_project_offers_nothing_on_launch() {
+    let (app, dir) = two_chapter_app("bb-intact-launch");
+    let (data, bdir) = with_backups_dir(&app, "bb-intact-launch-data");
+    seed_backup(&app, &bdir, "Book-2000-01-01-000000.zip", 3600);
+    drop(app);
+
+    let app = launch_test_app(&dir);
+    assert!(matches!(app.mode, Mode::Insert), "nothing offered");
 
     config::set_data_dir(None);
     fs::remove_dir_all(&data).ok();

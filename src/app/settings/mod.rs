@@ -528,6 +528,7 @@ fn strip_config_field(section: &str, field: &str) -> std::io::Result<()> {
     let (updated, removed) = config::strip_value(&text, section, field);
     if removed {
         crate::atomic::write(&path, updated.as_bytes())?;
+        config::forget_parsed(); // a load session must not serve the pre-write file
     }
     Ok(())
 }

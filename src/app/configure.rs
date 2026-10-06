@@ -146,6 +146,9 @@ impl App {
     /// so a settings change takes effect without a restart. Shared by the
     /// describe-config path and the plain Settings menu (#592).
     pub(crate) fn apply_config_live(&mut self) {
+        // A fresh session: the write that prompted this reload has landed, so the
+        // editor and theme sections share one fresh parse of each file.
+        let _config_session = config::LoadSession::begin();
         let editor = config::EditorConfig::load();
         self.vim = editor.vim;
         self.smart_typography = editor.smart_typography;

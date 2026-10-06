@@ -93,6 +93,7 @@ mod health;
 mod imports;
 mod join_reflow;
 mod keychain;
+mod launch;
 mod marks;
 mod models;
 mod mouse;
@@ -173,11 +174,27 @@ pub fn app_scratch_dir(name: &str) -> PathBuf {
 pub fn open_test_app(dir: &Path) -> App {
     let project = Project::open(dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
+    pin_test_settings(App::new(buffer, project))
+}
+
+/// Launch the project at `dir` through the real startup sequence
+/// ([`App::launch`]: open on the remembered chapter, resume the cursor, make the
+/// on-open offers), with the same config pins as [`open_test_app`].
+pub fn launch_test_app(dir: &Path) -> App {
+    pin_test_settings(App::launch(dir).unwrap())
+}
+
+/// Pin every config-derived setting on a freshly built editor (#428) — see
+/// [`open_test_app`].
+fn pin_test_settings(mut app: App) -> App {
     app.vim = false;
     app.smart_typography = false;
     app.auto_pair = false;
-    app.mode = Mode::Insert;
+    // Vim's resting Normal mode back to Insert — but keep a prompt a launch-time
+    // offer (recovery, damage restore) opened.
+    if matches!(app.mode, Mode::Normal) {
+        app.mode = Mode::Insert;
+    }
     app.workflows = Vec::new();
     app.triggers = Triggers::default();
     // Swap in the in-memory clipboard so copy / paste tests never touch the real
@@ -188,6 +205,14 @@ pub fn open_test_app(dir: &Path) -> App {
 
 /// A two-chapter project on disk with distinct content per chapter.
 fn two_chapter_app(name: &str) -> (App, TempProject) {
+    let dir = two_chapter_dir(name);
+    let app = open_test_app(&dir);
+    (app, dir)
+}
+
+/// The files of [`two_chapter_app`]'s project (`one.md`/`two.md`), not yet
+/// opened — for tests that set up disk state before the launch.
+fn two_chapter_dir(name: &str) -> TempProject {
     let dir = app_scratch_dir(name);
     fs::write(
         Project::manifest_path(&dir),
@@ -198,9 +223,7 @@ fn two_chapter_app(name: &str) -> (App, TempProject) {
     .unwrap();
     fs::write(dir.join("one.md"), "first chapter\n").unwrap();
     fs::write(dir.join("two.md"), "second chapter\n").unwrap();
-
-    let app = open_test_app(&dir);
-    (app, TempProject::new(dir))
+    TempProject::new(dir)
 }
 
 /// A three-chapter project (`c0/c1/c2.md` = "alpha"/"beta"/"gamma") with the same

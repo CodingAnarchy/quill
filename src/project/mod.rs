@@ -38,8 +38,8 @@ use annotations::load_annotations;
 #[cfg(test)]
 pub use annotations::write_count as annotation_writes;
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
-use io::cache_chapter;
 pub use io::read_existing;
+use io::{cache_chapter, record_read};
 use lock::{InstanceLock, LockOutcome, RecheckOutcome};
 // Re-export the manifest types and helpers so every caller keeps using
 // `crate::project::…`. A glob so the whole manifest surface (including
@@ -157,6 +157,12 @@ pub struct Project {
     /// A description of the instance that already holds the project, set alongside
     /// `read_only`, for the open-time warning. `None` when this instance owns it.
     busy_holder: Option<String>,
+    /// Chapter files (root-relative, across every book) whose last read found
+    /// them missing or unreadable (#934). Filled as a side effect of the
+    /// per-chapter caching at open (and refreshed by any later re-cache of a
+    /// chapter), so the on-open damage check is a lookup over cached state rather
+    /// than a second open plus a re-read of every chapter file.
+    damaged_chapters: HashSet<String>,
 }
 
 impl Project {
@@ -272,6 +278,7 @@ impl Project {
             lock,
             read_only,
             busy_holder,
+            damaged_chapters: HashSet::new(),
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -302,10 +309,26 @@ impl Project {
                 continue;
             }
             for entry in &mut book.chapters {
-                cache_chapter(&root, entry, &marker);
+                let outcome = cache_chapter(&root, entry, &marker);
+                record_read(&mut project.damaged_chapters, &entry.file, outcome);
             }
         }
         Ok(project)
+    }
+
+    /// Whether every chapter file of the active book read cleanly the last time
+    /// it was cached (#934) — at open, for an untouched project. A chapter whose
+    /// file was missing (the manifest still lists it) or failed to read (a hard
+    /// error: permissions, an I/O fault, invalid UTF-8) makes this `false`. Reads
+    /// only the record [`cache_chapter`] left during open, so it's O(chapters) in
+    /// memory with no file I/O.
+    pub fn chapters_intact(&self) -> bool {
+        self.damaged_chapters.is_empty()
+            || self
+                .manifest
+                .chapters
+                .iter()
+                .all(|c| !self.damaged_chapters.contains(&c.file))
     }
 
     /// Whether this project was opened read-only because another live instance
@@ -407,6 +430,7 @@ impl Project {
             lock,
             read_only: false,
             busy_holder: None,
+            damaged_chapters: HashSet::new(),
         };
         if template.is_empty() {
             project.add_default_chapter()?;
@@ -739,6 +763,7 @@ impl Project {
             lock: None,
             read_only: false,
             busy_holder: None,
+            damaged_chapters: HashSet::new(),
         }
     }
 }

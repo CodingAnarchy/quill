@@ -47,7 +47,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub use ai::{AiConfig, BackendKind, ImageBackendKind, ImageConfig, Policy};
-pub use load::{global_config_warning, load_section};
+pub use load::{forget_parsed, global_config_warning, load_section, LoadSession};
 pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
 pub use types::{

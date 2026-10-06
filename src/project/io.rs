@@ -7,11 +7,13 @@
 //! (#565). Extracted from `mod.rs` to keep that file under the ~1,000-line
 //! convention (#562) — a pure move, no behavior change.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::atomic;
 use crate::buffer::count_words;
+use crate::config;
 use crate::frontmatter::{self, FrontMatter};
 use crate::text::count_matches;
 
@@ -45,6 +47,21 @@ fn import_staging_path(root: &Path, file: &str) -> PathBuf {
     root.join(format!(".import.{file}.{}.tmp", std::process::id()))
 }
 
+/// What [`cache_chapter`] found on disk for a chapter (#934): whether its file
+/// read, was missing, or failed to read. Recorded on the [`Project`] so the
+/// on-open damage check reads it from memory instead of touching every file again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChapterRead {
+    /// The file read cleanly (possibly empty).
+    Read,
+    /// No file at the path — cached as an empty chapter, but damage to the
+    /// project when the manifest still lists it.
+    Missing,
+    /// A hard read failure (permissions, an I/O fault, invalid UTF-8, a directory
+    /// in the file's place) — the cache is left as it was.
+    Unreadable,
+}
+
 /// Read `entry`'s file under `root` and refresh its cached word count, TODO
 /// count, and front-matter metadata (#331, #867). Shared by the active book's
 /// caching and the other books of a series, so every book's counts/roles are
@@ -56,15 +73,31 @@ fn import_staging_path(root: &Path, file: &str) -> PathBuf {
 /// untouched rather than recording the chapter as 0 words with its metadata
 /// dropped, which would corrupt the word/TODO rollups until the next good read
 /// (#871). A missing file is the legitimate "starts empty" case and caches as
-/// empty, exactly as before — [`read_existing`] draws that line.
-pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry, marker: &str) {
-    let Ok(text) = read_existing(&root.join(&entry.file)) else {
-        return; // hard read error — keep the last good cache, don't zero it out
+/// empty, exactly as before — the same line [`read_existing`] draws. Returns which
+/// of the three it was, for the damage record ([`record_read`]).
+pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry, marker: &str) -> ChapterRead {
+    let (text, outcome) = match fs::read_to_string(root.join(&entry.file)) {
+        Ok(text) => (text, ChapterRead::Read),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), ChapterRead::Missing),
+        // Hard read error — keep the last good cache, don't zero it out.
+        Err(_) => return ChapterRead::Unreadable,
     };
     let (front, body) = frontmatter::split(&text);
     entry.words = count_words(body);
     entry.todo = count_matches(body, marker);
     entry.cache_meta(front.map(FrontMatter::from_raw).as_ref());
+    outcome
+}
+
+/// Fold one [`cache_chapter`] outcome into a project's set of damaged chapter
+/// files (#934): a missing or unreadable file is added, a clean read clears it.
+/// Keyed by the chapter's root-relative file, so it survives reordering.
+pub fn record_read(damaged: &mut HashSet<String>, file: &str, outcome: ChapterRead) {
+    if outcome == ChapterRead::Read {
+        damaged.remove(file);
+    } else {
+        damaged.insert(file.to_string());
+    }
 }
 
 /// Pre-flight the swap renames of [`Project::write_chapters_atomic`] so the loop
@@ -206,12 +239,15 @@ impl Project {
     /// count, and front-matter metadata (status / summary / POV). Used at open and
     /// after an off-buffer edit to a single chapter. Adjusts the running word total
     /// by the delta (#867), so caching every chapter at open stays O(n) rather than
-    /// a full re-sum per chapter.
+    /// a full re-sum per chapter. Records whether the file was missing or
+    /// unreadable for the on-open damage check (#934).
     pub(super) fn read_chapter_cache(&mut self, index: usize) {
         if index < self.manifest.chapters.len() {
             let marker = self.manifest.todo_marker().to_string();
             let before = self.manifest.chapters[index].words;
-            cache_chapter(&self.root, &mut self.manifest.chapters[index], &marker);
+            let entry = &mut self.manifest.chapters[index];
+            let outcome = cache_chapter(&self.root, entry, &marker);
+            record_read(&mut self.damaged_chapters, &entry.file, outcome);
             let after = self.manifest.chapters[index].words;
             self.words_total = self.words_total + after - before;
         }
@@ -462,6 +498,10 @@ impl Project {
         } else {
             series::series_to_toml(&self.manifest, &self.books, self.active_book).map_err(err)?
         };
-        atomic::write(&Self::manifest_path(&self.root), text.as_bytes())
+        atomic::write(&Self::manifest_path(&self.root), text.as_bytes())?;
+        // The manifest carries the `[quill.*]` config overrides (#710): an open
+        // config load session must re-read it rather than serve the old parse.
+        config::forget_parsed();
+        Ok(())
     }
 }
