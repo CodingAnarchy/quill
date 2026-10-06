@@ -100,9 +100,9 @@ impl Buffer {
         true
     }
 
-    /// Swap the document for a snapshot (undo/redo). The rope changes wholesale,
-    /// so the incremental parse tree is stale — reparse fully rather than feeding
-    /// the parser edits it never saw.
+    /// Swap the document for a snapshot (undo/redo). The rope changes wholesale;
+    /// the reparse reconciles by content, so only the blocks that differ from the
+    /// current parse go back through tree-sitter.
     fn restore(&mut self, snap: Snapshot) {
         self.rope = snap.rope;
         self.cursor = snap.cursor;
@@ -111,7 +111,7 @@ impl Buffer {
         self.dirty = true;
         self.clamp_cursor();
         self.word_count_cache.set(None); // the whole document changed (#151)
-        self.syntax = Syntax::new(&self.rope.to_string());
+        self.syntax.reparse(&self.rope);
         self.syntax_dirty = false;
         // The text changed wholesale: a new content revision (so the recovery
         // sidecar captures the restored text), but `edits` is left alone — Vim's

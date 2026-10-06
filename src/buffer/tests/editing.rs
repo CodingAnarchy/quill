@@ -1,5 +1,5 @@
-//! The edit path: incremental syntax highlighting through edits (the InputEdit
-//! bookkeeping in edit_insert/edit_remove), undo/redo grouping (#145), soft-wrap
+//! The edit path: syntax highlighting kept correct through edits (the
+//! per-block reparse after edit_insert/edit_remove), undo/redo grouping (#145), soft-wrap
 //! navigation (#143), and the modeless editing keys (#641). Includes the
 //! keystroke/reparse perf guards that keep typing decoupled from document size.
 
@@ -7,10 +7,10 @@ use super::*;
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 
-use crate::testutil::perf_budget_ms;
+use crate::testutil::{perf_budget_ms, perf_budget_us};
 
-// The syntax highlights must stay correct through incremental edits — this
-// exercises the InputEdit bookkeeping in edit_insert/edit_remove.
+// The syntax highlights must stay correct through edits — this exercises the
+// reparse that follows edit_insert/edit_remove.
 use crate::syntax::HighlightKind;
 
 fn kinds(buf: &Buffer) -> Vec<HighlightKind> {
@@ -37,20 +37,36 @@ fn typing_a_heading_updates_highlights_incrementally() {
 // for the single-chapter view, at most ~3 for the continuous view — never
 // the whole novel.
 
+/// `chapters` chapters of realistic prose: a heading, then `paragraphs`
+/// blank-line-separated paragraphs of a few sentences with inline emphasis —
+/// the shape a novel actually has. (One block per paragraph matters: the
+/// Markdown parse does per-block work, so a corpus of a few giant paragraphs
+/// would understate it.)
+fn prose_chapters(chapters: usize, paragraphs: usize) -> String {
+    let mut text = String::new();
+    for ch in 0..chapters {
+        write!(text, "# Chapter {ch}\n\n").unwrap();
+        for p in 0..paragraphs {
+            write!(
+                text,
+                "The night was *dark* and the road was **long** indeed, paragraph {p}. \
+                 She walked on without a word to anyone she passed. \
+                 Somewhere ahead a light burned in a window.\n\n"
+            )
+            .unwrap();
+        }
+    }
+    text
+}
+
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn keystroke_is_decoupled_from_document_size() {
-    // A keystroke only *records* the edit; the reparse is deferred. So it
-    // must be cheap regardless of buffer size. Stress it far past the real
-    // ~3-chapter cap to prove the cost is in the edit, not the document.
-    let mut text = String::new();
-    for ch in 0..150 {
-        write!(text, "# Chapter {ch}\n\n").unwrap();
-        for _ in 0..50 {
-            text.push_str("The night was *dark* and the road was **long** indeed.\n");
-        }
-        text.push('\n');
-    }
+    // A keystroke only marks the parse stale; the reparse is deferred to the
+    // settled pass. So it must be cheap regardless of buffer size. Stress it far
+    // past the real ~3-chapter cap (150 chapters, ~4k paragraphs) to prove the
+    // cost is in the edit, not the document.
+    let text = prose_chapters(150, 25);
     let words = text.split_whitespace().count();
 
     let path = temp_path("perf-big.md");
@@ -66,7 +82,7 @@ fn keystroke_is_decoupled_from_document_size() {
     let dt = t.elapsed();
 
     println!("keystroke(record-only) on {words} words = {dt:?}");
-    assert!(dt.as_millis() < perf_budget_ms(4), "keystroke took {dt:?}");
+    assert!(dt.as_millis() < perf_budget_ms(1), "keystroke took {dt:?}");
 
     // The live word count is maintained incrementally (#868), so reading it
     // after a keystroke must also stay decoupled from document size — no
@@ -81,7 +97,7 @@ fn keystroke_is_decoupled_from_document_size() {
 
     println!("keystroke + live word count on {words} words = {dt:?}");
     assert!(
-        dt.as_millis() < perf_budget_ms(4),
+        dt.as_millis() < perf_budget_ms(1),
         "keystroke + count took {dt:?}"
     );
     // And the incrementally-maintained count is byte-for-byte the same the
@@ -93,31 +109,27 @@ fn keystroke_is_decoupled_from_document_size() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn reparse_is_fast_at_window_size() {
-    // Realistic worst case: ~3 long chapters live at once (continuous view).
-    let mut text = String::new();
-    for ch in 0..3 {
-        write!(text, "# Chapter {ch}\n\n").unwrap();
-        for _ in 0..150 {
-            text.push_str("The night was *dark* and the road was **long** indeed.\n");
-        }
-        text.push('\n');
-    }
+    // Realistic worst case: ~3 long chapters live at once (continuous view),
+    // ~13k words in blank-line-separated paragraphs.
+    let text = prose_chapters(3, 150);
     let words = text.split_whitespace().count();
 
     let path = temp_path("perf-window.md");
     write(&path, &text);
+    let t = Instant::now();
     let mut buf = Buffer::from_path(&path).unwrap();
+    let cold = t.elapsed();
     buf.cursor = Cursor {
         line: buf.line_count() / 2,
         col: 0,
     };
 
-    // Best-of-N: each reparse is genuinely ~8ms, well under a frame, but a
+    // The typical reparse — after a keystroke — sends only the edited block back
+    // through tree-sitter; every other block's parse is reused. Best-of-N: a
     // single sample is dominated by one-off noise (scheduling, CPU ramp,
-    // first-call allocation) that occasionally tips it over 16ms. Noise only
-    // ever *adds* time, so the minimum across runs reflects the true compute
-    // cost. Each run needs a fresh edit — `refresh_syntax` is a no-op when the
-    // syntax isn't dirty.
+    // first-call allocation); noise only ever *adds* time, so the minimum across
+    // runs reflects the true compute cost. Each run needs a fresh edit —
+    // `refresh_syntax` is a no-op when the syntax isn't dirty.
     let mut best = Duration::MAX;
     for _ in 0..5 {
         buf.insert_char('X');
@@ -125,11 +137,28 @@ fn reparse_is_fast_at_window_size() {
         buf.refresh_syntax();
         best = best.min(t.elapsed());
     }
-
-    println!("reparse on {words} words = {best:?} (best of 5)");
+    println!("reparse after a keystroke on {words} words = {best:?} (best of 5)");
+    // A regression to re-parsing the whole window per keystroke (~10ms+ here)
+    // trips this.
     assert!(
-        best.as_millis() < perf_budget_ms(16),
-        "reparse took {best:?}"
+        best.as_micros() < perf_budget_us(2000),
+        "keystroke reparse took {best:?}"
+    );
+
+    // The worst case: opening a fence near the top turns the rest of the window
+    // into code, so everything after it is re-parsed. Like the cold open, that
+    // must still fit in a frame.
+    buf.cursor = Cursor { line: 2, col: 0 };
+    for c in "```\n".chars() {
+        buf.insert_char(c);
+    }
+    let t = Instant::now();
+    buf.refresh_syntax();
+    let fence = t.elapsed();
+    println!("cold parse = {cold:?}; reparse after an unclosed fence = {fence:?}");
+    assert!(
+        fence.as_millis() < perf_budget_ms(16),
+        "fence reparse took {fence:?}"
     );
     fs::remove_file(&path).ok();
 }

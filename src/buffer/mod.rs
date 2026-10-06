@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ropey::Rope;
-use tree_sitter::{InputEdit, Point};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::atomic;
@@ -68,9 +67,9 @@ pub struct Buffer {
     /// through short/wrapped rows doesn't permanently collapse the cursor toward
     /// column 0. In display cells because movement is by *visual* row (#143).
     goal_x: Option<usize>,
-    /// Live incremental Markdown parse. Edits are *recorded* into it on the
-    /// keystroke path; the actual reparse runs via [`Buffer::refresh_syntax`]
-    /// once typing goes idle, so a keystroke never blocks on a parse.
+    /// Live Markdown parse. An edit only marks it dirty; the reparse runs via
+    /// [`Buffer::refresh_syntax`] once per input batch, so a keystroke never
+    /// blocks on a parse (and the reparse touches only the changed block).
     syntax: Syntax,
     /// Set when an edit has been recorded but not yet reparsed.
     syntax_dirty: bool,
@@ -374,14 +373,14 @@ impl Buffer {
 
     // --- Editing -----------------------------------------------------------
 
-    /// Insert text at a char index and tell the parser exactly what changed, so
-    /// the reparse can be incremental. Does not touch the cursor.
+    /// Insert text at a char index and mark the parse stale (the next
+    /// [`refresh_syntax`](Self::refresh_syntax) reparses only the changed
+    /// block). Does not touch the cursor.
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
         self.checkpoint();
         self.edits = self.edits.wrapping_add(1);
         self.revision = fresh_revision();
         let start_byte = self.rope.char_to_byte(char_idx);
-        let start_position = point_at_byte(&self.rope, start_byte);
 
         // Maintain the word count incrementally (#868): re-segment only the
         // line(s) the insert touches, not the whole chapter. A word never
@@ -398,30 +397,19 @@ impl Buffer {
         self.adjust_word_count(touched_line, touched_line + added_lines, old_span_words);
 
         let new_end_byte = start_byte + text.len();
-        let edit = InputEdit {
-            start_byte,
-            old_end_byte: start_byte,
-            new_end_byte,
-            start_position,
-            old_end_position: start_position,
-            new_end_position: point_at_byte(&self.rope, new_end_byte),
-        };
-        self.syntax.record_edit(&edit);
         self.anchor_edits
             .push((start_byte, start_byte, new_end_byte));
         self.syntax_dirty = true;
     }
 
-    /// Remove the char range `[start, end)` and tell the parser what changed.
-    /// Does not touch the cursor.
+    /// Remove the char range `[start, end)` and mark the parse stale. Does not
+    /// touch the cursor.
     fn edit_remove(&mut self, start: usize, end: usize) {
         self.checkpoint();
         self.edits = self.edits.wrapping_add(1);
         self.revision = fresh_revision();
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
-        let start_position = point_at_byte(&self.rope, start_byte);
-        let old_end_position = point_at_byte(&self.rope, old_end_byte);
 
         // Incremental word count (#868): the removal spans lines
         // `[first, last]`; after it, they collapse onto `first`. Re-segment only
@@ -434,15 +422,6 @@ impl Buffer {
 
         self.adjust_word_count(first_line, first_line, old_span_words);
 
-        let edit = InputEdit {
-            start_byte,
-            old_end_byte,
-            new_end_byte: start_byte,
-            start_position,
-            old_end_position,
-            new_end_position: point_at_byte(&self.rope, start_byte),
-        };
-        self.syntax.record_edit(&edit);
         self.anchor_edits
             .push((start_byte, old_end_byte, start_byte));
         self.syntax_dirty = true;
@@ -923,9 +902,16 @@ impl Buffer {
     pub fn cursor_byte(&self) -> usize {
         self.rope.char_to_byte(self.cursor_char_idx())
     }
+
+    /// The line a byte offset falls on (clamped to the document end). O(log n)
+    /// on the rope — no line copy or grapheme scan, unlike
+    /// [`cursor_at_byte`](Self::cursor_at_byte), for callers that only need the
+    /// line.
+    pub fn line_of_byte(&self, byte: usize) -> usize {
+        self.rope.byte_to_line(byte.min(self.rope.len_bytes()))
+    }
 }
 
-/// A tree-sitter [`Point`] (row, byte-column-within-line) for a byte offset.
 /// Byte offset of grapheme column `col` within a single line's `text` (the line
 /// end if `col` is past the last grapheme).
 fn col_to_byte(text: &str, col: usize) -> usize {
@@ -937,12 +923,6 @@ fn col_to_byte(text: &str, col: usize) -> usize {
 /// Grapheme column of byte offset `byte` within a single line's `text`.
 fn byte_to_col(text: &str, byte: usize) -> usize {
     text[..byte.min(text.len())].graphemes(true).count()
-}
-
-fn point_at_byte(rope: &Rope, byte: usize) -> Point {
-    let row = rope.byte_to_line(byte);
-    let column = byte - rope.line_to_byte(row);
-    Point { row, column }
 }
 
 /// Count the words in a string (Unicode word segmentation). Shared by the live
