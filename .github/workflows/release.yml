@@ -55,10 +55,18 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # No toolchain action: rustup reads `rust-toolchain.toml` (the pin, #1200),
+      # so the target must be added to *that* toolchain. Installing `@stable` and
+      # adding the target there left cargo on the pinned version with no std for
+      # the x86_64-apple-darwin cross build (macos-latest is arm64) — E0463 "can't
+      # find crate for `core`" in the 1.2.0 release. `cargo --version` makes the
+      # rustup proxy install whichever toolchain applies (the pin, or default
+      # stable for a pre-pin tag rebuilt via workflow_dispatch), then the target
+      # goes onto it.
+      - name: Install Rust target
+        run: |
+          cargo --version
+          rustup target add ${{ matrix.target }}
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
