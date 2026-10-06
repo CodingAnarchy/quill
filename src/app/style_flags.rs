@@ -13,25 +13,63 @@
 //! chapter when the current one is exhausted, reporting clearly at the ends of the
 //! manuscript.
 
-use crate::analysis::{flag_ranges, FlagCategory};
+use std::sync::Arc;
+
+use crate::analysis::{flag_ranges, FlagCategory, WordLists};
 use crate::mode::{Command, Mode, Palette, PaletteItem};
 
 use super::App;
 
+/// What a style-flag scan depends on (#1001): the edit buffer's content revision
+/// (process-unique, so it also names which buffer), the category, the run-on
+/// threshold, and the word lists (by identity — the cache rebuilds them as a new
+/// allocation when the `[analysis]` section changes, and holding the `Arc` here
+/// keeps that address from being reused).
+pub(super) struct StyleKey {
+    rev: u64,
+    category: FlagCategory,
+    threshold: usize,
+    lists: Arc<WordLists>,
+}
+
+impl StyleKey {
+    fn matches(&self, other: &Self) -> bool {
+        self.rev == other.rev
+            && self.category == other.category
+            && self.threshold == other.threshold
+            && Arc::ptr_eq(&self.lists, &other.lists)
+    }
+}
+
 impl App {
-    /// Recompute the active category's flag ranges for the edit buffer (#1001), off
-    /// the keystroke path. A no-op (and empty) when no sweep is active, so it costs
-    /// nothing until the author turns one on — and even then it's window-scoped, like
-    /// the spell pass. Runs on the idle tick and on demand before a step.
+    /// Bring the active category's flag ranges for the edit buffer up to date
+    /// (#1001), off the keystroke path. A no-op (and empty) when no sweep is active,
+    /// so it costs nothing until the author turns one on — and even then it's
+    /// window-scoped, like the spell pass. Runs on the idle tick and on demand
+    /// before a step; skips the rescan when none of its inputs ([`StyleKey`]) moved
+    /// since the last one, so a quiet pass after a cursor move costs nothing.
     pub(crate) fn refresh_style_flags(&mut self) {
         let Some(category) = self.style_flag_category else {
             self.style_flags.clear();
+            self.style_flags_key = None;
             return;
         };
-        let threshold = Some(self.project.manifest.run_on_threshold());
-        let lists = self.analysis_word_lists();
+        let key = StyleKey {
+            rev: self.edit_buffer().revision(),
+            category,
+            threshold: self.project.manifest.run_on_threshold(),
+            lists: self.analysis_word_lists(),
+        };
+        if self
+            .style_flags_key
+            .as_ref()
+            .is_some_and(|k| k.matches(&key))
+        {
+            return;
+        }
         let text = self.edit_buffer().text();
-        self.style_flags = flag_ranges(&text, category, &lists, threshold);
+        self.style_flags = flag_ranges(&text, category, &key.lists, Some(key.threshold));
+        self.style_flags_key = Some(key);
     }
 
     /// Open the category picker (#1001): the report's flag axes as a pick-list, plus
@@ -108,6 +146,7 @@ impl App {
         }
         self.style_flag_category = None;
         self.style_flags.clear();
+        self.style_flags_key = None;
         self.message = Some("Style-flag sweep off.".into());
     }
 

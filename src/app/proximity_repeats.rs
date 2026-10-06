@@ -11,23 +11,44 @@
 //! author decides every change (the AI/analysis boundary). Off by default and
 //! toggled deliberately, so it's a pass the author opts into, not always-on noise.
 
-use crate::analysis::proximity_repeats;
+use std::sync::Arc;
+
+use crate::analysis::{proximity_repeats, WordLists};
 
 use super::App;
+
+/// What the proximity scan depends on (#1002): the edit buffer's content revision
+/// (process-unique, so it also names which buffer) and the word lists by identity
+/// (see [`StyleKey`](super::style_flags::StyleKey)).
+pub(super) struct ProximityKey {
+    rev: u64,
+    lists: Arc<WordLists>,
+}
 
 impl App {
     /// Recompute the near-proximity word repeats for the edit buffer (#1002), off
     /// the keystroke path. A no-op (and empty) when the marking is off, so it costs
     /// nothing until the author turns it on — and even then it's window-scoped, like
-    /// the spell pass and the #1001 flag sweep. Runs on the idle tick.
+    /// the spell pass and the #1001 flag sweep. Runs on the idle tick; skips the
+    /// rescan when neither the text nor the word lists changed since the last one.
     pub(crate) fn refresh_proximity_repeats(&mut self) {
         if !self.proximity_repeats_on {
             self.proximity_repeats.clear();
+            self.proximity_key = None;
             return;
         }
+        let rev = self.edit_buffer().revision();
         let lists = self.analysis_word_lists();
+        if self
+            .proximity_key
+            .as_ref()
+            .is_some_and(|k| k.rev == rev && Arc::ptr_eq(&k.lists, &lists))
+        {
+            return;
+        }
         let text = self.edit_buffer().text();
         self.proximity_repeats = proximity_repeats(&text, &lists);
+        self.proximity_key = Some(ProximityKey { rev, lists });
     }
 
     /// Toggle the proximity-repeat marking on or off (#1002). Turning it on computes
@@ -46,6 +67,7 @@ impl App {
             });
         } else {
             self.proximity_repeats.clear();
+            self.proximity_key = None;
             self.message = Some("Proximity repeats off.".into());
         }
     }

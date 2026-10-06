@@ -187,9 +187,14 @@ impl App {
     /// target is set. The live indicator itself is read fresh by the status bar
     /// each frame from cached counts, so this only handles the crossing.
     pub(crate) fn tick_session_target(&mut self) {
+        // Count only while a target is waiting to be met: the count resolves the
+        // active chapter (an O(chapters) lookup), and this runs every loop tick.
+        if !self.session_target.as_ref().is_some_and(|t| !t.reached) {
+            return;
+        }
         let current = self.project_word_count();
         if let Some(t) = self.session_target.as_mut() {
-            if !t.reached && t.is_met(current) {
+            if t.is_met(current) {
                 t.reached = true;
                 let target = t.target;
                 self.message = Some(format!("Session target reached — {target} words ✓"));

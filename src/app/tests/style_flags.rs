@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::analysis::FlagCategory;
+use crate::project::Analysis;
 
 /// A three-chapter project whose bodies carry a known number of `-ly` adverbs, so
 /// the sweep's hits sit at predictable places. Chapter one has two, chapter two
@@ -413,6 +414,69 @@ fn editing_invalidates_the_proximity_cache_until_the_next_idle_tick() {
     assert!(
         app.proximity_repeats.iter().all(|&(_, e)| e <= text.len()),
         "every recomputed span indexes live prose: {:?}",
+        app.proximity_repeats
+    );
+}
+
+#[test]
+fn a_quiet_pass_with_nothing_changed_keeps_the_cached_marks() {
+    // A cursor move changes nothing the style-flag or proximity scan reads, so the
+    // quiet pass leaves both caches alone (marker values stand in for them, so a
+    // rescan would visibly replace them). An edit still forces a fresh scan.
+    let (mut app, _dir) = adverb_app("flag-quiet-skip");
+    app.start_style_flag_sweep(FlagCategory::Adverbs);
+    app.toggle_proximity_repeats();
+    app.on_idle();
+    let marker = vec![(0, 1)];
+    app.style_flags.clone_from(&marker);
+    app.proximity_repeats.clone_from(&marker);
+
+    app.on_key(key(KeyCode::Right));
+    app.on_quiet();
+    assert_eq!(app.style_flags, marker, "no style rescan for a cursor move");
+    assert_eq!(app.proximity_repeats, marker, "no proximity rescan either");
+
+    type_str(&mut app, "X");
+    app.on_quiet();
+    let text = app.buffer.text();
+    assert_eq!(app.style_flags.len(), 2, "rescanned after the edit");
+    assert!(
+        app.style_flags
+            .iter()
+            .all(|&(s, e)| text[s..e].ends_with("ly")),
+        "{:?} over {text:?}",
+        app.style_flags
+    );
+}
+
+#[test]
+fn a_stopword_change_reaches_the_next_quiet_pass() {
+    // The word lists are cached against the manifest's `[analysis]` section; a
+    // change there (settings edit, config reload) must rebuild them, so a word
+    // made a stopword stops being marked as a near repeat — with the text unchanged.
+    let dir = app_scratch_dir("proximity-stopword-change");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "She turned, then he turned.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir);
+    app.toggle_proximity_repeats();
+    assert!(
+        !app.proximity_repeats.is_empty(),
+        "the close repeat is marked"
+    );
+
+    app.project.manifest.analysis = Some(Analysis {
+        stopwords_add: vec!["turned".into()],
+        ..Analysis::default()
+    });
+    app.on_quiet();
+    assert!(
+        app.proximity_repeats.is_empty(),
+        "a stopword is never a near repeat: {:?}",
         app.proximity_repeats
     );
 }

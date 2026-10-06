@@ -17,9 +17,35 @@
 //! author is still working — a finding whose chapter is the one being actively
 //! edited is left alone until the edit settles (reconcile, don't overwrite).
 
+use std::fs;
+use std::time::{Duration, SystemTime};
+
 use super::super::*;
 use super::RecheckRequest;
 use crate::mode::AiAction;
+
+/// How recently a file may have been modified and still have its digest memoized.
+/// A filesystem's mtime can be coarse (a few ms on Linux, seconds on some), so a
+/// second same-size write landing in the same tick as the one we stamped would
+/// look unchanged. Refusing to trust a stamp this fresh (the "racy git" rule) means
+/// any write after the stamp necessarily moves the mtime.
+const RACY_WINDOW: Duration = Duration::from_secs(2);
+
+/// Where a chapter's text currently comes from, as a cheap change stamp: the live
+/// buffer's content revision, or the chapter file's size and mtime.
+#[derive(PartialEq, Eq)]
+enum TextStamp {
+    Buffer(u64),
+    File(u64, SystemTime),
+}
+
+/// A memoized chapter digest for "verify on idle" (#1053): valid while the
+/// chapter's [`TextStamp`] is unchanged, so an idle pass re-reads and re-digests
+/// only the chapters that actually moved.
+pub(in crate::app) struct DigestMemo {
+    stamp: TextStamp,
+    digest: String,
+}
 
 /// One scoped re-check the idle plan will run: the built request plus the pass and
 /// book its response is parsed under, so the worker maps the fresh findings back to
@@ -51,7 +77,7 @@ impl App {
     fn baseline_finding_chapters(&mut self, finding: &Finding) {
         let book = self.finding_book(finding);
         for file in self.finding_chapter_files(finding) {
-            let digest = ai::incremental::digest(&self.book_chapter_text(book, &file));
+            let digest = self.chapter_digest(book, &file);
             self.verify_baselines.insert((book, file), digest);
         }
     }
@@ -167,9 +193,51 @@ impl App {
             let Some(baseline) = self.verify_baselines.get(&(book, file.clone())) else {
                 return false;
             };
-            let current = ai::incremental::digest(&self.book_chapter_text(book, file));
-            &current != baseline
+            &self.chapter_digest(book, file) != baseline
         })
+    }
+
+    /// The content digest of chapter `file` in book `book`, as
+    /// [`book_chapter_text`](Self::book_chapter_text) reads it — memoized against
+    /// the text's [`TextStamp`], so an idle pass where nothing changed costs a
+    /// `stat` per chapter rather than a read and a hash.
+    fn chapter_digest(&self, book: usize, file: &str) -> String {
+        let stamp = self.chapter_text_stamp(book, file);
+        let key = (book, file.to_string());
+        if let Some(stamp) = &stamp {
+            if let Some(memo) = self.verify_digests.borrow().get(&key) {
+                if &memo.stamp == stamp {
+                    return memo.digest.clone();
+                }
+            }
+        }
+        let digest = ai::incremental::digest(&self.book_chapter_text(book, file));
+        if let Some(stamp) = stamp {
+            let memo = DigestMemo {
+                stamp,
+                digest: digest.clone(),
+            };
+            self.verify_digests.borrow_mut().insert(key, memo);
+        }
+        digest
+    }
+
+    /// The change stamp for the text [`book_chapter_text`](Self::book_chapter_text)
+    /// would return: the live buffer's revision when that's where the text comes
+    /// from, otherwise the file's size and mtime. `None` when it can't be stamped
+    /// reliably — unreadable metadata, or an mtime inside [`RACY_WINDOW`] — so the
+    /// caller digests afresh rather than trust it.
+    fn chapter_text_stamp(&self, book: usize, file: &str) -> Option<TextStamp> {
+        if book == self.project.active_book() {
+            let index = self.project.index_of_file(file)?;
+            if index == self.project.active_index() && self.focus_shows_active_chapter() {
+                return Some(TextStamp::Buffer(self.buffer.revision()));
+            }
+        }
+        let meta = fs::metadata(self.project.root.join(file)).ok()?;
+        let modified = meta.modified().ok()?;
+        let age = SystemTime::now().duration_since(modified).ok()?;
+        (age >= RACY_WINDOW).then_some(TextStamp::File(meta.len(), modified))
     }
 
     /// The idle-verification plan's scoped requests (#1053), for tests to assert the

@@ -129,6 +129,38 @@ fn a_submitted_batch_id_is_persisted_and_reconcilable() {
     assert_eq!(record.batches[0].slug, "ai:continuity");
 }
 
+#[test]
+fn the_idle_reconcile_sees_batches_submitted_and_dropped_since_it_last_looked() {
+    // The idle reconcile keeps the durable record in memory rather than re-reading
+    // it every pass; a submit or reconcile this process handles must still reach it,
+    // so a new batch gets polled and a finished one is never re-polled.
+    let (mut app, _dir) = two_chapter_app("batch-record-cache");
+    enable_batch_update(&mut app);
+    assert!(
+        app.reconcile_batch_ids_for_test().is_empty(),
+        "nothing queued"
+    );
+
+    app.apply_batch_results_for_test(vec![BatchTaskResult::Submitted(Ok(PendingBatch {
+        batch_id: "batch-ai:continuity-0".into(),
+        slug: "ai:continuity".into(),
+        book: 0,
+        digests: app.book_digests(0),
+        submitted: "2026-06-17".into(),
+    }))]);
+    assert_eq!(
+        app.reconcile_batch_ids_for_test(),
+        vec!["batch-ai:continuity-0".to_string()],
+        "the submitted batch is polled next"
+    );
+
+    app.apply_batch_results_for_test(vec![BatchTaskResult::failed("ai:continuity", 0, "expired")]);
+    assert!(
+        app.reconcile_batch_ids_for_test().is_empty(),
+        "a dropped batch is not polled again"
+    );
+}
+
 // --- Reconcile outcomes (#950) ----------------------------------------------
 
 #[test]
