@@ -528,3 +528,36 @@ fn a_short_prompt_stays_on_the_status_line() {
     assert!(rows[9].contains("Note on") && rows[9].contains("check this"));
     assert!(rows[8].trim().is_empty(), "no extra row:\n{screen}");
 }
+
+#[test]
+fn a_scrolled_report_overlay_shows_the_window_at_its_offset() {
+    // An unwrapped overlay renders only its visible rows (not a clone of the whole
+    // report per frame); the window must still start at the scroll offset and end
+    // at the box's interior height, including at the clamped bottom.
+    let mut app = app_with("x\n");
+    let lines: Vec<Line<'static>> = (0..100).map(|i| Line::raw(format!("row {i:03}"))).collect();
+    let mut overlay = Overlay::report("progress", lines);
+    overlay.scroll = 40;
+    app.overlay = Some(overlay);
+    let screen = render(&app, 40, 12); // 10 interior rows
+    assert!(
+        !screen.contains("row 039"),
+        "rows above the offset are off:\n{screen}"
+    );
+    assert!(
+        screen.contains("row 040") && screen.contains("row 049"),
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("row 050"),
+        "rows past the box are off:\n{screen}"
+    );
+
+    app.overlay.as_mut().unwrap().scroll = 500; // clamped to the last screenful
+    let screen = render(&app, 40, 12);
+    assert!(
+        screen.contains("row 090") && screen.contains("row 099"),
+        "{screen}"
+    );
+    assert!(!screen.contains("row 089"), "{screen}");
+}

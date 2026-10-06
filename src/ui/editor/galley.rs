@@ -22,6 +22,7 @@ use ratatui::{
 use crate::app::App;
 use crate::buffer::Buffer;
 
+use super::ranges::Overlapping;
 use super::rows::{row_count, row_kind, styled_line, SpanHighlights};
 use super::{centered_column, ByteRange};
 
@@ -137,7 +138,7 @@ pub fn render_galley(frame: &mut Frame, area: Rect, app: &App) {
         spell: empty,
         style_flags: empty,
         proximity: empty,
-        annotations: empty,
+        annotations: &Overlapping::default(),
         focus: None,
     };
 

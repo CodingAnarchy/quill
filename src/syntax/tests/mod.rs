@@ -363,3 +363,53 @@ fn headings_are_in_document_order_and_empty_when_none() {
     let starts: Vec<usize> = s.headings().iter().map(|h| h.start).collect();
     assert!(starts.windows(2).all(|w| w[0] <= w[1]));
 }
+
+/// The indexed lookups (`conceal_ranges` finding the cursor's enclosing spans by
+/// binary search, `highlights_in` skipping spans that end before the window) must
+/// agree exactly with a naive scan of every marker / highlight — at every cursor
+/// byte, over documents with nesting, indented and quoted fences, scene breaks,
+/// headings, and emphasis spanning lines.
+#[test]
+fn indexed_lookups_match_a_naive_scan_everywhere() {
+    let docs = [
+        "# Title *em*\n\nPlain *one* and **two** and ***both*** here.\n\
+         A _span\nacross_ lines and **nested *inner* run**.\n\n---\n\nAfter.\n",
+        "Intro.\n\n  ```rust\n  let x = *y*;\n  ```\n\nText *a* b.\n\n\
+         > ```\n> quoted\n> ```\n\n* * *\n\n~~~\nraw\n~~~\n\nEnd **x**.\n",
+        "- item *one*\n- item **two** with *more*\n\n```\nunclosed *x*\n",
+    ];
+    for doc in docs {
+        let syntax = Syntax::new(doc);
+        for b in 0..=doc.len() {
+            let naive: Vec<(usize, usize)> = if syntax
+                .markers
+                .iter()
+                .any(|m| m.span_start <= b && b <= m.span_end)
+            {
+                syntax
+                    .markers
+                    .iter()
+                    .filter(|m| !(m.span_start <= b && b <= m.span_end))
+                    .map(|m| (m.delim_start, m.delim_end))
+                    .collect()
+            } else {
+                syntax.conceal_all.to_vec()
+            };
+            assert_eq!(
+                syntax.conceal_ranges(Some(b)).to_vec(),
+                naive,
+                "conceal at byte {b} of {doc:?}"
+            );
+            for e in b..=(b + 12).min(doc.len() + 1) {
+                let fast: Vec<Highlight> = syntax.highlights_in(b, e).copied().collect();
+                let slow: Vec<Highlight> = syntax
+                    .highlights
+                    .iter()
+                    .filter(|h| h.start < e && h.end > b)
+                    .copied()
+                    .collect();
+                assert_eq!(fast, slow, "highlights in {b}..{e} of {doc:?}");
+            }
+        }
+    }
+}

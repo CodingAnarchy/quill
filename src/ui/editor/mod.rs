@@ -21,6 +21,7 @@ mod focus;
 mod galley;
 mod header;
 mod margin;
+mod ranges;
 mod rows;
 
 pub use galley::{galley_last_top, galley_next_top, galley_prev_top};
@@ -30,6 +31,7 @@ pub use header::HeaderCache;
 
 use focus::{first_row_indent, focus_paragraph, starts_paragraph};
 use header::header_inserts;
+use ranges::{is_sorted_disjoint, Overlapping};
 use rows::{
     fold_glyph_cells, folded_heading_line, record_row, row_count, row_kind, row_starts_for,
     styled_line, visible_width_before, RowFlags, RowKind, SpanHighlights,
@@ -102,7 +104,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // Inline author annotations (#302/#370): the anchored spans get a tinted
     // background, in both the single-chapter and continuous views (the live ranges
     // are buffer-absolute against whichever buffer is active).
-    let annotations = app.annotation_ranges();
+    // Indexed once per frame for row-window lookup — notes may overlap or nest.
+    let annotations = Overlapping::new(app.annotation_ranges());
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(
@@ -128,6 +131,20 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         annotations: &annotations,
         focus,
     };
+    // The renderer narrows these to each row by binary search, which needs each
+    // list start-sorted and pairwise disjoint (see `ranges::disjoint_within`).
+    debug_assert!(
+        [
+            &highlights.conceal[..],
+            highlights.matches,
+            highlights.spell,
+            highlights.style_flags,
+            highlights.proximity,
+        ]
+        .iter()
+        .all(|l| is_sorted_disjoint(l)),
+        "a highlight range list is unsorted or overlapping"
+    );
     // Heading/scene folds (#975): the lines a collapsed section hides (rendered as
     // zero rows) and the headings that carry a collapse marker. Display-only —
     // computed off the syntax cache, never touching the buffer.
@@ -212,7 +229,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         spell: &[],
         style_flags: &[],
         proximity: &[],
-        annotations: &[],
+        annotations: &Overlapping::default(),
         focus: None,
     };
     let inserts = scene_break_inserts(buffer);

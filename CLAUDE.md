@@ -125,11 +125,17 @@ What they assert:
   window, the reparse after a keystroke re-parses only the edited block (see
   `src/syntax/segment.rs`; ~0.2ms, budget 2ms), and the worst case — an
   unclosed fence near the top, re-parsing the rest — stays under a 16ms frame.
-- `render_stays_within_a_frame` (`ui.rs`) — a full `draw()` (large chapter +
-  a many-chapter outline pane) stays under one frame. The status bar's live
-  word count is O(document) per draw; the pane reads cached per-chapter
-  metadata, never the files. If rendering ever re-reads files or does
-  per-chapter work proportional to the novel, this catches it.
+- `render_stays_within_a_frame` (`ui/tests/perf.rs`) — a full `draw()` (large
+  chapter + a many-chapter outline pane) stays under one frame. The main pass
+  renders unfolded, wrapped prose with emphasis on every line plus spell flags,
+  proximity repeats, style flags, and annotations, and a second adds an active
+  search with thousands of matches; both must stay under 4ms (~0.5ms today), so
+  per-character scans of whole-buffer highlight lists (~45ms here) trip it —
+  narrow each list to the row by binary search instead. Folded sections, a modal,
+  a scroll offset, and the assistant pane are timed against the 16ms frame. The
+  status bar's live word count is O(document) per draw; the pane reads cached
+  per-chapter metadata, never the files. If rendering ever re-reads files or
+  does per-chapter work proportional to the novel, this catches it.
 - `open_is_fast_for_a_large_novel` (`project.rs`) — opening reads and parses
   every chapter file once (word count + front matter); even a 150-chapter
   novel opens in a few ms.

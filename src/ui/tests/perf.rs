@@ -5,9 +5,24 @@ use crate::buffer::{Buffer, Cursor};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::fmt::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::testutil::perf_budget_ms;
+use crate::testutil::{perf_budget_ms, perf_budget_us};
+
+/// The budget for the prose and search passes, in µs (CI-widened): a quarter of
+/// a frame. They measure ~0.55ms on an M-series laptop; with the per-character
+/// whole-list scans this guard was rebuilt to catch, the prose pass took ~45ms.
+const PROSE_BUDGET_US: u128 = 4000;
+
+/// Time 30 draws of `app` after one warm-up draw, returning the mean.
+fn mean_frame(terminal: &mut Terminal<TestBackend>, app: &App) -> Duration {
+    terminal.draw(|f| draw(f, app)).unwrap(); // warm
+    let t = Instant::now();
+    for _ in 0..30 {
+        terminal.draw(|f| draw(f, app)).unwrap();
+    }
+    t.elapsed() / 30
+}
 
 /// Performance guard (run with `cargo test --release -- --ignored
 /// --nocapture`). A full frame must render well within one 16ms frame, even
@@ -17,11 +32,22 @@ use crate::testutil::perf_budget_ms;
 /// makes rendering re-read files or do per-chapter work proportional to the
 /// novel, this catches it.
 ///
-/// Focus mode and typewriter scrolling (#301) are both on here, over a corpus
-/// with no blank lines — the pathological case where the focused "paragraph"
-/// spans the whole buffer, so `focus_paragraph`'s line walk does its most
-/// work — plus a spread of inline annotations (#302) so their per-row/char
-/// scan is timed. Confirms none of these adds cost that breaks the frame budget.
+/// The main pass renders a screenful of *unfolded, wrapped prose* from the
+/// middle of the chapter, with `*emphasis*` and `**strong**` on every line,
+/// a few hundred spell flags, proximity repeats, style-flag hits, and inline
+/// annotations (#302) all live — every per-row / per-character styling layer at
+/// once, against whole-buffer lists thousands of entries long. A second pass adds
+/// an active search with thousands of matches. Both hold a tight budget (well
+/// under a frame): the body renderer narrows each list to the row by binary
+/// search, and a regression to scanning whole lists per character (what this
+/// guard used to miss, because it only ever timed folded headings) costs several
+/// times that budget here.
+///
+/// Focus mode and typewriter scrolling (#301) are both on, over a corpus with no
+/// blank lines — the pathological case where the focused "paragraph" spans the
+/// whole buffer, so `focus_paragraph`'s line walk does its most work. Folding
+/// every section (#975) is timed as its own pass, then a modal, a wheel-scroll
+/// offset, and the assistant pane.
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn render_stays_within_a_frame() {
@@ -45,7 +71,9 @@ fn render_stays_within_a_frame() {
         if i % 100 == 0 && i > 0 {
             text.push_str("\n---\n\n");
         }
-        text.push_str("The night was dark and the road was very long indeed.\n");
+        // Emphasis and strong on every line, so every visible row takes the
+        // per-character styling path (concealed markers, italic/bold runs).
+        text.push_str("The night was *dark* and the road was **very** long indeed.\n");
     }
     let words = text.split_whitespace().count();
     let mut buffer = Buffer::from_text(&text);
@@ -72,52 +100,93 @@ fn render_stays_within_a_frame() {
     // The first-line paragraph indent (#722) classifies each visible logical line
     // (a bounded highlight lookup per row); on here so the render guard covers it.
     app.paragraph_indent = true;
-    // Fold every section (#975), so the render's per-row fold lookup and the
-    // scroll math's zero-row hidden lines are exercised under the frame budget.
-    let headings = app.edit_buffer().syntax().headings().to_vec();
-    app.folds.fold_all(&headings);
-    // A spread of inline annotations (#302) so the per-row/char annotation
-    // scan is exercised under the frame budget too.
-    app.annotations = (0..50)
-        .map(|i| crate::annotation::Live {
+    // A spread of inline annotations (#302) across the whole chapter, plus one
+    // long note spanning the middle (so rows far past its start are still
+    // tinted), so the per-row annotation lookup is exercised under the budget.
+    let len = text.len();
+    app.annotations = (0..200)
+        .map(|i| (i * len / 200, i * len / 200 + 5))
+        .chain([(len / 3, 2 * len / 3)])
+        .map(|(start, end)| crate::annotation::Live {
             chapter: "7B".into(),
-            start: i * 53,
-            end: i * 53 + 5,
+            start,
+            end,
             note: "note".into(),
             replies: Vec::new(),
             resolved: false,
             reviewer: None,
         })
         .collect();
+    // Idle-pass results as they'd stand on a long chapter: a few hundred spell
+    // flags and proximity repeats spread over the buffer (whole-buffer lists the
+    // renderer must narrow per row, never scan per character).
+    app.spell_flags = (0..300)
+        .map(|i| (i * len / 300, i * len / 300 + 3))
+        .collect();
+    app.proximity_repeats = (0..600)
+        .map(|i| (i * len / 600 + 5, i * len / 600 + 9))
+        .collect();
     // An active style-flag sweep (#1001) with a spread of cached hits, so the body
     // render's per-row/char flag scan is timed too. The cache is read, never
     // recomputed per draw — if a change moved the flag computation onto the render
     // path, this guard (over a window-sized buffer) would blow the frame budget.
     app.style_flag_category = Some(crate::analysis::FlagCategory::Adverbs);
-    app.style_flags = (0..200).map(|i| (i * 37, i * 37 + 6)).collect();
+    app.style_flags = (0..200)
+        .map(|i| (i * len / 200 + 30, i * len / 200 + 36))
+        .collect();
+    // The cursor mid-chapter, on a prose line (not a heading), so the screen is
+    // wrapped prose deep into every list.
+    let mid = (app.buffer.line_count() / 2..app.buffer.line_count())
+        .find(|&l| app.buffer.line(l).starts_with("The night"))
+        .unwrap();
+    app.buffer.cursor = Cursor { line: mid, col: 4 };
 
     let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
-    terminal.draw(|f| draw(f, &app)).unwrap(); // warm
-    let t = Instant::now();
-    for _ in 0..30 {
-        terminal.draw(|f| draw(f, &app)).unwrap();
-    }
-    let dt = t.elapsed() / 30;
+    let dt = mean_frame(&mut terminal, &app);
+    println!("render {words}w prose + 150-chapter outline = {dt:?}");
+    assert!(
+        dt.as_micros() < perf_budget_us(PROSE_BUDGET_US),
+        "prose render took {dt:?}"
+    );
 
-    println!("render {words}w + 150-chapter outline = {dt:?}");
-    assert!(dt.as_millis() < perf_budget_ms(16), "render took {dt:?}");
+    // An active find (#144) with thousands of matches: each visible row narrows
+    // the match list too, and the current match draws bright.
+    app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    for c in "road".chars() {
+        app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    let matches = match &app.mode {
+        Mode::Search(s) => s.matches.len(),
+        _ => panic!("find is open"),
+    };
+    assert!(matches > 3000, "thousands of matches ({matches})");
+    let search_dt = mean_frame(&mut terminal, &app);
+    println!("render with an active search ({matches} matches) = {search_dt:?}");
+    assert!(
+        search_dt.as_micros() < perf_budget_us(PROSE_BUDGET_US),
+        "search render took {search_dt:?}"
+    );
+    app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // close the find
+    assert!(!matches!(app.mode, Mode::Search(_)));
+
+    // Fold every section (#975), so the render's per-row fold lookup and the
+    // scroll math's zero-row hidden lines are exercised under the frame budget.
+    let headings = app.edit_buffer().syntax().headings().to_vec();
+    app.folds.fold_all(&headings);
+    app.buffer.cursor = Cursor { line: 0, col: 0 }; // on the first heading
+    let folded_dt = mean_frame(&mut terminal, &app);
+    println!("render with every section folded = {folded_dt:?}");
+    assert!(
+        folded_dt.as_millis() < perf_budget_ms(16),
+        "folded render took {folded_dt:?}"
+    );
 
     // And again with a modal overlay open (#349): the same editor plus the
     // O(screen) backdrop dim and the shadowed box. Confirms the depth pass
     // doesn't push a full frame past budget.
     app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)); // open the run-action palette
     assert!(matches!(app.mode, Mode::Palette(_)));
-    terminal.draw(|f| draw(f, &app)).unwrap(); // warm
-    let t = Instant::now();
-    for _ in 0..30 {
-        terminal.draw(|f| draw(f, &app)).unwrap();
-    }
-    let modal_dt = t.elapsed() / 30;
+    let modal_dt = mean_frame(&mut terminal, &app);
     println!("render with a modal overlay = {modal_dt:?}");
     assert!(
         modal_dt.as_millis() < perf_budget_ms(16),
@@ -135,16 +204,11 @@ fn render_stays_within_a_frame() {
     assert!(!matches!(app.mode, Mode::Palette(_)));
     app.buffer.cursor = Cursor { line: 0, col: 0 }; // pin the cursor at the top
     app.scroll_offset.set(40); // wheel-scrolled a screenful down into the chapter
-    terminal.draw(|f| draw(f, &app)).unwrap(); // warm
+    let scrolled_dt = mean_frame(&mut terminal, &app);
     assert!(
         app.scroll_offset.get() > 0,
         "the offset stayed clamped to content"
     );
-    let t = Instant::now();
-    for _ in 0..30 {
-        terminal.draw(|f| draw(f, &app)).unwrap();
-    }
-    let scrolled_dt = t.elapsed() / 30;
     println!("render with a wheel-scroll offset = {scrolled_dt:?}");
     assert!(
         scrolled_dt.as_millis() < perf_budget_ms(16),
@@ -166,12 +230,7 @@ fn render_stays_within_a_frame() {
              width onto several rows, so the per-entry wrap work is real."
         ));
     }
-    terminal.draw(|f| draw(f, &app)).unwrap(); // warm (builds the wrap cache)
-    let t = Instant::now();
-    for _ in 0..30 {
-        terminal.draw(|f| draw(f, &app)).unwrap();
-    }
-    let assistant_dt = t.elapsed() / 30;
+    let assistant_dt = mean_frame(&mut terminal, &app); // warm-up builds the wrap cache
     println!("render with the assistant pane open = {assistant_dt:?}");
     assert!(
         assistant_dt.as_millis() < perf_budget_ms(16),
