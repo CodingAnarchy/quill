@@ -143,7 +143,13 @@ fn a_reference_pane_shows_the_concealed_preview_form() {
     terminal
         .draw(|f| {
             let area = f.area();
-            super::editor::render_reference_pane(f, area, &app, &buffer);
+            super::editor::render_reference_pane(
+                f,
+                area,
+                &app,
+                &buffer,
+                app.project.active_index(),
+            );
         })
         .unwrap();
     let buf = terminal.backend().buffer().clone();

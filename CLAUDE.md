@@ -136,6 +136,11 @@ What they assert:
   status bar's live word count is O(document) per draw; the pane reads cached
   per-chapter metadata, never the files. If rendering ever re-reads files or
   does per-chapter work proportional to the novel, this catches it.
+- `outline_pane_is_flat_in_chapter_count` (`ui/tests/perf.rs`) — the outline
+  pane styles only the rows on screen (it scrolls to keep the selection / active
+  chapter visible), so its cost at 1500 chapters stays within ~1.5× its cost at
+  150, and a full frame beside a series-sized outline stays well under budget.
+  Resolve `active_index()` once per `draw()` and thread it — never per row.
 - `open_is_fast_for_a_large_novel` (`project.rs`) — opening reads and parses
   every chapter file once (word count + front matter); even a 150-chapter
   novel opens in a few ms.

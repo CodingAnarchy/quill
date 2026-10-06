@@ -178,6 +178,13 @@ impl App {
     /// active chapter from its *cache*, so swap in the live buffer count to reflect
     /// unsaved edits (the buffer's word count updates as you type).
     pub fn project_word_count(&self) -> usize {
+        self.project_word_count_with_active(self.project.active_index())
+    }
+
+    /// Like [`Self::project_word_count`] but with the active index already
+    /// resolved — the render path resolves `active_index()` (an O(chapters) scan)
+    /// once per frame and threads it to every per-frame reader.
+    pub fn project_word_count_with_active(&self, active: usize) -> usize {
         // Swap the active chapter's cached count for the live buffer only when the
         // buffer actually holds it. With a reference pane focused (#165) the buffer
         // is a bible entry / note, so keep the all-cached total rather than let the
@@ -185,7 +192,6 @@ impl App {
         if !self.focus_shows_active_chapter() {
             return self.project.words_total();
         }
-        let active = self.project.active_index();
         let cached_active = self.project.chapter_words(active);
         (self.project.words_total() + self.buffer.word_count()).saturating_sub(cached_active)
     }

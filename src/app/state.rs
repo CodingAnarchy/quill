@@ -308,6 +308,13 @@ pub struct App {
     /// back to the cursor. A `Cell` so the immutable render path can store the
     /// clamped offset.
     pub(crate) scroll_offset: std::cell::Cell<isize>,
+    /// The outline pane's scroll offset: the first chapter-list row on screen. The
+    /// renderer moves it just enough to keep the row that matters in view (the Nav
+    /// selection, the focused outline's heading, or the active chapter and its
+    /// current section) and writes it back, so the list scrolls a row at a time as
+    /// the selection walks past an edge rather than jumping a page. A `Cell` so the
+    /// immutable render path can store it.
+    pub(crate) nav_scroll: std::cell::Cell<usize>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.

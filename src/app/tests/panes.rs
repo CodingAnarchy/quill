@@ -158,7 +158,7 @@ fn other_pane_title(app: &App) -> String {
         Some(SplitView {
             content: SplitContent::Editor(other),
             ..
-        }) => app.pane_title_for(other),
+        }) => app.pane_title_for_with_active(other, app.project.active_index()),
         _ => panic!("expected two editor panes"),
     }
 }

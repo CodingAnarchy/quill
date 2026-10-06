@@ -47,14 +47,14 @@ const PARAGRAPH_INDENT: &str = "    ";
 
 impl Pane for Editor<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
-        render_focused_pane(frame, area, self.0);
+        render_focused_pane(frame, area, self.0, self.1);
     }
 }
 
 /// Render the focused editor pane (`App::buffer`) into `area`: full rendering with
 /// headers, search highlighting, and the terminal cursor (#163: shared by the
 /// single-pane view and the focused half of a split).
-pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
+pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, active: usize) {
     // The prose column, with a blank top row (the EditMeta banner draws there).
     let body = Rect {
         x: area.x,
@@ -90,7 +90,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // cached header `Rc` slice untouched rather than deep-cloning every header
     // Line/Span into a merged Vec each frame; only build a fresh merged list when
     // there's actually something to merge in.
-    let header = header_inserts(app, column.width);
+    let header = header_inserts(app, column.width, active);
     let scene_breaks = scene_break_inserts(buffer);
     let merged;
     let inserts: &[(usize, Vec<Line<'static>>)] = if scene_breaks.is_empty() {
@@ -196,8 +196,14 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
 
 /// Render a non-focused reference pane (#163): the other pane's prose under a
 /// dimmed title bar naming its chapter — no cursor, no search highlight.
-pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, buffer: &Buffer) {
-    let title = app.pane_title_for(buffer);
+pub(super) fn render_reference_pane(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    buffer: &Buffer,
+    active: usize,
+) {
+    let title = app.pane_title_for_with_active(buffer, active);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(" {title}"),

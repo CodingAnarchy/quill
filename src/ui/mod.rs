@@ -9,25 +9,23 @@ use ratatui::{
     Frame,
 };
 
-use std::path::Path;
-
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
-use crate::frontmatter::{Band, Role, Status};
-use crate::mode::{BibleReview, GuideNav, Mode, Overlay, OverlayKind, RefFiles, Tree};
-use crate::syntax::Heading;
+use crate::mode::{BibleReview, GuideNav, Mode, Overlay, OverlayKind, Tree};
 use crate::theme::{self, Theme};
 
 mod assistant;
 mod editor;
 mod list_overlay;
+mod nav_pane;
 mod overlay;
 mod status;
 pub use assistant::AssistantWrapCache;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
+use nav_pane::NavPane;
 use status::{
     draw_prompt, editor_status_bar, mode_chip, nav_status_bar, prompt_height, search_status,
 };
@@ -53,14 +51,12 @@ trait Pane {
     fn render(&self, frame: &mut Frame, area: Rect);
 }
 
-/// The prose column: centered, fixed-width text following the cursor.
-struct Editor<'a>(&'a App);
-/// The left strip: chapter list with the active chapter's heading outline
-/// nested beneath it (current section highlighted; the Nav-mode selection
-/// reversed).
-struct NavPane<'a>(&'a App);
-/// The bottom line: chapter name / counts, or the active prompt.
-struct StatusBar<'a>(&'a App);
+/// The prose column: centered, fixed-width text following the cursor. The second
+/// field is the active chapter's index, resolved once per draw.
+struct Editor<'a>(&'a App, usize);
+/// The bottom line: chapter name / counts, or the active prompt. The second field
+/// is the active chapter's index, resolved once per draw.
+struct StatusBar<'a>(&'a App, usize);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     // The render path styles from the active theme (#300); affirm it each frame.
@@ -77,7 +73,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // The editor is always the base layer; modal surfaces (#349) float over it on
     // a dimmed backdrop, so the active surface is unmistakable and the editor
     // recedes without disappearing.
-    draw_editor_base(frame, area, app);
+    // Resolve the active chapter once per frame — `active_index()` is an
+    // O(chapters) scan of the manifest — and thread it to every pane that needs it
+    // (the status bar's tags, the chapter header, the outline pane, pane titles).
+    let active = app.project.active_index();
+    draw_editor_base(frame, area, app, active);
 
     // Box overlays each render through the shared `modal` frame (dim + shadow);
     // a prompt lives on the status line, so it only dims the editor behind it.
@@ -100,7 +100,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             draw_cooccurrence(f, r, report, &app.list_layout);
         }),
         Mode::History(history) => {
-            let chapter = app.project.active_title().unwrap_or("this chapter");
+            let chapter = app.project.chapter_title(active).unwrap_or("this chapter");
             modal(frame, area, |f, r| {
                 draw_history(f, r, history, chapter, &app.list_layout);
             });
@@ -144,7 +144,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 /// Draw the editor base layer: the prose pane (with the outline strip when shown)
 /// and the status line beneath it. Always drawn; modal overlays float on top.
-fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App, active: usize) {
     // Galley proofreading mode (#1003): a distinct read-only, paginated presentation —
     // one screen-page of the chapter at a time, chrome-free like composition mode, but
     // page-driven and never editable. Drawn straight into the whole screen and returns,
@@ -161,7 +161,7 @@ fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
     // mode already dims into). Toggling off restores the full layout below.
     if app.distraction_free {
         app.pane_rects.set(None); // no split on screen — no click target
-        Editor(app).render(frame, area);
+        Editor(app, active).render(frame, area);
         return;
     }
 
@@ -178,14 +178,14 @@ fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(outline_w), Constraint::Min(1)])
             .split(chunks[0]);
-        NavPane(app).render(frame, cols[0]);
+        NavPane { app, active }.render(frame, cols[0]);
         cols[1]
     } else {
         chunks[0]
     };
 
-    draw_editor_region(frame, editor_area, app);
-    StatusBar(app).render(frame, chunks[1]);
+    draw_editor_region(frame, editor_area, app, active);
+    StatusBar(app, active).render(frame, chunks[1]);
 }
 
 /// Layer a floating modal over the already-drawn editor (#349): dim the editor as
@@ -263,10 +263,10 @@ const MIN_PANE_HEIGHT: u16 = 6;
 /// Draw the editor region: one pane, or two when the window is split — a second
 /// editor (#163) or a docked report/analysis/AI surface (#164), at the split
 /// ratio set by `Ctrl-w </>` (#166).
-fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App, active: usize) {
     let Some(view) = app.split_view() else {
         app.pane_rects.set(None);
-        Editor(app).render(frame, area);
+        Editor(app, active).render(frame, area);
         return;
     };
 
@@ -290,7 +290,7 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
                 draw_assistant_pane(frame, area, app, conv, true);
             }
             // Otherwise the focused pane is always the editor (`App::buffer`).
-            _ => Editor(app).render(frame, area),
+            _ => Editor(app, active).render(frame, area),
         }
         return;
     }
@@ -327,9 +327,11 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
 
     // The focused editor (`App::buffer`) always draws in `focused_area`; the other
     // pane shows a second editor or a docked surface.
-    editor::render_focused_pane(frame, focused_area, app);
+    editor::render_focused_pane(frame, focused_area, app, active);
     match view.content {
-        SplitContent::Editor(other) => editor::render_reference_pane(frame, other_area, app, other),
+        SplitContent::Editor(other) => {
+            editor::render_reference_pane(frame, other_area, app, other, active);
+        }
         SplitContent::Surface(overlay) => {
             // Feed the surface's scroll bound the height it's actually drawn in.
             app.surface_height.set(other_area.height);
@@ -341,412 +343,11 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-/// The index of the heading whose section the cursor is currently in: the last
-/// heading at or before the cursor. `None` if the cursor sits above the first
-/// heading (or there are no headings).
-fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
-    headings.iter().rposition(|h| h.start <= cursor_byte)
-}
-
 /// The accent style for the active/current item in the nav pane.
 pub fn active_style() -> Style {
     Style::default()
         .fg(theme::current().heading)
         .add_modifier(Modifier::BOLD)
-}
-
-/// Accent color for a chapter's revision status badge.
-fn status_style(status: Status) -> Style {
-    let theme = theme::current();
-    let color = match status {
-        Status::Draft => theme.dim,
-        Status::Revised => theme.revised,
-        Status::Final => theme.added,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
-}
-
-/// One chapter row: a marker for the active chapter, its word count, and a
-/// colored status badge — reversed while it's the Nav-mode selection.
-#[allow(clippy::too_many_arguments)] // a chapter row's fields read clearer flat than boxed
-fn chapter_line(
-    title: &str,
-    number: Option<usize>,
-    words: usize,
-    goal: Option<usize>,
-    status: Option<Status>,
-    role: Option<Role>,
-    is_active: bool,
-    is_selected: bool,
-) -> Line<'static> {
-    let mut style = if is_active {
-        active_style()
-    } else {
-        Style::default()
-    };
-    if is_selected {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    let marker = if is_active { "▸ " } else { "  " };
-    // A grouped body chapter (#181) shows its 1-based number; sections don't.
-    let label = number.map_or_else(
-        || format!("{marker}{title}"),
-        |n| format!("{marker}{n}. {title}"),
-    );
-    // With a goal (#146), show progress (a ✓ once reached); otherwise just the count.
-    let count = goal.map_or_else(
-        || words.to_string(),
-        |g| format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
-    );
-    // The selection highlight reverses every span on the row.
-    let sel = |s: Style| {
-        if is_selected {
-            s.add_modifier(Modifier::REVERSED)
-        } else {
-            s
-        }
-    };
-    let mut spans = vec![Span::styled(format!("{label}  {count}"), style)];
-    // A front/back-matter section shows its role (#179) as a dim italic tag.
-    if let Some(role) = role {
-        let tag = Style::default()
-            .fg(theme::current().dim)
-            .add_modifier(Modifier::ITALIC);
-        spans.push(Span::styled(format!(" · {}", role.label()), sel(tag)));
-    }
-    if let Some(status) = status {
-        spans.push(Span::styled(
-            format!(" {}", status.badge()),
-            sel(status_style(status)),
-        ));
-    }
-    Line::from(spans)
-}
-
-/// The reference-file browser's rows (#165/#590): a header, then each file as its
-/// path relative to the project root (the bible structure stays legible), the
-/// selection reversed. The header and hint reflect whether it's the bible-only
-/// view (#590) or the full reference list (#165).
-fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
-    let (title, hint) = if state.bible_only {
-        ("Story bible", "enter edit · esc back")
-    } else {
-        ("Reference files", "enter open · f/esc back")
-    };
-    let mut lines = vec![
-        Line::from(Span::styled(
-            title.to_string(),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            hint.to_string(),
-            Style::default().fg(theme::current().dim),
-        )),
-        Line::raw(""),
-    ];
-    // Group by folder rather than list bare paths (#165/#590): the files arrive
-    // sorted by path, so each folder's files are contiguous — emit a dim header
-    // when the folder changes, then each file by its clean stem, indented under it.
-    // Files sitting directly in the root show flush with no header. `selected` stays
-    // a file index (headers are render-only), so the arrows step file-to-file and
-    // skip the headers.
-    let mut current: Option<String> = None;
-    for (i, path) in state.files.iter().enumerate() {
-        let group = ref_group(app, path, state.bible_only);
-        if group != current {
-            if let Some(g) = &group {
-                lines.push(Line::from(Span::styled(
-                    g.clone(),
-                    Style::default().fg(theme::current().dim),
-                )));
-            }
-            current.clone_from(&group);
-        }
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("untitled");
-        let label = if group.is_some() {
-            format!("  {name}")
-        } else {
-            name.to_string()
-        };
-        lines.push(list_row(i == state.selected, &label, None));
-    }
-    lines
-}
-
-/// The folder a reference file is grouped under in the browser (#165/#590): its
-/// parent directory relative to the project root, `None` for a file sitting
-/// directly in the root (shown flush, no header). In the bible-only view the
-/// leading `bible/` is stripped so headers read "characters", not
-/// "bible/characters", and a file directly under `bible/` groups flush like a root
-/// file.
-fn ref_group(app: &App, path: &Path, bible_only: bool) -> Option<String> {
-    let rel = path.strip_prefix(&app.project.root).unwrap_or(path);
-    let group = rel.parent()?.to_string_lossy().replace('\\', "/");
-    if group.is_empty() {
-        return None;
-    }
-    if !bible_only {
-        return Some(group);
-    }
-    // Bible-only view: strip the leading `bible/` so headers read "characters", not
-    // "bible/characters"; a file sitting directly in `bible/` groups flush (None).
-    if let Some(rest) = group.strip_prefix("bible/") {
-        return Some(rest.to_string());
-    }
-    (group != "bible").then_some(group)
-}
-
-/// The active chapter's heading outline, indented by level, current section
-/// accented. `skip` omits one heading by index (used to drop a leading H1 that
-/// just repeats the chapter title) while leaving the remaining indices — and so
-/// the `current` highlight — intact. `selected` is the focused-outline cursor
-/// (#657): when set, that heading is drawn reversed so the author sees which one
-/// Enter will jump to; otherwise the outline is the plain display list.
-fn heading_outline_lines(
-    headings: &[Heading],
-    current: Option<usize>,
-    selected: Option<usize>,
-    skip: Option<usize>,
-    query: &str,
-) -> Vec<Line<'static>> {
-    headings
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| Some(*i) != skip)
-        // When the focused outline is filtered (#822), show only headings whose
-        // title matches; the index numbering is untouched so `selected` still
-        // lands on the right heading.
-        .filter(|(_, h)| query.is_empty() || h.title.to_lowercase().contains(query))
-        .map(|(i, h)| {
-            let indent = "  ".repeat(h.level as usize);
-            let mut style = if Some(i) == current {
-                active_style()
-            } else {
-                Style::default().fg(theme::current().muted)
-            };
-            if Some(i) == selected {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-            Line::from(Span::styled(format!("{indent}{}", h.title), style))
-        })
-        .collect()
-}
-
-/// If the chapter opens with a level-1 heading whose text matches the chapter
-/// title, the outline would just repeat the title — return its index to skip it.
-fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<usize> {
-    match headings.first() {
-        Some(h) if h.level == 1 && h.title == chapter_title => Some(0),
-        _ => None,
-    }
-}
-
-/// The top of the nav pane: book / series metadata above the chapter list.
-/// Series (if any) sits above the book title; subtitle and author follow.
-fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
-    let theme = theme::current();
-    let mut lines = Vec::new();
-    if let Some(series) = &manifest.series {
-        lines.push(Line::from(Span::styled(
-            series.clone(),
-            Style::default().fg(theme.dim),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        manifest.title.clone(),
-        active_style(),
-    )));
-    if let Some(subtitle) = &manifest.subtitle {
-        lines.push(Line::from(Span::styled(
-            subtitle.clone(),
-            Style::default()
-                .fg(theme.muted)
-                .add_modifier(Modifier::ITALIC),
-        )));
-    }
-    if let Some(author) = &manifest.author {
-        lines.push(Line::from(Span::styled(
-            format!("by {author}"),
-            Style::default().fg(theme.dim),
-        )));
-    }
-    lines.push(Line::raw(""));
-    lines
-}
-
-/// A band header for the chapter pane (#181): "CHAPTERS" for the body — so an
-/// all-body project reads exactly as before — and "FRONT MATTER" / "BACK MATTER"
-/// for the section bands.
-fn band_header(band: Band) -> Line<'static> {
-    let label = match band {
-        Band::Front => "FRONT MATTER",
-        Band::Body => "CHAPTERS",
-        Band::Back => "BACK MATTER",
-    };
-    Line::from(Span::styled(
-        label.to_string(),
-        Style::default()
-            .fg(theme::current().dim)
-            .add_modifier(Modifier::BOLD),
-    ))
-}
-
-impl Pane for NavPane<'_> {
-    fn render(&self, frame: &mut Frame, area: Rect) {
-        let app = self.0;
-        let block = Block::default().borders(Borders::RIGHT);
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        // The reference-file browser (#165) replaces the chapter list with the
-        // bible entries and notes the author can open in a side pane.
-        if let Mode::RefFiles(state) = &app.mode {
-            frame.render_widget(Paragraph::new(ref_file_lines(app, state)), inner);
-            return;
-        }
-
-        let mut lines: Vec<Line> = project_header(&app.project.manifest);
-
-        // The outline nested under the active chapter is *that chapter's* structure.
-        // When a non-chapter reference pane is focused (a bible entry / note, #165),
-        // `app.buffer` holds that file, not the active chapter — so its headings must
-        // not be nested under a chapter row. Treat the outline as empty then, leaving
-        // the chapter list flat rather than mis-nesting the bible's sections.
-        let headings = if app.focus_shows_active_chapter() {
-            app.buffer.syntax().headings()
-        } else {
-            &[]
-        };
-        let current_heading = current_section(headings, app.buffer.cursor_byte());
-        // When the outline is focused (#657), draw its selection cursor reversed.
-        let outline_selected = match &app.mode {
-            Mode::Outline { selected, .. } => Some(*selected),
-            _ => None,
-        };
-        // When the outline is focused with an active filter (#822), the pane shows
-        // only headings whose title matches; the query is lowercased once here.
-        let outline_query = app.outline_query();
-        let outline_typing = matches!(&app.mode, Mode::Outline { typing: true, .. });
-
-        // Resolve the active index once: active_index() is an O(n) scan, so
-        // calling it per row would be O(n²) per frame.
-        let active = app.project.active_index();
-
-        // The browser selection, if we're in Nav mode.
-        let nav_selected = match &app.mode {
-            Mode::Nav { selected, .. } => Some(*selected),
-            _ => None,
-        };
-        // When a quick-jump filter is active (#410), the list shows only the
-        // chapters that match; body numbering still counts every chapter so the
-        // numbers stay stable as you filter. The query is lowercased once here,
-        // not once per chapter.
-        let filtering = matches!(&app.mode, Mode::Nav { filter, .. } if !filter.is_empty());
-        let nav_query = app.nav_query();
-
-        // Count each chapter once for this frame, then reuse for the rows and
-        // the total — so the active chapter's live count isn't recomputed twice.
-        // Reuse the `active` index resolved above: `chapter_word_count` would
-        // otherwise re-run the O(n) `active_index()` scan per chapter, making
-        // the counts loop O(chapters²) per frame.
-        let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
-            .map(|i| app.chapter_word_count_with_active(i, active))
-            .collect();
-        // Resolve each chapter's band once, like the counts above.
-        let bands: Vec<Band> = (0..counts.len())
-            .map(|i| app.project.chapter_band(i))
-            .collect();
-
-        // Group by band (#181) only when the project actually has sections, so an
-        // all-body project keeps the flat, un-numbered "CHAPTERS" list it had.
-        let grouped = bands.iter().any(|&b| b != Band::Body);
-        let mut shown_band: Option<Band> = None;
-        let mut body_n = 0usize;
-        for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
-            let band = bands[i];
-            // Body chapters carry a 1-based number once the list is grouped;
-            // sections show their role instead. Counted before the filter skip so
-            // a filtered list still shows each chapter's real number.
-            let number = (grouped && band == Band::Body).then(|| {
-                body_n += 1;
-                body_n
-            });
-            if filtering && !app.nav_chapter_matches(i, &nav_query) {
-                continue;
-            }
-            // The band header is emitted lazily, just before the first matching
-            // chapter of a band, so a filter that hides a whole band hides its
-            // header too.
-            if shown_band != Some(band) {
-                if shown_band.is_some() {
-                    lines.push(Line::raw("")); // a gap between bands
-                }
-                lines.push(band_header(band));
-                lines.push(Line::raw(""));
-                shown_band = Some(band);
-            }
-
-            let is_active = i == active;
-            let is_selected = nav_selected == Some(i);
-            let status = app.project.chapter_status(i);
-            let goal = app.project.chapter_goal(i);
-            let role = app.project.chapter_role(i);
-            lines.push(chapter_line(
-                &chapter.title,
-                number,
-                counts[i],
-                goal,
-                status,
-                role,
-                is_active,
-                is_selected,
-            ));
-            if is_active {
-                let skip = redundant_title_heading(headings, &chapter.title);
-                lines.extend(heading_outline_lines(
-                    headings,
-                    current_heading,
-                    outline_selected,
-                    skip,
-                    &outline_query,
-                ));
-                // While filtering the focused outline (#822), show the query (a
-                // trailing `_` caret while typing) under the narrowed headings.
-                if outline_typing || !outline_query.is_empty() {
-                    let caret = if outline_typing { "_" } else { "" };
-                    lines.push(Line::from(Span::styled(
-                        format!("  filter: {outline_query}{caret}"),
-                        Style::default().fg(theme::current().dim),
-                    )));
-                }
-            }
-        }
-
-        // Rolled-up totals: the body word count, kept clear of any front/back
-        // matter so the manuscript total isn't muddied (#181).
-        let total: usize = counts.iter().sum();
-        let body_total: usize = bands
-            .iter()
-            .zip(&counts)
-            .filter(|(&b, _)| b == Band::Body)
-            .map(|(_, &c)| c)
-            .sum();
-        let total_line = if total != body_total {
-            format!("{body_total} words · {} in sections", total - body_total)
-        } else {
-            format!("{total} words")
-        };
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            total_line,
-            Style::default().fg(theme::current().dim),
-        )));
-
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
 }
 
 impl Pane for StatusBar<'_> {
@@ -776,7 +377,7 @@ impl Pane for StatusBar<'_> {
         {
             nav_status_bar(app, *selected, filter, *typing)
         } else {
-            editor_status_bar(app)
+            editor_status_bar(app, self.1)
         };
 
         let chip = mode_chip(app);

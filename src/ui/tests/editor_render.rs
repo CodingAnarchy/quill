@@ -7,6 +7,7 @@ use super::*;
 use crate::buffer::Cursor;
 use crate::project::Goals;
 use crate::syntax::Heading;
+use crate::ui::nav_pane::current_section;
 use ratatui::style::Color;
 use ratatui::{backend::TestBackend, Terminal};
 use std::fmt::Write;
