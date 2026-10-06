@@ -564,11 +564,6 @@ pub struct App {
     /// shows how far under it today's net is — reading only the cached daily tally,
     /// so it costs nothing per draw.
     pub(crate) daily_nudge: bool,
-    /// Whether the author dismissed the below-target cue this session (#1012). A
-    /// per-session flag (never persisted): once dismissed the tag stays hidden for
-    /// the rest of the run, so it's non-modal and can be waved off. Reset on the
-    /// next launch, so tomorrow's pace surfaces afresh.
-    pub(crate) nudge_dismissed: bool,
     /// The "Ask the manuscript" history (#609), newest last: each ask, its
     /// grounded answer, and the chapters it cited. Lets the author re-open a past
     /// lookup (and re-jump its citations) without re-asking. Loaded from the

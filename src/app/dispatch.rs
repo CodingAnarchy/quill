@@ -8,11 +8,31 @@ use std::collections::HashMap;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
-use crate::mode::{Action, Mode, Pending};
+use crate::mode::{Action, Mode, Pending, VimPending};
 
 use super::App;
 
 impl App {
+    /// Whether Esc has no editing job right now, so a global Esc (leaving
+    /// composition mode) may claim it: Insert mode
+    /// without Vim, or a Vim Normal mode with no count, operator, or multi-key
+    /// command in flight. Vim Insert's Esc drops to Normal, and a pending
+    /// operator's Esc cancels it — neither is idle. Visual keeps Esc for
+    /// collapsing the selection.
+    fn esc_is_idle(&self) -> bool {
+        match self.mode {
+            Mode::Insert => !self.vim,
+            Mode::Normal => {
+                let v = &self.vim_state;
+                v.count.is_none()
+                    && v.op.is_none()
+                    && v.pending == VimPending::None
+                    && self.case_op.is_none()
+            }
+            _ => false,
+        }
+    }
+
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
     #[allow(clippy::needless_pass_by_value)] // consumes the event, moving its inner Key/Mouse to handlers
@@ -69,30 +89,15 @@ impl App {
 
         // Esc leaves distraction-free composition mode (#975) from an editing mode,
         // restoring the chrome — the promised "toggle back" that isn't a second
-        // Ctrl-\. Guarded to the resting editing modes and no overlay, so it never
-        // pre-empts Esc where a prompt/menu/Vim-insert owns it; a Visual selection
-        // keeps Esc for collapsing the selection first.
+        // Ctrl-\. Guarded to an Esc that would otherwise do nothing, so it never
+        // pre-empts Esc where a prompt/menu/Vim-insert/pending operator owns it; a
+        // Visual selection keeps Esc for collapsing the selection first.
         if key.code == KeyCode::Esc
             && self.distraction_free
             && self.overlay.is_none()
-            && matches!(self.mode, Mode::Insert | Mode::Normal)
+            && self.esc_is_idle()
         {
             self.toggle_distraction_free();
-            return;
-        }
-
-        // Esc dismisses the ambient below-target cue (#1012) when it's the only
-        // thing Esc would act on: in a resting editing mode, no overlay, no
-        // distraction-free (handled above), and the cue actually showing. It's a
-        // waved-off, non-modal signal — dismissed for the rest of the session, so
-        // Esc goes back to its usual job. Guarded to Insert/Normal so a Visual
-        // selection keeps Esc for collapsing first.
-        if key.code == KeyCode::Esc
-            && self.overlay.is_none()
-            && matches!(self.mode, Mode::Insert | Mode::Normal)
-            && self.nudge_showing()
-        {
-            self.nudge_dismissed = true;
             return;
         }
 

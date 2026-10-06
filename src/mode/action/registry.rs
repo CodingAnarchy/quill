@@ -143,6 +143,8 @@ pub enum Action {
     ToggleParagraphIndent,
     /// Toggle the annotation margin — notes shown beside the prose they mark.
     ToggleAnnotationMargin,
+    /// Hide or restore the below-daily-goal status-bar cue (#1012) for this session.
+    ToggleDailyCue,
     /// Fold every section in the active chapter to its heading (#975).
     FoldAll,
     /// Expand every folded section (#975).
@@ -388,6 +390,7 @@ impl Action {
         Self::ToggleFocus,
         Self::ToggleParagraphIndent,
         Self::ToggleAnnotationMargin,
+        Self::ToggleDailyCue,
         Self::FoldAll,
         Self::ExpandAll,
         Self::ToggleComposition,
@@ -458,6 +461,7 @@ impl Action {
             Self::ToggleFocus => "view:focus",
             Self::ToggleParagraphIndent => "view:paragraph-indent",
             Self::ToggleAnnotationMargin => "view:annotation-margin",
+            Self::ToggleDailyCue => "view:daily-cue",
             Self::FoldAll => "view:fold-all",
             Self::ExpandAll => "view:expand-all",
             Self::ToggleComposition => "view:composition",
@@ -567,6 +571,7 @@ impl Action {
             | Self::ToggleFocus
             | Self::ToggleParagraphIndent
             | Self::ToggleAnnotationMargin
+            | Self::ToggleDailyCue
             | Self::FoldAll
             | Self::ExpandAll
             | Self::ToggleComposition
@@ -635,6 +640,7 @@ impl Action {
             Self::ToggleFocus => "Focus mode (toggle)",
             Self::ToggleParagraphIndent => "Paragraph indent (toggle)",
             Self::ToggleAnnotationMargin => "Annotation margin (toggle)",
+            Self::ToggleDailyCue => "Daily goal cue (toggle)",
             Self::FoldAll => "Fold all sections",
             Self::ExpandAll => "Expand all sections",
             Self::ToggleComposition => "Composition mode — distraction-free (toggle)",

@@ -283,7 +283,6 @@ impl App {
             sprint: None,
             session_target: None,
             daily_nudge,
-            nudge_dismissed: false,
             qa_log,
             qa_store,
             pending_qa_question: None,

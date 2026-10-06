@@ -126,6 +126,22 @@ fn composition_mode_toggles_and_esc_restores() {
 }
 
 #[test]
+fn vim_insert_esc_drops_to_normal_without_leaving_composition_mode() {
+    // In Vim Insert, Esc's job is Insert → Normal; only a further, idle Esc in
+    // Normal exits composition mode.
+    let (mut app, _dir) = folding_app("composition-vim");
+    app.vim = true;
+    app.mode = Mode::Insert;
+    app.on_key(ctrl('\\'));
+    assert!(app.distraction_free);
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Normal), "Esc left Insert");
+    assert!(app.distraction_free, "and composition mode stayed on");
+    app.on_key(key(KeyCode::Esc));
+    assert!(!app.distraction_free, "a Normal-mode Esc exits it");
+}
+
+#[test]
 fn search_reveals_a_match_inside_a_folded_section() {
     let (mut app, _dir) = folding_app("fold-search-reveal");
     // Fold the first scene, whose body holds "river".

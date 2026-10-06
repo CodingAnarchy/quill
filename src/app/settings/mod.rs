@@ -63,6 +63,7 @@ impl App {
             bool_row(SettingBool::FocusMode, self.focus_mode),
             bool_row(SettingBool::ParagraphIndent, self.paragraph_indent),
             bool_row(SettingBool::AnnotationMargin, self.annotation_margin),
+            bool_row(SettingBool::DailyNudge, self.daily_nudge),
             PaletteItem::new(
                 "Analysis stopwords",
                 format!("Currently: {}", self.stopwords_label()),

@@ -371,6 +371,10 @@ impl App {
                     on_off(self.annotation_margin)
                 ));
             }
+            Action::ToggleDailyCue => {
+                self.daily_nudge = !self.daily_nudge;
+                self.message = Some(format!("Daily goal cue {}.", on_off(self.daily_nudge)));
+            }
             Action::FoldAll => self.fold_all(),
             Action::ExpandAll => self.expand_all_folds(),
             Action::ToggleComposition => self.toggle_distraction_free(),
