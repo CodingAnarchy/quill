@@ -5,6 +5,53 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-05
+
+A small feature release centered on annotations, plus two fixes for edits and
+cues that could quietly disappear. No project format changes; every 1.x project
+opens unchanged. One new optional config key, `annotation_margin` (on by default).
+
+### Added
+
+- **Annotations show in the margin.** Each inline note now appears to the right
+  of the prose column, level with the line it's anchored to, so your notes stay
+  in view while you write. Notes that would collide stack downward; long ones are
+  clipped with `…` (the review list has the full thread). On a narrow terminal the
+  prose shifts left to make room, and the margin hides when there's none. Turn it
+  off with "Annotation margin (toggle)" in the Ctrl-K palette, in Settings, or
+  with `annotation_margin = false` under `[editor]`.
+- **Remove annotations from the editor.** "Remove annotation at cursor" deletes
+  the note you're on (or every note a Visual selection overlaps), and "Remove all
+  annotations here…" clears the chapter's notes after a y/N confirm. Previously a
+  note could only be deleted from inside the review list.
+- **Daily goal cue toggle.** "Daily goal cue (toggle)" in the palette hides or
+  restores the "◈ N to daily goal" status-bar cue for the session, and a new
+  Settings row saves the choice as `daily_nudge`.
+
+### Changed
+
+- **Long prompts wrap.** A note (or any other status-bar prompt) longer than the
+  screen is wide now wraps upward over the editor instead of running off the
+  right edge where you couldn't see what you were typing.
+- **Esc no longer dismisses the daily goal cue.** Use the new toggle instead; an
+  accidentally hidden cue can now be brought back.
+
+### Fixed
+
+- **The daily goal cue no longer vanishes when you start cutting text in Vim
+  mode.** The Esc you press to leave Insert was being taken as "dismiss the cue"
+  for the rest of the session, and you stayed in Insert. Esc now always drops to
+  Normal; the cue stays (showing a larger shortfall on a net-negative day).
+- **Esc in Vim Insert no longer exits composition mode.** It drops to Normal
+  first; a second Esc leaves composition mode, as intended.
+- **A failed save no longer discards a split pane's unsaved edits.** Closing or
+  swapping panes (`Ctrl-w c`, `:q`, `Ctrl-w w`) when the chapter couldn't be
+  written used to drop the buffer anyway (and could report "Closed the pane." over
+  the save error). These now stop and keep your work, like every other switch-away
+  path.
+- **`daily_nudge` is documented** in the configuration reference, and changing
+  it now takes effect without a restart.
+
 ## [1.1.0] - 2026-08-13
 
 A feature-and-reliability release. It adds a few small conveniences and closes
@@ -602,6 +649,8 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.2.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.0
+[1.1.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.1.0
 [1.0.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.0.1
 [1.0.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.0.0
 [0.9.2]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.2
