@@ -16,7 +16,7 @@ use crate::buffer::Buffer;
 use crate::history;
 use crate::lastpos;
 use crate::manuscript::Manuscript;
-use crate::mode::{Finding, Mode, Overlay, VimState};
+use crate::mode::{AiAction, Finding, Mode, Overlay, VimState};
 use crate::project::Project;
 use crate::recovery;
 
@@ -615,18 +615,13 @@ pub struct App {
     /// when it's sent so the answer can be filed under it in [`qa_log`](Self::qa_log);
     /// taken when the answer applies, `None` when no ask is pending.
     pub(crate) pending_qa_question: Option<String>,
-    /// The accuracy concern the author named for a cultural & historical accuracy
-    /// pass (#973) — the period / place / domain to check against ("1850s London").
-    /// Captured when the author submits it in the concern prompt so the cost-gated
-    /// run (and any confirm chained after it) reaches the pass with the concern
-    /// intact; taken when the pass spawns, `None` when no accuracy pass is pending.
-    pub(crate) accuracy_concern: Option<String>,
-    /// The character pair the author chose for a relationship-trajectory pass
-    /// (#1046) — e.g. "Alice / Bob". Captured when the author submits it in the pair
-    /// prompt so the cost-gated run (and any confirm chained after it) reaches the
-    /// pass with the pair intact; taken when the pass spawns, `None` when no
-    /// relationship pass is pending.
-    pub(crate) relationship_pair: Option<String>,
+    /// The argument the author submitted for a cost-gated, argument-taking AI pass
+    /// — the accuracy concern (#973, "1850s London") or the relationship pair
+    /// (#1046, "Alice / Bob") — with the action it belongs to. Captured when the
+    /// author submits the argument prompt so the cost-gated run (and any confirm
+    /// chained after it) reaches the pass with it intact; taken when that action
+    /// runs, `None` when no such pass is pending.
+    pub(crate) pending_ai_arg: Option<(AiAction, String)>,
     /// The chapter files an on-demand continuity/setting pass is scoped to (#1054)
     /// — captured from the editor selection (or the cursor's chapter) when the
     /// author opens the AI palette from Visual mode, so the pass re-verifies just

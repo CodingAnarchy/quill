@@ -156,16 +156,12 @@ impl App {
     }
 
     /// Start a cultural & historical accuracy pass (#973) for the concern the author
-    /// named (`accuracy_concern`, set by the prompt) — flag passages that read as
-    /// factually / period / culturally inaccurate for that named concern, applied by
-    /// [`App::poll_ai`] into the revision-triage list. Findings only; author-invoked;
-    /// accuracy, NOT a sensitivity / representation review. The concern is *taken*
-    /// here (one pass per submission), so a later run re-prompts rather than reusing a
-    /// stale concern; a missing concern is a no-op (the prompt always sets one first).
-    pub(crate) fn analyze_accuracy(&mut self) {
-        let Some(concern) = self.accuracy_concern.take() else {
-            return;
-        };
+    /// named — flag passages that read as factually / period / culturally inaccurate
+    /// for that named concern, applied by [`App::poll_ai`] into the revision-triage
+    /// list. Findings only; author-invoked; accuracy, NOT a sensitivity /
+    /// representation review. A blank concern is a no-op (the prompt and the
+    /// assistant always supply one).
+    pub(crate) fn analyze_accuracy(&mut self, concern: &str) {
         let concern = concern.trim().to_string();
         if concern.is_empty() {
             return;
@@ -178,16 +174,11 @@ impl App {
     }
 
     /// Start a relationship-trajectory pass (#1046) for the pair the author chose
-    /// (`relationship_pair`, set by the prompt) — track the pair's state per chapter
-    /// and flag inconsistencies (contradictions / off-page reversals), applied by
-    /// [`App::poll_ai`] into the revision-triage list. Findings only; author-invoked;
-    /// it observes the drift, never rewrites the arc. The pair is *taken* here (one
-    /// pass per submission), so a later run re-prompts rather than reusing a stale
-    /// pair; a missing / blank pair is a no-op (the prompt always sets one first).
-    pub(crate) fn analyze_relationship(&mut self) {
-        let Some(pair) = self.relationship_pair.take() else {
-            return;
-        };
+    /// — track the pair's state per chapter and flag inconsistencies (contradictions /
+    /// off-page reversals), applied by [`App::poll_ai`] into the revision-triage
+    /// list. Findings only; author-invoked; it observes the drift, never rewrites the
+    /// arc. A blank pair is a no-op (the prompt and the assistant always supply one).
+    pub(crate) fn analyze_relationship(&mut self, pair: &str) {
         let pair = pair.trim().to_string();
         if pair.is_empty() {
             return;

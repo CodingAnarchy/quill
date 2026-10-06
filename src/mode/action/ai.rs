@@ -205,14 +205,32 @@ pub struct AiActionSpec {
     /// helpers are runnable; the thesaurus/image passes, the local views, and the
     /// off-manuscript copy generators are not.
     pub(crate) assistant_runnable: bool,
-    /// The JSON property name of this action's single free-text argument (#390) for
-    /// the actions that take one (the question for Ask, the concern for Accuracy, …),
-    /// or `None`. The single source the assistant's tool schema and its dispatch read.
-    pub(crate) text_arg: Option<&'static str>,
+    /// This action's single free-text argument (#390) for the actions that take one
+    /// (the question for Ask, the concern for Accuracy, …), or `None`. The single
+    /// source the assistant's tool schema, its dispatch, and the palette's argument
+    /// prompt read.
+    pub(crate) text_arg: Option<AiArg>,
     /// Which backend this action needs ([`Needs`]) — the single source the
     /// availability gate, the enable-AI on-ramp (#602), and the workflow sync/async
     /// split derive from.
     pub(crate) needs: Needs,
+}
+
+/// The free-text argument an [`AiAction`] takes (#390): what the assistant's tool
+/// schema names it, and how the palette prompts the author for it.
+pub struct AiArg {
+    /// The JSON property name the assistant supplies the argument under.
+    pub(crate) key: &'static str,
+    /// The label of the prompt the palette opens to ask the author for it.
+    pub(crate) label: &'static str,
+    /// The message a blank prompt entry cancels with, for the actions that can't
+    /// run without one; `None` hands a blank entry to the handler, which ignores it.
+    pub(crate) blank: Option<&'static str>,
+}
+
+/// An [`AiArg`] row for the SPECS table.
+const fn arg(key: &'static str, label: &'static str, blank: Option<&'static str>) -> AiArg {
+    AiArg { key, label, blank }
 }
 
 /// Shorthand for a finding-surfacing pass row: manuscript-costed, its finding kind,
@@ -225,7 +243,7 @@ const fn findings_spec(
     finding_kind: FindingKind,
     label: &'static str,
     palette: (&'static str, &'static str),
-    text_arg: Option<&'static str>,
+    text_arg: Option<AiArg>,
 ) -> AiActionSpec {
     AiActionSpec {
         action,
@@ -280,7 +298,7 @@ impl AiAction {
     pub(crate) const SPECS: &'static [AiActionSpec] = &[
         AiActionSpec {
             assistant_runnable: true,
-            text_arg: Some("question"),
+            text_arg: Some(arg("question", "Ask the manuscript: ", None)),
             ..plain_spec(
                 Self::Ask,
                 "ai:ask",
@@ -401,7 +419,7 @@ impl AiAction {
         ),
         AiActionSpec {
             assistant_runnable: true,
-            text_arg: Some("premise"),
+            text_arg: Some(arg("premise", "Premise or idea: ", None)),
             ..plain_spec(
                 Self::Brainstorm,
                 "ai:brainstorm",
@@ -417,7 +435,7 @@ impl AiAction {
         },
         AiActionSpec {
             assistant_runnable: true,
-            text_arg: Some("concept"),
+            text_arg: Some(arg("concept", "Concept / premise: ", None)),
             ..plain_spec(
                 Self::DraftCharacters,
                 "ai:draft-characters",
@@ -433,7 +451,7 @@ impl AiAction {
         },
         AiActionSpec {
             assistant_runnable: true,
-            text_arg: Some("concept"),
+            text_arg: Some(arg("concept", "Concept / premise: ", None)),
             ..plain_spec(
                 Self::DraftSetting,
                 "ai:draft-setting",
@@ -655,7 +673,12 @@ impl AiAction {
                 "Flag inaccuracies for a concern you name — accuracy, not sensitivity",
             ),
             // The named period / place / domain to check accuracy against (#973).
-            Some("concern"),
+            Some(arg(
+                "concern",
+                "Accuracy concern (e.g. 1850s London): ",
+                // Accuracy is per named concern, always — a blank entry cancels.
+                Some("Accuracy check cancelled — name a concern to check."),
+            )),
         ),
         findings_spec(
             Self::Relationship,
@@ -668,7 +691,12 @@ impl AiAction {
                 "Track a pair's arc per chapter + flag inconsistencies (no fixes)",
             ),
             // The character pair whose relationship trajectory to track (#1046).
-            Some("pair"),
+            Some(arg(
+                "pair",
+                "Character pair (e.g. Alice / Bob): ",
+                // The pass tracks a pair, so a blank entry cancels.
+                Some("Relationship pass cancelled — name a character pair."),
+            )),
         ),
         findings_spec(
             Self::Foreshadow,
@@ -734,7 +762,13 @@ impl AiAction {
 
     /// The JSON property name of this action's free-text argument (#390), or `None`.
     pub(crate) fn text_arg(self) -> Option<&'static str> {
-        self.spec().text_arg
+        self.arg().map(|a| a.key)
+    }
+
+    /// This action's free-text argument — its key, prompt label, and blank-entry
+    /// message — or `None` for the actions that take none.
+    pub(crate) fn arg(self) -> Option<&'static AiArg> {
+        self.spec().text_arg.as_ref()
     }
 
     /// Which backend this action needs ([`Needs`]) — a descriptor lookup, so the

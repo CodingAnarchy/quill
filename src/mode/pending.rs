@@ -72,8 +72,12 @@ pub enum Pending {
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.
     Rename { at: usize },
-    /// Text input: a question to ask the AI about the manuscript.
-    AskAi,
+    /// Text input: the free-text argument of an AI action that takes one (#390) —
+    /// the question for Ask, the premise / concept for the generative helpers
+    /// (#255–#257), the named concern for an accuracy check (#973), the character
+    /// pair for a relationship trajectory (#1046). The label and blank-entry rule
+    /// come from the action's [`arg`](AiAction::arg) descriptor.
+    AiArg(AiAction),
     /// Text input: a query for semantic "find similar scenes" (#924) — the passages
     /// most similar to this text, ranked with scores + jumpable citations. Prefilled
     /// with the visual selection when one is active, so the author can find scenes
@@ -228,19 +232,6 @@ pub enum Pending {
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
     ExCommand,
-    /// Text input: a premise / idea to brainstorm story ideas from (#255).
-    Brainstorm,
-    /// Text input: a concept to draft a starter character cast from (#256).
-    DraftCharacters,
-    /// Text input: a concept to draft a starter setting bible from (#257).
-    DraftSetting,
-    /// Text input: the concern (period / place / domain, e.g. "1850s London") to run
-    /// a cultural & historical accuracy check against (#973). Author-invoked;
-    /// accuracy, not sensitivity / representation.
-    AccuracyConcern,
-    /// Text input: the character pair (e.g. "Alice / Bob") whose relationship
-    /// trajectory to track across the book (#1046). Author-invoked; findings only.
-    RelationshipPair,
     /// Text input: a plain-language description of a workflow to generate (#232).
     DescribeWorkflow,
     /// Text input: confirm or edit the name for the workflow the AI proposed
@@ -319,6 +310,42 @@ pub enum Pending {
     /// AI action the author was reaching for, re-run once AI is enabled and keyed,
     /// or `None` for the plain "Enable AI assistance" action.
     ConfirmEnableAi { resume: Option<AiAction> },
+}
+
+impl Pending {
+    /// Whether this is a single-key confirmation (y/N and its kin) rather than a
+    /// text prompt. Confirmations answer on the first key; every other variant is
+    /// a text prompt that shares the line-editing keys and resolves on Enter — so
+    /// a new text prompt needs only its Enter handler, while a new confirmation
+    /// must be listed here.
+    pub(crate) const fn is_confirm(self) -> bool {
+        matches!(
+            self,
+            Self::Quit
+                | Self::Delete { .. }
+                | Self::Merge { .. }
+                | Self::ClearAnnotations
+                | Self::ConfirmAi { .. }
+                | Self::ConfirmRefreshBibles { .. }
+                | Self::ConfirmQueuePasses { .. }
+                | Self::ResumePassQueue
+                | Self::ConfirmBatchUpdate
+                | Self::ConfirmRemoveModel(_)
+                | Self::StripPlaintextKey(_)
+                | Self::ConfirmEnableAi { .. }
+                | Self::ConfirmRestore
+                | Self::ConfirmRestoreProject
+                | Self::ConfirmRestoreBackup
+                | Self::ConfirmRecovery
+                | Self::ConfirmSwitch
+                | Self::ConfirmRemoveBook { .. }
+                | Self::ConfirmDeleteProject
+                | Self::WizardStart
+                | Self::ConfirmPortraits
+                | Self::ConfirmScene
+                | Self::ConfirmConfig
+        )
+    }
 }
 
 /// Which metadata field a [`Pending::SetMeta`] prompt writes. Chapter fields
