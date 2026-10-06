@@ -6,6 +6,7 @@
 //! Extracted from [`super`] as an `impl App` block on the shared `App` type;
 //! the fields these touch stay defined in `mod.rs`.
 
+use crate::annotation::Remapper;
 use crate::mode::{Command, Mode, Palette, PaletteItem};
 
 use super::App;
@@ -26,6 +27,24 @@ impl App {
             w.eq_ignore_ascii_case(&marker) || self.project.is_accepted(w)
         });
         self.spell_scratch = scratch;
+        self.spell_rev = self.edit_buffer().revision();
+    }
+
+    /// Carry the spell flags through a burst of edits (the deltas `mapper`
+    /// composes, drained from the buffer at revision `base`), so the underlines
+    /// stay on their words while typing without a full spell pass per keystroke.
+    /// Only valid when the flags were computed (or last remapped) at `base`;
+    /// otherwise they're left for [`on_input_settled`](Self::on_input_settled) to
+    /// recompute. Each endpoint maps through the same edits as the text, so a
+    /// remapped range stays on char boundaries and inside the buffer; a word an
+    /// edit consumed is dropped. A word being typed is re-judged on the idle pass.
+    pub(crate) fn remap_spell_flags(&mut self, mapper: &Remapper, base: u64) {
+        if base == 0 || self.spell_rev != base {
+            return;
+        }
+        self.spell_flags
+            .retain_mut(|f| mapper.remap_range(f.0, f.1).map(|r| *f = r).is_some());
+        self.spell_rev = self.edit_buffer().revision();
     }
 
     /// Move the cursor to the next (`dir >= 0`) or previous misspelled word in the
@@ -62,6 +81,9 @@ impl App {
     /// (#358): add it (persisted to `dictionary.txt`), then clear the flag. The
     /// cursor must be on (or just past) a misspelled word; otherwise it says so.
     pub(crate) fn accept_word_at_cursor(&mut self) {
+        // Judge the word as it stands now — between idle passes the flags are only
+        // remapped, so a word mid-edit may not be (or no longer be) misspelled.
+        self.refresh_spell_flags();
         let Some((s, e)) = self.flagged_word_at_cursor() else {
             self.message = Some("No flagged word at the cursor.".into());
             return;

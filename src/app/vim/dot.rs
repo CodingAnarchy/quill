@@ -50,6 +50,11 @@ impl App {
         if self.dot_composing() {
             return;
         }
+        // A command settling back into resting Normal mode is a Vim undo step:
+        // `u` reverses one Normal-mode command, or one whole Insert session. The
+        // idle pass only seals on a pause in input, so a quick `ifoo<Esc>dd`
+        // would otherwise fold into a single undo group.
+        self.edit_buffer_mut().seal_undo_group();
         self.dot_settle();
     }
     /// Whether a change command is mid-composition: an operator or a multi-key

@@ -547,6 +547,17 @@ impl Manuscript {
 
     // --- Recovery ----------------------------------------------------------
 
+    /// The manifest indices of the window's dirty chapters, in window order —
+    /// the cheap half of [`dirty_segments`](Self::dirty_segments) (no text
+    /// copied), which the recovery capture uses as its change key.
+    pub fn dirty_chapters(&self) -> Vec<usize> {
+        self.segments
+            .iter()
+            .filter(|s| s.dirty)
+            .map(|s| s.index)
+            .collect()
+    }
+
     /// Each dirty segment's `(manifest index, prose body)`, snapshotting the
     /// in-memory buffer — not the on-disk files (#566). The body is normalized
     /// the same way [`save`](Self::save) computes it, with front matter left out

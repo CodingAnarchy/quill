@@ -113,6 +113,11 @@ impl Buffer {
         self.word_count_cache.set(None); // the whole document changed (#151)
         self.syntax = Syntax::new(&self.rope.to_string());
         self.syntax_dirty = false;
+        // The text changed wholesale: a new content revision (so the recovery
+        // sidecar captures the restored text), but `edits` is left alone — Vim's
+        // `.` reads it, and an undo is not a change `.` should repeat.
+        self.revision = fresh_revision();
+        self.anchor_base = NO_REVISION;
     }
 
     /// Keep the cursor inside the document after a snapshot restore.

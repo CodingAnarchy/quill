@@ -67,6 +67,12 @@ pub struct App {
     /// recomputed on the idle tick (never the keystroke path) and underlined by
     /// the editor. Empty until the first idle pass.
     pub(crate) spell_flags: Vec<(usize, usize)>,
+    /// The edit buffer [`revision`](crate::buffer::Buffer::revision) the
+    /// `spell_flags` are aligned with. The per-batch settled pass remaps the flags
+    /// through each burst's edit deltas (keeping this current) and recomputes them
+    /// only when the buffer changed some other way — so a stale flag never
+    /// underlines shifted text, without a full spell pass per keystroke.
+    pub(crate) spell_rev: u64,
     /// Reusable scratch holding the active buffer's text for the idle spell pass
     /// (#780), so `refresh_spell_flags` doesn't allocate a fresh whole-document
     /// `String` every idle tick — it refills this in place instead.
@@ -512,6 +518,15 @@ pub struct App {
     /// so the idle cadence clears it exactly once when the buffer goes clean
     /// rather than issuing a remove on every idle tick.
     pub(super) recovery_written: bool,
+    /// What the last successful recovery capture wrote: the edit buffer's content
+    /// [`revision`](crate::buffer::Buffer::revision) plus the chapter files it
+    /// attributed text to. An idle pass whose key matches skips the copy,
+    /// serialize, and fsync'd write entirely — the sidecar already holds exactly
+    /// this. `None` when nothing has been captured (or the sidecar was cleared).
+    pub(super) recovery_key: Option<super::persistence::RecoveryKey>,
+    /// When the sidecar was last written, for the capture throttle
+    /// ([`RECOVERY_MIN_INTERVAL`](super::persistence::RECOVERY_MIN_INTERVAL)).
+    pub(super) recovery_captured_at: Option<std::time::Instant>,
     /// The project the author chose in the browser, held while the unsaved-
     /// changes confirm is open (#270); taken when they confirm the switch.
     pub(super) pending_switch: Option<PathBuf>,

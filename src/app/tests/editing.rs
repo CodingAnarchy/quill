@@ -500,3 +500,29 @@ fn replace_y_does_not_count_or_loop_on_seam_newlines() {
         "no phantom count: pressing y on unremovable seams replaces nothing"
     );
 }
+
+#[test]
+fn a_typing_burst_settled_per_batch_undoes_as_one_group() {
+    // The event loop runs only the cheap settled pass between key batches and
+    // seals the undo group on a pause (the debounced idle pass). Typing a phrase
+    // key by key — each key its own batch, as at normal typing speed — must still
+    // undo as one step, not one character per Ctrl-Z.
+    let (mut app, _dir) = two_chapter_app("burst-undo");
+    let original = app.buffer.text();
+    for c in "hello world".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+        app.on_input_settled(); // what the event loop runs after each batch
+    }
+    assert!(
+        app.buffer.text().contains("hello world"),
+        "the burst landed"
+    );
+    app.on_idle(); // the author pauses: the debounced idle pass
+
+    app.on_key(ctrl('z'));
+    assert_eq!(
+        app.buffer.text(),
+        original,
+        "one undo reverses the whole burst"
+    );
+}

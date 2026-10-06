@@ -151,6 +151,13 @@ What they assert:
 - `tally_is_independent_of_project_size` (`app/tests/chapters.rs`) — the daily
   word tally (every idle tick) touches only the chapters that changed, not all of
   them; flat (~6µs) even at 2000 chapters.
+- `keystroke_with_settled_pass_stays_within_a_frame`
+  (`app/tests/chapters_counts_and_perf.rs`) — a keystroke as the event loop pays
+  for it (`on_key` + the per-batch `on_input_settled` pass + the throttled
+  recovery tick) on a dirty ~6k-word chapter stays under a frame (~8ms, mostly
+  the reparse). The heavy idle work (spell re-judging, tally, the fsync'd recovery
+  write, undo sealing) is debounced to a pause in input (`on_quiet`); running it
+  per batch again would roughly double this and trip the guard.
 - `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
   words), so flagging on idle never stutters. It runs on the idle tick, never the

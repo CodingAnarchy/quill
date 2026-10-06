@@ -3,9 +3,11 @@
 //! on a clean save or an explicit discard.
 
 use super::*;
+use crate::app::persistence::RECOVERY_MIN_INTERVAL;
 use crate::mode::Pending;
 use crate::recovery;
 use std::fmt::Write;
+use std::time::Instant;
 
 /// True while the recovery prompt is open.
 fn at_recovery_prompt(app: &App) -> bool {
@@ -400,4 +402,70 @@ fn quitting_despite_unsaved_changes_discards_the_sidecar() {
         recovery::read(&dir).is_none(),
         "an explicit quit-with-unsaved discards recovery"
     );
+}
+
+#[test]
+fn an_unchanged_buffer_does_not_rewrite_the_sidecar() {
+    // Each capture is a durable (fsync'd) write; an idle pass with no new text —
+    // after an arrow key, a mouse move, a pause — must not repeat it.
+    let (mut app, dir) = two_chapter_app("rec-unchanged");
+    type_str(&mut app, "new words");
+    app.on_idle();
+    assert!(recovery::read(&dir).is_some(), "the edit was captured");
+
+    // Remove the sidecar behind the app's back: a rewrite would bring it back.
+    recovery::clear(&dir);
+    app.on_key(key(KeyCode::Left)); // a motion, no text change
+    app.on_idle();
+    assert!(
+        recovery::read(&dir).is_none(),
+        "nothing changed, so nothing was rewritten"
+    );
+
+    type_str(&mut app, "!");
+    app.on_idle();
+    let rec = recovery::read(&dir).expect("a change is captured again");
+    assert!(rec.body.contains("new word!s"), "{}", rec.body);
+}
+
+#[test]
+fn an_undo_is_captured_on_the_next_idle_pass() {
+    // Undo swaps the text without an edit; the capture's change key must still
+    // see it, or the sidecar would keep the pre-undo text.
+    let (mut app, dir) = two_chapter_app("rec-undo");
+    type_str(&mut app, " extra");
+    app.on_idle();
+    type_str(&mut app, " more");
+    app.on_idle();
+    assert!(recovery::read(&dir).unwrap().body.contains("extra more"));
+
+    app.on_key(ctrl('z')); // drop " more"
+    app.on_idle();
+    let rec = recovery::read(&dir).expect("still dirty, still captured");
+    assert!(rec.body.contains("extra"), "{}", rec.body);
+    assert!(
+        !rec.body.contains("more"),
+        "the sidecar holds the post-undo text: {}",
+        rec.body
+    );
+}
+
+#[test]
+fn a_throttled_capture_is_deferred_not_dropped() {
+    // The event loop's capture is rate-limited while edits keep coming; a write
+    // the throttle holds back lands on a later tick, so the last edit of a burst
+    // is never left uncaptured.
+    let (mut app, dir) = two_chapter_app("rec-throttle");
+    type_str(&mut app, "A");
+    app.tick_recovery();
+    assert!(recovery::read(&dir).unwrap().body.contains('A'));
+
+    type_str(&mut app, "B");
+    app.tick_recovery(); // within the interval: held back
+    assert!(!recovery::read(&dir).unwrap().body.contains('B'));
+
+    // Once the interval has passed, the next tick writes the latest text.
+    app.recovery_captured_at = Instant::now().checked_sub(RECOVERY_MIN_INTERVAL);
+    app.tick_recovery();
+    assert!(recovery::read(&dir).unwrap().body.contains("AB"));
 }

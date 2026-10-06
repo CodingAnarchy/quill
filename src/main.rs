@@ -47,7 +47,7 @@ mod wrap;
 use std::io::{self, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::Show,
@@ -75,6 +75,19 @@ static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 /// The `quill <version>` banner printed for `--version`/`-V` (#516). The version
 /// is the crate version from `Cargo.toml`, baked in at compile time.
 const VERSION_LINE: &str = concat!("quill ", env!("CARGO_PKG_VERSION"));
+
+/// The event loop's tick: the longest it waits for input before re-running the
+/// `tick_*`/`poll_*` calls, so AI results, sprints, and autosave surface with no
+/// keypress.
+const TICK: Duration = Duration::from_millis(100);
+
+/// How long input must stay quiet before the debounced idle pass
+/// ([`App::on_quiet`]) runs. Long enough to span the gaps between keys in a
+/// typing burst (typically ~100–200ms), so a burst stays on the cheap per-batch
+/// path; short enough that spell flags, the revision passes, and the word tally
+/// catch up as soon as the author pauses. It is also the undo grouping: keys
+/// typed with no gap this long undo together.
+const IDLE_QUIET: Duration = Duration::from_millis(200);
 
 /// What the first command-line argument asks Quill to do. Decided by [`parse_arg`]
 /// before any filesystem work so a flag-style argument (`--help`, `--version`) is
@@ -547,6 +560,8 @@ impl Drop for Tui {
 }
 
 fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
+    // When the last input batch was handled, while an idle pass is still owed.
+    let mut idle_owed_since: Option<Instant> = None;
     while !app.should_quit {
         // Surface a finished AI request (runs on a worker thread) before drawing,
         // so its answer appears within the poll window even with no keypress.
@@ -563,18 +578,37 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         app.poll_model_download(); // surface a finished local-model download (#382)
         app.poll_batch_update(); // apply/report a finished background bible batch (#950)
         tui.draw(app)?;
+        // Crash-recovery capture, after the frame so a typed key has already
+        // echoed: a no-op unless the text changed since the last capture, and at
+        // most one write per `RECOVERY_MIN_INTERVAL` — so sustained typing that
+        // never pauses long enough for the idle pass is still captured.
+        app.tick_recovery();
 
-        // Poll so we can stay responsive without busy-spinning.
-        if event::poll(Duration::from_millis(100))? {
+        // Wait for input, but no longer than the tick (so AI results, sprints, and
+        // autosave surface without a keypress) — or, while an idle pass is owed,
+        // than the rest of the quiet window.
+        let timeout =
+            idle_owed_since.map_or(TICK, |t| IDLE_QUIET.saturating_sub(t.elapsed()).min(TICK));
+        if event::poll(timeout)? {
             app.handle_event(event::read()?);
             // Drain the rest of the input burst before doing any heavier work,
             // so a fast typist (or a key-repeat) is handled as one batch.
             while event::poll(Duration::ZERO)? {
                 app.handle_event(event::read()?);
             }
-            // Input has gone idle: reparse for highlighting and tally the day's
-            // word delta. Kept off the per-keystroke path so typing stays instant.
-            app.on_idle();
+            // Per batch, only the cheap pass that keeps the renderer's byte-offset
+            // caches (syntax, folds, annotations, spell flags) aligned with the
+            // edited text; the loop then draws at once, so the key echoes before
+            // any heavy idle work.
+            app.on_input_settled();
+            idle_owed_since = Some(Instant::now());
+        } else if idle_owed_since.is_some_and(|t| t.elapsed() >= IDLE_QUIET) {
+            // Input has been quiet for `IDLE_QUIET`: the debounced idle pass —
+            // re-judge spelling and the revision passes, tally the day's words,
+            // seal the undo group (so a burst undoes as one step), and capture
+            // recovery. Kept off the per-batch path so typing stays instant.
+            app.on_quiet();
+            idle_owed_since = None;
         }
     }
     Ok(())

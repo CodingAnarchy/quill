@@ -99,6 +99,7 @@ Corpora are generated deterministically in-test, so the suite needs no fixtures.
 | `switching_books_is_fast_in_a_series` | `project.rs` | 2 books × 750 chapters (#329) | < 500 ms | Switching the active book caches the target book's chapters once (the bounded work `open` does for one book) — never the whole series. (Typically ~10 ms.) |
 | `tree_rows_are_fast_for_a_series` | `app/tests/books.rs` | 4 books × 200 chapters, all expanded (#330) | < 16 ms | Building the tree navigator's visible rows reads only cached per-chapter metadata (titles, roles), never files — so even fully expanded it stays within a frame. (Typically ~70 µs.) |
 | `tally_is_independent_of_project_size` | `app/tests/chapters.rs` | 2000 chapters on disk | < 30 µs / idle tick | The daily word tally touches only the chapters that changed (the live active one, plus any whose cache moved), not all of them. A regression to the per-chapter walk would be ~50–100 µs here. (Typically ~6 µs.) |
+| `keystroke_with_settled_pass_stays_within_a_frame` | `app/tests/chapters_counts_and_perf.rs` | ~6k-word chapter on disk, dirty | < 12 ms / keystroke | A keystroke as the event loop pays for it: `on_key` + the per-batch settled pass (reparse, fold prune, annotation/spell-flag re-anchoring) + the throttled recovery tick. The heavy idle work — spell re-judging, revision passes, tally, the fsync'd recovery write, sealing the undo group — is debounced to a ~200 ms pause in input and must stay off this path; running it per batch (the old behavior, ~16 ms here) trips the budget. The rest is dominated by the incremental reparse. (Typically ~8 ms on macOS.) |
 | `save_is_independent_of_project_size` | `app/tests/chapters.rs` | 150 vs 1500 chapters on disk (#867) | < 500 µs at 1500, and flat vs 150 | A save (Ctrl-S / autosave / chapter-switch flush) records a snapshot whose TODO count and project word total read maintained caches — the TODO count per chapter and a running word total — never a per-chapter disk sweep. The roll-up cost must stay flat from 150 to 1500 chapters; a regression to the old per-chapter `read_to_string` + TODO scan would make the 1500-chapter case ~10× the 150-chapter one (milliseconds). (Typically ~3–7 µs.) |
 
 Budgets are deliberately generous headroom over the typical measured time: they
@@ -110,6 +111,12 @@ typical so it keeps defending the win.
 
 - **Parsing is off the keystroke path** — record the edit on keypress, reparse
   on idle (the `main.rs` event loop). The keystroke guard enforces this.
+- **Heavy idle work waits for a pause** — per input batch the loop runs only
+  `on_input_settled` (the reparse plus re-anchoring the byte-offset caches the
+  renderer reads), draws, and runs the rest (`on_quiet`) once input has been
+  quiet for `IDLE_QUIET`. The recovery sidecar is rewritten only when the text
+  changed, at most once per `RECOVERY_MIN_INTERVAL`. The settled-keystroke guard
+  enforces this.
 - **Rendering never touches the filesystem** — file-derived data (word counts,
   front-matter metadata) is cached on `ChapterEntry` at open and kept current as
   the author edits. The render and navigation guards enforce this.
