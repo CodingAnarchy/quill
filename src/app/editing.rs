@@ -57,6 +57,11 @@ impl App {
     /// chapter the cursor was in. Stays in continuous view if the save fails, so
     /// no edits are lost.
     pub(super) fn leave_continuous(&mut self) {
+        // The window is saved and dropped below: let a background save of it
+        // land first, or stay put if the disk won't answer.
+        if self.manuscript.is_some() && !self.settle_saves() {
+            return;
+        }
         // Fold the burst's pending edits into the live annotation offsets before we
         // persist them below (#302/#370): leaving the view is a keystroke-path save,
         // and the deltas since the last idle tick aren't in `self.annotations` yet —
@@ -526,6 +531,13 @@ impl App {
             .as_ref()
             .is_some_and(|m| m.would_reslide(&self.project));
         if will_reslide {
+            // A reslide saves the window and rebuilds it from disk; let a
+            // background save land first. If the disk won't answer, don't page:
+            // rewind the move, as for a failed reslide below (#892).
+            if !self.settle_saves() {
+                self.edit_buffer_mut().cursor = before;
+                return;
+            }
             self.reanchor_annotations();
             self.persist_annotations();
         }
@@ -561,107 +573,6 @@ impl App {
         // keystrokes would insert blind into the invisible body (#975). The
         // continuous view clears folds, so this is a cheap no-op there.
         self.reveal_fold_at_cursor();
-    }
-
-    /// Save the active edit target (the continuous window, or the single chapter).
-    pub(super) fn save_edit(&mut self) {
-        self.message = Some(match self.write_active() {
-            Ok(()) => "Saved".into(),
-            Err(e) => e,
-        });
-        self.finalize_save();
-        // Run the on-save workflow trigger (#228). This is the explicit-save
-        // command (Ctrl-S / `:w`); implicit flushes (chapter switch, leaving the
-        // continuous view) save the buffer directly and intentionally don't fire
-        // it. A no-op when this save is itself a workflow's own step — no recursion.
-        self.trigger_on_save();
-    }
-
-    /// Write the active chapter (or the continuous window) to disk through the
-    /// same atomic, front-matter-preserving path as Ctrl-S, with the persistence
-    /// that travels with a save — annotations in lockstep (#302/#370), the
-    /// word-count cache, and a clean sibling pane (#163). Returns the error
-    /// message on failure. No status message and no on-save trigger, so it's
-    /// shared by the explicit save (which adds those) and autosave (#409).
-    fn write_active(&mut self) -> Result<(), String> {
-        // The project is open read-only because another live instance holds it
-        // (#871): refuse the write rather than race the owner's saves and clobber
-        // the shared chapter files. The open-time warning already told the author.
-        if self.project.is_read_only() {
-            return Err(
-                "Read-only: this project is open in another Quill instance; not saved.".to_string(),
-            );
-        }
-        if let Some(mut m) = self.manuscript.take() {
-            let result = m.save(&mut self.project);
-            self.manuscript = Some(m);
-            result.map_err(|e| format!("Save failed: {e}"))?;
-            self.adopt_view_annotations_if_stale();
-            self.persist_annotations();
-        } else {
-            self.buffer
-                .save()
-                .map_err(|e| format!("Save failed: {e}"))?;
-            self.cache_focus_words();
-            self.refresh_split_sibling();
-            // A save in the same burst as a chapter switch must persist the new
-            // chapter's notes, not the previous chapter's set (which has none).
-            self.adopt_view_annotations_if_stale();
-            self.persist_annotations();
-        }
-        Ok(())
-    }
-
-    /// Autosave on the idle timer (#409): when enabled and there are unsaved
-    /// changes, save after the configured seconds of genuine idle. Driven from the
-    /// event loop (like `tick_sprint`), so it catches an idle pause even with no
-    /// keypress. Cheap and O(1) when off or already saved.
-    pub(crate) fn tick_autosave(&mut self) {
-        let secs = self.autosave_interval_secs;
-        if secs == 0 || !self.edit_dirty() {
-            return;
-        }
-        if self.last_activity.elapsed() >= std::time::Duration::from_secs(secs) {
-            self.autosave();
-            // Reset the idle window so a failed save doesn't retry every tick.
-            self.last_activity = std::time::Instant::now();
-        }
-    }
-
-    /// The autosave write: the same persistence as Ctrl-S minus the "Saved"
-    /// message and the on-save trigger (so an autosave-driven workflow can't
-    /// thrash, #228). On failure it stays dirty and surfaces the error, so a full
-    /// disk or lost write permission can't fail silently every idle tick while the
-    /// author keeps typing, trusting autosave (reliability audit).
-    fn autosave(&mut self) {
-        if let Err(e) = self.write_active() {
-            self.message = Some(format!(
-                "Autosave failed: {e} — save with Ctrl-S or check disk"
-            ));
-            return;
-        }
-        self.finalize_save();
-    }
-
-    /// The post-write tail shared by an explicit save and an autosave: a clean
-    /// buffer means there's nothing left to recover (#263), and either way we
-    /// checkpoint today's momentum to the history log.
-    fn finalize_save(&mut self) {
-        // A save is the one moment pure typing can change git status; flag it so
-        // the next idle tick recomputes the count off-thread (#779), rather than
-        // re-walking the tree on every idle burst.
-        self.mark_vc_status_dirty();
-        // A save reached disk: note that an automatic off-site backup is owed
-        // (#887). Just sets a flag — the actual push is decided and spawned off the
-        // save path by the cadence hook, so a save never touches the network.
-        self.mark_backup_on_save();
-        if !self.edit_dirty() {
-            self.clear_recovery();
-        }
-        self.persist_snapshot();
-        // Keep the resume point current on every save, so an unclean exit after a
-        // save still reopens where the author was working (#588).
-        self.persist_position();
     }
 }
 

@@ -34,6 +34,9 @@ bin-dir = "quill{ binary-ext }"
 quill-core = { path = "crates/quill-core" }
 ratatui = "0.30.2"
 crossterm = "0.29"
+# The save path snapshots the buffer's rope (an O(1) clone) for the background
+# writer (#1227). Already built for quill-core.
+ropey = "1.6"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
 serde = { version = "1.0.228", features = ["derive"] }

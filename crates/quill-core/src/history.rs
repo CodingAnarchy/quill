@@ -121,7 +121,9 @@ pub fn for_date(root: &Path, date: &str) -> Option<Snapshot> {
 /// accumulate within a session; [`load`] coalesces them (latest wins) and
 /// [`compact`] tidies the file. Creates `.quill/` if needed.
 pub fn persist(root: &Path, snap: &Snapshot) -> std::io::Result<()> {
-    fs::create_dir_all(root.join(DIR))?;
+    // Only `.quill/` itself: a background write that lands after the project
+    // folder was renamed or removed fails instead of recreating it.
+    atomic::create_leaf_dir(&root.join(DIR))?;
     let mut line = serde_json::to_string(snap).map_err(std::io::Error::other)?;
     line.push('\n');
     let mut file = OpenOptions::new()
@@ -159,7 +161,9 @@ pub fn persist_session(root: &Path, session: &SessionRecord) -> std::io::Result<
     if session.added == 0 && session.removed == 0 {
         return Ok(()); // an empty session isn't worth a line
     }
-    fs::create_dir_all(root.join(DIR))?;
+    // Only `.quill/` itself: a background write that lands after the project
+    // folder was renamed or removed fails instead of recreating it.
+    atomic::create_leaf_dir(&root.join(DIR))?;
     let mut line = serde_json::to_string(session).map_err(std::io::Error::other)?;
     line.push('\n');
     let mut file = OpenOptions::new()

@@ -100,10 +100,7 @@ fn path(root: &Path) -> PathBuf {
 /// renamed or removed fails instead of resurrecting the folder.
 pub fn write(root: &Path, rec: &Recovery) -> io::Result<()> {
     let json = serde_json::to_string(rec).map_err(io::Error::other)?;
-    match fs::create_dir(root.join(DIR)) {
-        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
-        _ => {}
-    }
+    atomic::create_leaf_dir(&root.join(DIR))?;
     atomic::write(&path(root), json.as_bytes())
 }
 

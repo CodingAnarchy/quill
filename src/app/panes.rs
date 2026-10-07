@@ -372,6 +372,10 @@ impl App {
     /// pane's words away with nothing on screen to say so. Callers abort and report;
     /// the message is set here.
     pub(super) fn close_split_if_any(&mut self) -> Result<(), ()> {
+        // The other pane may show the file a background save is writing.
+        if self.split.is_some() && !self.settle_saves() {
+            return Err(());
+        }
         // Borrow the pane just long enough to save it, so the error message below
         // isn't fighting the borrow of `self.split`.
         let save_err = match self.split.as_mut() {

@@ -561,6 +561,18 @@ pub struct App {
     /// The background thread that writes and clears the sidecar, so a durable
     /// write on a busy disk never blocks typing.
     pub(super) recovery_writer: recovery::writer::Writer,
+    /// The background thread that writes the project's files on save — the
+    /// chapters, the annotations side file, the history log, the resume point —
+    /// so a save (autosave above all) never blocks typing on a slow disk.
+    pub(super) file_writer: super::saving::FileWriter,
+    /// Saves handed to [`file_writer`](Self::file_writer) whose outcome hasn't
+    /// been applied yet, oldest first.
+    pub(super) pending_saves: Vec<super::saving::PendingSave>,
+    /// Test seam: settle every file write as soon as it's queued (the default in
+    /// tests, so a test can read the disk right after a save); the tests of the
+    /// asynchronous behavior turn it off.
+    #[cfg(test)]
+    pub(super) settle_saves_eagerly: bool,
     /// The project the author chose in the browser, held while the unsaved-
     /// changes confirm is open (#270); taken when they confirm the switch.
     pub(super) pending_switch: Option<PathBuf>,
