@@ -5,6 +5,55 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-06
+
+A performance and reliability release. Typing, drawing, saving, and startup are
+all substantially faster, and three ways an edit could silently lose data are
+fixed. No project format changes; every 1.x project opens unchanged.
+
+### Fixed
+
+- **Annotations are no longer erased on disk when switching chapters quickly.**
+  Switching *through* a chapter in one burst of input (holding Ctrl-n), saving
+  right after switching into a chapter, or adding a note right after switching
+  could overwrite that chapter's saved annotations with an empty set.
+- **Per-project settings in `book.toml` survive a save.** Any structural edit
+  (adding, renaming, or reordering a chapter, setting a goal, converting to a
+  series) rewrote `book.toml` without its `[quill.*]` overrides, silently
+  dropping them. Top-level keys this version doesn't recognize (for example from
+  a newer Quill) are now kept as well, and a save refuses to overwrite a
+  `book.toml` that no longer parses.
+- **Undo takes back a whole burst of typing again.** At normal typing speed
+  each keystroke had become its own undo step, so undo went back one character
+  at a time and could reach only the last ~256 characters typed.
+- **The outline pane scrolls in large projects.** With more chapters than fit,
+  the active or selected chapter could sit below the pane with no way to reach
+  it, and the total-words line was never visible. The pane now follows the
+  selection and keeps the total pinned at the bottom.
+- **Plot, Theme, Semantic find, and Echo offer to turn AI on** when it's off,
+  like every other AI action, instead of stopping at "AI is disabled".
+- **The status bar's right-hand count lines up with the edge** when the bar
+  contains symbols such as ● or ✓.
+
+### Changed
+
+- **Typing is near-instant on long chapters.** Only the paragraph being edited
+  is re-parsed for highlighting (about 0.1ms per keystroke on a 6,000-word
+  chapter, down from ~10ms), and the heavier follow-up work — spell check, style
+  and repetition marks, the word tally, the crash-recovery snapshot — runs once
+  you pause rather than after every key, and is skipped entirely when nothing
+  it depends on changed.
+- **Drawing styled text is ~10× faster** (about 0.25ms per frame), including
+  with an active search or many spelling and annotation marks.
+- **The crash-recovery file is written only when the text changed**, at most
+  every two seconds, instead of being fully rewritten and flushed to disk after
+  every key.
+- **Saves and chapter switches do less disk work.** `annotations.toml` and the
+  remembered-position file are rewritten only when they change (a save is about
+  3× faster; a continuous-view save about 5×).
+- **Startup opens the project once** and loads the remembered chapter directly
+  (a 1,500-chapter project starts about twice as fast).
+
 ## [1.2.0] - 2026-10-05
 
 A small feature release centered on annotations, plus two fixes for edits and
@@ -649,6 +698,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.2.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.0
 [1.1.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.1.0
 [1.0.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.0.1

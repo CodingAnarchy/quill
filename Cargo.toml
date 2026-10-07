@@ -1,6 +1,6 @@
 [package]
 name = "quill"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 description = "A terminal editor optimized for writing novels"
 license = "MIT"
