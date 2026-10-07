@@ -20,7 +20,7 @@
 use super::App;
 use crate::config;
 use crate::fonts::{self, FontFamily};
-use crate::mode::{Command, FontTarget, Mode, Palette, PaletteItem};
+use crate::mode::{Command, FontTarget, PaletteItem};
 use crate::project::{read_existing, Project};
 
 /// The project subdirectory downloaded fonts live in — also the prefix of the
@@ -51,12 +51,7 @@ impl App {
                 PaletteItem::new(f.name, desc, Command::PickFontRole(i))
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Fonts — OFL (open-licensed)",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Fonts — OFL (open-licensed)", items);
     }
 
     /// After a family is chosen, ask which slot it fills (#494): the body text, the
@@ -78,12 +73,7 @@ impl App {
                 FontTarget::Both,
             ),
         ];
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Apply font to…",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Apply font to…", items);
     }
 
     /// Download the chosen family (if it isn't already cached in the project) and
@@ -253,7 +243,7 @@ const fn target_label(target: FontTarget) -> &'static str {
 mod tests {
     use super::*;
     use crate::app::tests::{app_scratch_dir, open_test_app, TempProject};
-    use crate::mode::Action;
+    use crate::mode::{Action, Mode};
 
     /// A one-chapter project on disk whose manifest a font test inspects.
     fn font_app(name: &str) -> (App, TempProject) {

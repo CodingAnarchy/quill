@@ -117,6 +117,7 @@ mod snippets;
 mod spell;
 mod sprint;
 mod style_flags;
+mod typed_passes;
 mod typography;
 mod vcs;
 mod vcs_concurrency;

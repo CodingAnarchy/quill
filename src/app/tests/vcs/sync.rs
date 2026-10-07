@@ -78,16 +78,12 @@ fn a_landing_sync_stashes_per_chapter_conflicts_for_resolution() {
     // covered end-to-end by the vcs tests.
     let (mut app, _dir) = two_chapter_app("vc-sync-conflicts");
     git_menu(&mut app, 0); // Initialize
-    assert!(app.sync_conflicts().is_empty(), "none before a sync");
+    assert!(app.sync_conflicts.is_empty(), "none before a sync");
 
     app.spawn_sync_conflicts_for_test(&["one.md", "two.md"]);
     app.settle_vc_for_test();
 
-    let paths: Vec<&str> = app
-        .sync_conflicts()
-        .iter()
-        .map(|c| c.path.as_str())
-        .collect();
+    let paths: Vec<&str> = app.sync_conflicts.iter().map(|c| c.path.as_str()).collect();
     assert_eq!(
         paths,
         vec!["one.md", "two.md"],
@@ -111,13 +107,13 @@ fn a_clean_sync_clears_any_prior_conflicts() {
     git_menu(&mut app, 0); // Initialize
     app.spawn_sync_conflicts_for_test(&["one.md"]);
     app.settle_vc_for_test();
-    assert!(!app.sync_conflicts().is_empty(), "a conflict was stashed");
+    assert!(!app.sync_conflicts.is_empty(), "a conflict was stashed");
 
     // A clean pull carries no conflicts → the prior set is cleared.
     app.spawn_landing_pull_for_test();
     app.settle_vc_for_test();
     assert!(
-        app.sync_conflicts().is_empty(),
+        app.sync_conflicts.is_empty(),
         "a clean sync/pull clears the prior conflicts"
     );
 }
@@ -175,7 +171,7 @@ fn a_sync_conflict_opens_the_resolution_flow_with_a_safety_snapshot() {
         matches!(app.mode, Mode::ConflictReview(_)),
         "the resolution overlay opened"
     );
-    assert_eq!(app.sync_conflicts().len(), 1, "one chapter conflicts");
+    assert_eq!(app.sync_conflicts.len(), 1, "one chapter conflicts");
     // A safety milestone was tagged before anything was applied.
     let tags = crate::vcs::list_tags(&b).unwrap();
     assert!(
@@ -202,7 +198,7 @@ fn keeping_local_completes_the_sync_with_the_local_text() {
         matches!(app.mode, Mode::Insert),
         "the flow completed back to the editor"
     );
-    assert!(app.sync_conflicts().is_empty(), "conflicts cleared");
+    assert!(app.sync_conflicts.is_empty(), "conflicts cleared");
     assert_eq!(
         fs::read_to_string(b.join("one.md")).unwrap(),
         "B's rewrite\n"

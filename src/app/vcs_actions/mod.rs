@@ -149,12 +149,7 @@ impl App {
                 GitAction::Initialize,
             )]
         };
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Version control",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Version control", items);
     }
 
     /// Dispatch a version-control action chosen from the palette.

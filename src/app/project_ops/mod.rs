@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::buffer::Buffer;
 use crate::config::ProjectsConfig;
-use crate::mode::{Command, Mode, Palette, PaletteItem, Pending};
+use crate::mode::{Command, PaletteItem, Pending};
 use crate::project::{Project, ProjectTemplate, TEMPLATES};
 use crate::recent;
 
@@ -62,12 +62,7 @@ impl App {
             .enumerate()
             .map(|(i, t)| PaletteItem::new(t.name, t.desc, Command::NewProjectTemplate(i)))
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "New project — structure",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("New project — structure", items);
     }
 
     /// Create the stashed new project (#611) with the template at `index`, then

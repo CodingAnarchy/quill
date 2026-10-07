@@ -1,6 +1,6 @@
 //! Two-way sync (#962): the off-thread sync flow that fetches the remote and
-//! reconciles its chapter edits with the local working copy, plus the accessor the
-//! conflict-resolution UI (#963) reads. Child module of `vcs_actions`, so these
+//! reconciles its chapter edits with the local working copy, plus opening the
+//! conflict-resolution UI (#963) for what it couldn't reconcile. Child module of `vcs_actions`, so these
 //! `impl App` methods keep access to `App`'s private fields; the sync worker rides
 //! the shared `vc_task` and lands through [`poll_vc`](App::poll_vc) exactly like a
 //! pull, so a network-slow sync never blocks the editor and its failure surfaces its
@@ -10,9 +10,24 @@ use std::collections::BTreeMap;
 
 use crate::app::bible_review::unified_diff;
 use crate::mode::{ChapterConflictItem, ConflictReview};
+use crate::vcs::ChapterConflict;
 
 use super::super::*;
 use super::VcMsg;
+
+/// The overlay's view of a detected conflict (#963): both full versions plus the
+/// local → remote diff, pre-rendered once so the overlay never re-diffs per frame.
+/// Shared by the sync and draft-merge paths, which resolve through the same UI.
+impl From<&ChapterConflict> for ChapterConflictItem {
+    fn from(c: &ChapterConflict) -> Self {
+        Self {
+            path: c.path.clone(),
+            diff: unified_diff(&c.local, &c.remote),
+            local: c.local.clone(),
+            remote: c.remote.clone(),
+        }
+    }
+}
 
 impl App {
     /// Sync with the remote on a worker thread (#962): flush unsaved work, then fetch
@@ -64,14 +79,6 @@ impl App {
         );
     }
 
-    /// The per-chapter conflicts from the last two-way sync (#962), for the
-    /// resolution UI (#963) to render and act on. Empty after a clean sync (or before
-    /// any sync).
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn sync_conflicts(&self) -> &[crate::vcs::ChapterConflict] {
-        &self.sync_conflicts
-    }
-
     /// Open the conflict-resolution overlay for the chapters the last sync found
     /// changed on both machines (#963). Called by [`poll_vc`](App::poll_vc) as soon
     /// as a sync lands with conflicts, so the author resolves them in-app instead of
@@ -107,12 +114,7 @@ impl App {
         let conflicts = self
             .sync_conflicts
             .iter()
-            .map(|c| ChapterConflictItem {
-                path: c.path.clone(),
-                diff: unified_diff(&c.local, &c.remote),
-                local: c.local.clone(),
-                remote: c.remote.clone(),
-            })
+            .map(ChapterConflictItem::from)
             .collect::<Vec<_>>();
         self.mode = Mode::ConflictReview(Box::new(ConflictReview {
             conflicts,
@@ -267,7 +269,7 @@ impl App {
     pub(crate) fn spawn_sync_conflicts_for_test(&mut self, paths: &[&str]) {
         let conflicts = paths
             .iter()
-            .map(|p| crate::vcs::ChapterConflict {
+            .map(|p| ChapterConflict {
                 path: (*p).to_string(),
                 local: format!("local {p}"),
                 remote: format!("remote {p}"),

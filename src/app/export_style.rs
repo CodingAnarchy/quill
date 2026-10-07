@@ -24,7 +24,7 @@ use crate::config;
 use crate::export::pdf::{self, PrintConfig};
 use crate::export::style::{preset_blurb, HEADING_ALIGNS, PRESET_NAMES};
 use crate::export::ExportStyle;
-use crate::mode::{Command, Mode, Palette, PaletteItem, Pending, StylePicker, StyleTextKnob};
+use crate::mode::{Command, PaletteItem, Pending, StylePicker, StyleTextKnob};
 use crate::project::{read_existing, Project};
 
 /// Guidance shown when an author tries to set `[style]` design on a multi-book
@@ -99,12 +99,7 @@ impl App {
                 Command::OpenStylePicker(StylePicker::Trim),
             ),
         ];
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Export style",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Export style", items);
     }
 
     /// Open the export-style sub-picker the menu row chose (#569).
@@ -129,12 +124,7 @@ impl App {
         items.extend(PRESET_NAMES.iter().enumerate().map(|(i, name)| {
             PaletteItem::new(*name, preset_blurb(name), Command::SetStylePreset(Some(i)))
         }));
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Style preset",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Style preset", items);
     }
 
     /// Open the heading-alignment picker (#569): the four allowed values plus a
@@ -151,12 +141,7 @@ impl App {
                 .enumerate()
                 .map(|(i, a)| PaletteItem::new(*a, "", Command::SetStyleAlign(Some(i)))),
         );
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Heading alignment",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Heading alignment", items);
     }
 
     /// Open the drop-cap picker (#569): on, off, or "(default)" which clears the key.
@@ -174,12 +159,7 @@ impl App {
                 Command::SetStyleDropCap(None),
             ),
         ];
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Drop caps",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Drop caps", items);
     }
 
     /// Open the print-trim picker (#569): the supported trim sizes, the active one
@@ -198,12 +178,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Print trim size",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Print trim size", items);
     }
 
     /// Open the text prompt for a free-text `[style]` knob (#569), prefilled with
@@ -426,7 +401,7 @@ mod tests {
     use crate::app::tests::{app_scratch_dir, open_test_app, TempProject};
     use crate::export::epub::to_epub;
     use crate::export::ImageRole;
-    use crate::mode::Action;
+    use crate::mode::{Action, Mode};
     use std::io::Read;
 
     /// A one-chapter standalone project on disk whose manifest a style test inspects.

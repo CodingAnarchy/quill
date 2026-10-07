@@ -130,7 +130,7 @@ fn a_landing_sync_conflict_does_not_clobber_an_open_prompt() {
         std::mem::discriminant(&app.mode)
     );
     assert!(
-        !app.sync_conflicts().is_empty(),
+        !app.sync_conflicts.is_empty(),
         "the conflict is stashed for when the author returns"
     );
 
@@ -222,7 +222,7 @@ fn a_real_sync_resolution_finalizes_against_the_remote_despite_a_stale_draft_mer
         matches!(app.mode, Mode::Insert),
         "the flow completed back to the editor"
     );
-    assert!(app.sync_conflicts().is_empty(), "conflicts cleared");
+    assert!(app.sync_conflicts.is_empty(), "conflicts cleared");
     assert_eq!(
         fs::read_to_string(b.join("one.md")).unwrap(),
         "B's rewrite\n",
