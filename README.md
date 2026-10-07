@@ -441,11 +441,12 @@ keystrokes that stay out of the way.
 
 ### Prebuilt binary (no Rust toolchain)
 
-Prebuilt binaries for macOS (Intel and Apple Silicon) and Linux (x86_64 and
-aarch64) are attached to every [release](https://github.com/CodingAnarchy/quill/releases/latest).
+Prebuilt binaries for macOS (Apple Silicon) and Linux (x86_64 and aarch64) are
+attached to every [release](https://github.com/CodingAnarchy/quill/releases/latest).
 Download the `quill-<version>-<target>.tar.gz` for your platform (each ships a
 `.sha256` sidecar you can verify against), unpack the `quill` binary, and put it
-on your `PATH` — no Rust toolchain required.
+on your `PATH` — no Rust toolchain required. On an Intel Mac there's no prebuilt
+binary; install with Cargo or build from source as described below.
 
 Prefer to build with Cargo? Install straight from the repository:
 
