@@ -72,12 +72,17 @@ pub(in crate::ui) fn draw_annotations(
     let (filter, typing, show, sort, reviewer) = match &app.mode {
         crate::mode::Mode::Annotations {
             filter,
-            typing,
             show,
             sort,
             reviewer,
             ..
-        } => (filter.clone(), *typing, *show, *sort, reviewer.clone()),
+        } => (
+            filter.text.clone(),
+            filter.typing,
+            *show,
+            *sort,
+            reviewer.clone(),
+        ),
         _ => (
             String::new(),
             false,

@@ -5,7 +5,7 @@
 //! emitting a terminal escape (#531).
 
 use super::*;
-use crate::mode::{Finding, Findings, Mode};
+use crate::mode::{Finding, Findings, ListFilter, Mode};
 use crossterm::event::Event;
 
 /// A one-chapter app with Vim mode on, resting in Normal, so the yank / delete /
@@ -167,8 +167,7 @@ fn a_paste_in_a_non_editing_mode_is_ignored() {
             corroborators: Vec::new(),
         }],
         selected: 0,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     }));
     paste_event(&mut app, "STRAY");
     assert_eq!(

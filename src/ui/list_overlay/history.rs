@@ -30,7 +30,7 @@ pub(in crate::ui) fn draw_history(
     // The type-to-filter query (#822) narrows to rows whose text matches; the row
     // index is preserved so the marker and click map align. The combined milestone
     // + commit list (#833) is the single sequence the selection indexes into.
-    let query = history.filter.to_lowercase();
+    let query = history.filter.query();
     let all = history.rows();
     // A row's primary label and its dimmed secondary text. A milestone's secondary
     // is its note (#966); a commit's is the chapters it touched (#964), and its
@@ -62,18 +62,18 @@ pub(in crate::ui) fn draw_history(
             list_row(*i == history.selected, &primary, secondary)
         })
         .collect();
-    let help = if history.typing {
-        format!("Filter: {}_", history.filter)
+    let help = if history.filter.typing {
+        format!("Filter: {}_", history.filter.text)
     } else if history.findings_anchor.is_some() {
         // Mid findings-diff (#1051): point A is picked; nudge toward point B.
         "Findings diff — pick point B and press f · esc close".to_string()
-    } else if history.filter.is_empty() {
+    } else if history.filter.text.is_empty() {
         "History — ↑↓ move · d/r chapter · D/R project · f findings · n note · / filter · esc close"
             .to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",
-            history.filter,
+            history.filter.text,
             visible.len(),
             if visible.len() == 1 { "" } else { "es" }
         )

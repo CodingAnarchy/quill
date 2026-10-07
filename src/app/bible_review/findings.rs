@@ -10,11 +10,43 @@ use ratatui::text::Line;
 use crate::atomic;
 use crate::buffer::Buffer;
 use crate::frontmatter;
-use crate::mode::{Finding, Findings, Mode};
+use crate::mode::{Finding, Findings, ListFilter, Mode};
 use crate::project::read_existing;
 use crate::text::count_matches;
 
+use super::super::list_filter::FilteredList;
 use super::super::App;
+
+/// The findings triage overlay as a [`FilteredList`] (#822): rows are the open
+/// findings, matched on their summary or chapters.
+struct FindingsList;
+
+impl FilteredList for FindingsList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::Findings(f) => Some((f.selected, &f.filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::Findings(f) => Some((&mut f.selected, &mut f.filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        match &app.mode {
+            Mode::Findings(f) => f.items.len(),
+            _ => 0,
+        }
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        app.finding_at(index).is_some_and(|f| finding_matches(f, q))
+    }
+}
 
 /// Whether finding `f` passes the triage overlay's active filter (#822): a
 /// case-insensitive substring match on its summary or any of its chapters. `q` is
@@ -96,26 +128,20 @@ impl App {
         };
         // In the filter-input sub-mode, keystrokes build the query (#822); the
         // overlay's single-key commands are reachable only outside it.
-        if f.typing {
-            self.on_key_findings_filter(key);
+        if f.filter.typing {
+            self.on_key_list_filter::<FindingsList>(key);
+            return;
+        }
+        let selected = f.selected;
+        // `/`, the arrows (skipping findings the filter has hidden), and
+        // Esc-clears-the-filter are the shared list keys.
+        if self.on_key_list_command::<FindingsList>(key) {
             return;
         }
         // The selected finding, only when it passes the active filter — so a
         // command never acts on a row the query has hidden (#822).
-        let selected = f.selected;
-        let acts_on_selected =
-            self.finding_query_matches(selected) && selected < self.findings_len();
+        let acts_on_selected = FindingsList::selected_matches(self);
         match key.code {
-            KeyCode::Char('/') => self.set_findings_typing(true),
-            // Movement skips findings the filter has hidden.
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.findings_step(false);
-                self.set_findings_selected(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.findings_step(true);
-                self.set_findings_selected(s);
-            }
             KeyCode::Char('d') if acts_on_selected => {
                 // Dismiss durably (#591): the finding leaves the overlay and the
                 // triage list, and a record on disk keeps a re-run from
@@ -131,7 +157,7 @@ impl App {
                 }
                 self.dismiss_finding(&dropped);
                 // Keep the selection on a still-visible match after the removal.
-                self.findings_snap();
+                FindingsList::snap(self);
             }
             KeyCode::Enter if acts_on_selected => {
                 let item = self.finding_at(selected).cloned();
@@ -154,7 +180,7 @@ impl App {
                         if self.insert_todo(&title, &item.summary) {
                             self.resolve_finding(&item);
                             self.drop_finding_from_overlay(selected);
-                            self.findings_snap();
+                            FindingsList::snap(self);
                         }
                     } else {
                         self.message = Some("No chapter to mark".into());
@@ -176,15 +202,8 @@ impl App {
             // triage list — each finding's pass + chapters + summary — filed as a
             // durable revision to-do, distinct from the grouped health dashboard.
             KeyCode::Char('s') => self.save_findings(),
-            // Esc clears an active filter first (restoring the full list), then a
-            // second Esc closes the overlay.
-            KeyCode::Esc => {
-                if self.findings_has_filter() {
-                    self.clear_findings_filter();
-                } else {
-                    self.mode = Mode::Insert;
-                }
-            }
+            // With no filter to clear, Esc closes the overlay (to Insert mode).
+            KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
         }
     }
@@ -208,133 +227,6 @@ impl App {
         let body = findings_plain_text(&f.items);
         let name = format!("findings-{}", crate::date::iso(crate::date::today()));
         self.write_export(&name, "md", body.as_bytes());
-    }
-
-    /// Keys for the findings overlay's filter-input sub-mode (#822): printable
-    /// characters build the query (live), Backspace edits it, the arrows move
-    /// within the matches, Enter/Esc leave input — keeping the filter so the
-    /// overlay's commands act on the narrowed list (a second Esc, in command mode,
-    /// clears it).
-    fn on_key_findings_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_findings_typing(false),
-            KeyCode::Up => {
-                let s = self.findings_step(false);
-                self.set_findings_selected(s);
-            }
-            KeyCode::Down => {
-                let s = self.findings_step(true);
-                self.set_findings_selected(s);
-            }
-            KeyCode::Backspace => self.findings_filter_pop(),
-            KeyCode::Char(c) => self.findings_filter_push(c),
-            _ => {}
-        }
-    }
-
-    fn findings_len(&self) -> usize {
-        match &self.mode {
-            Mode::Findings(f) => f.items.len(),
-            _ => 0,
-        }
-    }
-
-    /// The active findings filter, lowercased (empty off the overlay/unfiltered).
-    fn findings_query(&self) -> String {
-        match &self.mode {
-            Mode::Findings(f) => f.filter.to_lowercase(),
-            _ => String::new(),
-        }
-    }
-
-    fn findings_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::Findings(f) if !f.filter.is_empty())
-    }
-
-    /// Whether the finding at `index` passes the active filter (#822).
-    fn finding_query_matches(&self, index: usize) -> bool {
-        let q = self.findings_query();
-        self.finding_at(index)
-            .is_some_and(|it| finding_matches(it, &q))
-    }
-
-    fn set_findings_typing(&mut self, on: bool) {
-        if let Mode::Findings(f) = &mut self.mode {
-            f.typing = on;
-        }
-    }
-
-    fn set_findings_selected(&mut self, selected: usize) {
-        if let Mode::Findings(f) = &mut self.mode {
-            f.selected = selected;
-        }
-    }
-
-    fn clear_findings_filter(&mut self) {
-        if let Mode::Findings(f) = &mut self.mode {
-            f.filter.clear();
-            f.typing = false;
-        }
-    }
-
-    fn findings_filter_push(&mut self, c: char) {
-        if let Mode::Findings(f) = &mut self.mode {
-            f.filter.push(c);
-        }
-        self.findings_snap();
-    }
-
-    fn findings_filter_pop(&mut self) {
-        if let Mode::Findings(f) = &mut self.mode {
-            f.filter.pop();
-        }
-        self.findings_snap();
-    }
-
-    /// After the filter changes, keep the selection on a visible finding: if the
-    /// current one no longer matches, jump to the first that does (#822).
-    fn findings_snap(&mut self) {
-        let q = self.findings_query();
-        let Mode::Findings(f) = &self.mode else {
-            return;
-        };
-        let stays = f
-            .items
-            .get(f.selected)
-            .is_some_and(|it| finding_matches(it, &q));
-        if !stays {
-            if let Some(first) = f.items.iter().position(|it| finding_matches(it, &q)) {
-                self.set_findings_selected(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) finding that passes the filter, or the
-    /// current selection unchanged when there's no further match that way (#822).
-    fn findings_step(&self, forward: bool) -> usize {
-        let q = self.findings_query();
-        let Mode::Findings(f) = &self.mode else {
-            return 0;
-        };
-        let from = f.selected;
-        let n = f.items.len();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if f.items.get(i).is_some_and(|it| finding_matches(it, &q)) {
-                return i;
-            }
-        }
     }
 
     /// The finding at `index` in the open findings overlay, if any (#608).

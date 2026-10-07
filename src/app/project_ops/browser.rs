@@ -10,12 +10,54 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::config::ProjectsConfig;
-use crate::mode::{DirBrowser, DirEntry, Mode, Pending, ProjectBrowser};
+use crate::mode::{DirBrowser, DirEntry, ListFilter, Mode, Pending, ProjectBrowser};
 use crate::project::Project;
 use crate::recent;
 
+use super::super::list_filter::FilteredList;
 use super::super::App;
 use super::set_manifest_title;
+
+/// The project browser as a [`FilteredList`] (#612): rows are the library's
+/// projects, matched on title or path. Enter in the query line opens the
+/// highlighted match rather than just leaving input.
+struct ProjectList;
+
+impl FilteredList for ProjectList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::ProjectBrowser(s) => Some((s.selected, &s.filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::ProjectBrowser(s) => Some((&mut s.selected, &mut s.filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        match &app.mode {
+            Mode::ProjectBrowser(s) => s.projects.len(),
+            _ => 0,
+        }
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        matches!(
+            &app.mode,
+            Mode::ProjectBrowser(s) if s.projects.get(index).is_some_and(|p| project_matches(p, q))
+        )
+    }
+
+    /// Enter opens the highlighted project (#612) — only when it passes the
+    /// query, so it never opens a row the filter hid.
+    fn submit(app: &mut App) {
+        app.open_selected_project();
+    }
+}
 
 impl App {
     /// Open the project browser over the recently-opened projects (newest first).
@@ -30,8 +72,7 @@ impl App {
         self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser {
             projects,
             selected: 0,
-            filter: String::new(),
-            typing: false,
+            filter: ListFilter::new(),
         }));
     }
 
@@ -46,26 +87,17 @@ impl App {
         };
         // In the filter-input sub-mode, keystrokes build the query (#612); the
         // browser's single-key commands are reachable only outside it.
-        if state.typing {
-            self.on_key_project_filter(key);
+        if state.filter.typing {
+            self.on_key_list_filter::<ProjectList>(key);
+            return;
+        }
+        // `/` (the type-to-filter query, #612), the arrows, and
+        // Esc-clears-the-filter are the shared list keys.
+        if self.on_key_list_command::<ProjectList>(key) {
             return;
         }
         match key.code {
-            // Start the type-to-filter query (#612).
-            KeyCode::Char('/') => self.set_project_typing(true),
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.project_step(false);
-                self.set_project_selected(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.project_step(true);
-                self.set_project_selected(s);
-            }
-            KeyCode::Enter => {
-                if let Some(target) = self.selected_project_path() {
-                    self.request_switch(target);
-                }
-            }
+            KeyCode::Enter => self.open_selected_project(),
             KeyCode::Char('b') => self.open_dir_browser(),
             KeyCode::Char('n') => {
                 let base = self.new_project_base();
@@ -74,56 +106,10 @@ impl App {
             // Rename / delete the selected project from the library (#612).
             KeyCode::Char('r') => self.prompt_rename_browser_project(),
             KeyCode::Char('d') => self.prompt_delete_browser_project(),
-            // Esc clears an active filter first (restoring the full list), then a
-            // second Esc leaves the browser.
-            KeyCode::Esc => {
-                if self.project_has_filter() {
-                    self.clear_project_filter();
-                } else {
-                    self.mode = self.editing_mode();
-                }
-            }
+            // With no filter to clear, Esc leaves the browser.
+            KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
-    }
-
-    /// Keys for the project browser's filter-input sub-mode (#612): printable
-    /// characters build the query (live), Backspace edits it, the arrows move
-    /// within the matches, Enter opens the highlighted one, and Esc leaves input
-    /// — keeping the filter so the browser's commands act on the narrowed list (a
-    /// second Esc, in command mode, clears it).
-    fn on_key_project_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.set_project_typing(false),
-            KeyCode::Enter => {
-                if let Some(target) = self.selected_project_path() {
-                    self.request_switch(target);
-                }
-            }
-            KeyCode::Up => {
-                let s = self.project_step(false);
-                self.set_project_selected(s);
-            }
-            KeyCode::Down => {
-                let s = self.project_step(true);
-                self.set_project_selected(s);
-            }
-            KeyCode::Backspace => self.project_filter_pop(),
-            KeyCode::Char(c) => self.project_filter_push(c),
-            _ => {}
-        }
-    }
-
-    /// The active filter query, lowercased (empty when not browsing or unfiltered).
-    fn project_query(&self) -> String {
-        match &self.mode {
-            Mode::ProjectBrowser(s) => s.filter.to_lowercase(),
-            _ => String::new(),
-        }
-    }
-
-    fn project_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::ProjectBrowser(s) if !s.filter.is_empty())
     }
 
     /// The currently-selected project row, cloned (`None` off the browser or when
@@ -135,91 +121,17 @@ impl App {
         }
     }
 
-    /// The path of the selected project, but only when it passes the active
-    /// filter — so Enter never opens a row the query has hidden.
-    fn selected_project_path(&self) -> Option<PathBuf> {
-        let q = self.project_query();
-        self.selected_project()
-            .filter(|p| project_matches(p, &q))
-            .map(|p| p.path)
+    /// The selected project, but only when it passes the active filter — so
+    /// Enter, rename, and delete never act on a row the query has hidden.
+    fn selected_visible_project(&self) -> Option<recent::RecentProject> {
+        let q = ProjectList::query(self);
+        self.selected_project().filter(|p| project_matches(p, &q))
     }
 
-    fn set_project_typing(&mut self, on: bool) {
-        if let Mode::ProjectBrowser(s) = &mut self.mode {
-            s.typing = on;
-        }
-    }
-
-    fn set_project_selected(&mut self, selected: usize) {
-        if let Mode::ProjectBrowser(s) = &mut self.mode {
-            s.selected = selected;
-        }
-    }
-
-    fn clear_project_filter(&mut self) {
-        if let Mode::ProjectBrowser(s) = &mut self.mode {
-            s.filter.clear();
-            s.typing = false;
-        }
-    }
-
-    fn project_filter_push(&mut self, c: char) {
-        if let Mode::ProjectBrowser(s) = &mut self.mode {
-            s.filter.push(c);
-        }
-        self.project_snap();
-    }
-
-    fn project_filter_pop(&mut self) {
-        if let Mode::ProjectBrowser(s) = &mut self.mode {
-            s.filter.pop();
-        }
-        self.project_snap();
-    }
-
-    /// After the filter changes, keep the selection on a visible project: if the
-    /// current one no longer matches, jump to the first that does (#612).
-    fn project_snap(&mut self) {
-        let q = self.project_query();
-        let Mode::ProjectBrowser(s) = &self.mode else {
-            return;
-        };
-        let stays = s
-            .projects
-            .get(s.selected)
-            .is_some_and(|p| project_matches(p, &q));
-        if !stays {
-            if let Some(first) = s.projects.iter().position(|p| project_matches(p, &q)) {
-                self.set_project_selected(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) project that passes the filter, or the
-    /// current selection unchanged when there's no further match that way (#612).
-    fn project_step(&self, forward: bool) -> usize {
-        let q = self.project_query();
-        let Mode::ProjectBrowser(s) = &self.mode else {
-            return 0;
-        };
-        let from = s.selected;
-        let n = s.projects.len();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if s.projects.get(i).is_some_and(|p| project_matches(p, &q)) {
-                return i;
-            }
+    /// Switch to the selected (visible) project, if any.
+    fn open_selected_project(&mut self) {
+        if let Some(target) = self.selected_visible_project() {
+            self.request_switch(target.path);
         }
     }
 
@@ -355,8 +267,7 @@ impl App {
     /// currently open is deferred to the in-place rename (#424), which also reopens
     /// it at the new path.
     fn prompt_rename_browser_project(&mut self) {
-        let q = self.project_query();
-        let Some(project) = self.selected_project().filter(|p| project_matches(p, &q)) else {
+        let Some(project) = self.selected_visible_project() else {
             return;
         };
         // The open project renames in place (and reopens itself) — route there so
@@ -441,8 +352,7 @@ impl App {
     /// delete the currently-open project (switch away first), and otherwise
     /// stashes the target and opens a y/N confirm before any files are touched.
     fn prompt_delete_browser_project(&mut self) {
-        let q = self.project_query();
-        let Some(project) = self.selected_project().filter(|p| project_matches(p, &q)) else {
+        let Some(project) = self.selected_visible_project() else {
             return;
         };
         if self.is_open_project(&project.path) {

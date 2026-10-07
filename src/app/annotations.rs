@@ -13,9 +13,86 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::list_filter::{snap_in_order, step_in_order, FilteredList};
 use super::App;
 use crate::annotation::{Live, Remapper, Reply};
-use crate::mode::{JumpPos, Mode, Pending};
+use crate::mode::{JumpPos, ListFilter, Mode, Pending};
+
+/// The annotation review list as a [`FilteredList`] (#822/#933). It differs from
+/// the other lists in two ways, both overridden here: it steps and snaps in its
+/// *display* order (the visible notes, sorted by the active sort) rather than
+/// index order, and its narrowing filter also covers the per-reviewer filter —
+/// so the first Esc clears both, and the selection snaps onto a visible note.
+struct AnnotationList;
+
+impl FilteredList for AnnotationList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::Annotations {
+                selected, filter, ..
+            } => Some((*selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::Annotations {
+                selected, filter, ..
+            } => Some((selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        app.annotations.len()
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        app.annotation_matches(index, q)
+    }
+
+    /// The `/` text query (#822) or the per-reviewer filter (#933).
+    fn has_filter(app: &App) -> bool {
+        matches!(
+            &app.mode,
+            Mode::Annotations { filter, reviewer, .. } if filter.is_active() || reviewer.is_some()
+        )
+    }
+
+    /// Clear the `/` text query and the per-reviewer filter, restoring the full
+    /// (still status-filtered / sorted) list, and snap onto a visible note.
+    fn clear(app: &mut App) {
+        if let Mode::Annotations {
+            filter, reviewer, ..
+        } = &mut app.mode
+        {
+            filter.clear();
+            *reviewer = None;
+        }
+        Self::snap(app);
+    }
+
+    /// The next (or previous) visible note in display order, or the current
+    /// selection unchanged at the end that way; the first visible note when the
+    /// selection itself is hidden.
+    fn step(app: &App, forward: bool) -> usize {
+        let Some((from, _)) = Self::state(app) else {
+            return 0;
+        };
+        step_in_order(&app.annotation_visible_order(), from, forward)
+    }
+
+    /// After a filter/sort change, keep the selection on a visible note: if the
+    /// current one no longer shows, jump to the first in display order.
+    fn snap(app: &mut App) {
+        let Some((sel, _)) = Self::state(app) else {
+            return;
+        };
+        let to = snap_in_order(&app.annotation_visible_order(), sel);
+        Self::select(app, to);
+    }
+}
 
 impl App {
     /// Reconcile annotations with the buffer on the idle tick (#302/#370): reload
@@ -314,8 +391,7 @@ impl App {
         }
         self.mode = Mode::Annotations {
             selected: 0,
-            filter: String::new(),
-            typing: false,
+            filter: ListFilter::new(),
             show: crate::mode::AnnoShow::default(),
             sort: crate::mode::AnnoSort::default(),
             reviewer: None,
@@ -333,8 +409,7 @@ impl App {
         let selected = index.min(self.annotations.len() - 1);
         self.mode = Mode::Annotations {
             selected,
-            filter: String::new(),
-            typing: false,
+            filter: ListFilter::new(),
             show: crate::mode::AnnoShow::default(),
             sort: crate::mode::AnnoSort::default(),
             reviewer: None,
@@ -384,7 +459,7 @@ impl App {
             });
             // Resolving may hide the row under the open filter; keep the selection on
             // a still-visible note.
-            self.annotation_snap();
+            AnnotationList::snap(self);
         }
     }
 
@@ -394,7 +469,7 @@ impl App {
         if let Mode::Annotations { show, .. } = &mut self.mode {
             *show = show.next();
         }
-        self.annotation_snap();
+        AnnotationList::snap(self);
     }
 
     /// Cycle the sort order (#933): position → status → reviewer → position. Snaps
@@ -403,7 +478,7 @@ impl App {
         if let Mode::Annotations { sort, .. } = &mut self.mode {
             *sort = sort.next();
         }
-        self.annotation_snap();
+        AnnotationList::snap(self);
     }
 
     /// Cycle the per-reviewer filter (#933): all reviewers → each present reviewer
@@ -429,7 +504,7 @@ impl App {
         if let Mode::Annotations { reviewer, .. } = &mut self.mode {
             *reviewer = next;
         }
-        self.annotation_snap();
+        AnnotationList::snap(self);
     }
 
     /// Key handling for the annotation review list: move (skipping filtered-out
@@ -442,7 +517,9 @@ impl App {
     /// open thread.
     pub(crate) fn on_key_annotations(&mut self, key: KeyEvent) {
         let Mode::Annotations {
-            selected, typing, ..
+            selected,
+            filter: ListFilter { typing, .. },
+            ..
         } = self.mode
         else {
             return;
@@ -450,22 +527,17 @@ impl App {
         // In the filter-input sub-mode, keystrokes build the query (#822); the
         // list's single-key commands are reachable only outside it.
         if typing {
-            self.on_key_annotations_filter(key);
+            self.on_key_list_filter::<AnnotationList>(key);
+            return;
+        }
+        // `/`, the arrows (in display order), and Esc-clears-the-filters are the
+        // shared list keys.
+        if self.on_key_list_command::<AnnotationList>(key) {
             return;
         }
         // Only act on the selection when it passes the active filter (#822).
-        let acts_on_selected =
-            selected < self.annotations.len() && self.annotation_query_matches(selected);
+        let acts_on_selected = AnnotationList::selected_matches(self);
         match key.code {
-            KeyCode::Char('/') => self.set_annotations_typing(true),
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.annotation_step(false);
-                self.set_annotations_selected(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.annotation_step(true);
-                self.set_annotations_selected(s);
-            }
             KeyCode::Enter if acts_on_selected => {
                 let start = self.annotations.get(selected).map(|a| a.start);
                 self.mode = self.editing_mode();
@@ -495,60 +567,13 @@ impl App {
                 } else {
                     let s = selected.min(self.annotations.len() - 1);
                     self.set_annotations_selected(s);
-                    self.annotation_snap();
+                    AnnotationList::snap(self);
                 }
             }
-            // Esc clears an active filter first (restoring the full list), then a
-            // second Esc closes the list.
-            KeyCode::Esc => {
-                if self.annotation_has_filter() {
-                    self.clear_annotation_filter();
-                } else {
-                    self.mode = self.editing_mode();
-                }
-            }
+            // With no filter to clear, Esc closes the list.
+            KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
-    }
-
-    /// Keys for the annotation list's filter-input sub-mode (#822): printable
-    /// characters build the query (live), Backspace edits it, the arrows move
-    /// within the matches, Enter/Esc leave input — keeping the filter so the
-    /// list's commands act on the narrowed set (a second Esc, in command mode,
-    /// clears it).
-    fn on_key_annotations_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_annotations_typing(false),
-            KeyCode::Up => {
-                let s = self.annotation_step(false);
-                self.set_annotations_selected(s);
-            }
-            KeyCode::Down => {
-                let s = self.annotation_step(true);
-                self.set_annotations_selected(s);
-            }
-            KeyCode::Backspace => self.annotation_filter_pop(),
-            KeyCode::Char(c) => self.annotation_filter_push(c),
-            _ => {}
-        }
-    }
-
-    /// The active annotation filter, lowercased (empty off the list/unfiltered).
-    fn annotation_query(&self) -> String {
-        match &self.mode {
-            Mode::Annotations { filter, .. } => filter.to_lowercase(),
-            _ => String::new(),
-        }
-    }
-
-    /// Whether any narrowing filter is active — the `/` text query (#822) or the
-    /// per-reviewer filter (#933). The first Esc clears these before a second closes
-    /// the list.
-    const fn annotation_has_filter(&self) -> bool {
-        matches!(
-            &self.mode,
-            Mode::Annotations { filter, reviewer, .. } if !filter.is_empty() || reviewer.is_some()
-        )
     }
 
     /// The active resolved/open filter (#889): `All` off the list.
@@ -635,53 +660,9 @@ impl App {
                 .contains(q)
     }
 
-    fn annotation_query_matches(&self, index: usize) -> bool {
-        let q = self.annotation_query();
-        self.annotation_matches(index, &q)
-    }
-
-    const fn set_annotations_typing(&mut self, on: bool) {
-        if let Mode::Annotations { typing, .. } = &mut self.mode {
-            *typing = on;
-        }
-    }
-
-    pub(crate) const fn set_annotations_selected(&mut self, selected: usize) {
-        if let Mode::Annotations { selected: s, .. } = &mut self.mode {
-            *s = selected;
-        }
-    }
-
-    /// Clear the active narrowing filters (#822/#933): the `/` text query and the
-    /// per-reviewer filter, restoring the full (still status-filtered / sorted)
-    /// list. The first Esc runs this; a second then closes the list.
-    fn clear_annotation_filter(&mut self) {
-        if let Mode::Annotations {
-            filter,
-            typing,
-            reviewer,
-            ..
-        } = &mut self.mode
-        {
-            filter.clear();
-            *typing = false;
-            *reviewer = None;
-        }
-        self.annotation_snap();
-    }
-
-    fn annotation_filter_push(&mut self, c: char) {
-        if let Mode::Annotations { filter, .. } = &mut self.mode {
-            filter.push(c);
-        }
-        self.annotation_snap();
-    }
-
-    fn annotation_filter_pop(&mut self) {
-        if let Mode::Annotations { filter, .. } = &mut self.mode {
-            filter.pop();
-        }
-        self.annotation_snap();
+    /// Move the list's selection to `selected` (no-op off the list).
+    pub(crate) fn set_annotations_selected(&mut self, selected: usize) {
+        AnnotationList::select(self, selected);
     }
 
     /// The visible annotation indices in display order (#933): the notes that pass
@@ -693,7 +674,7 @@ impl App {
     /// `Position` is just the filtered indices unchanged; `Status` and `Reviewer`
     /// stable-sort them by a group key, keeping position order within each group.
     pub(crate) fn annotation_visible_order(&self) -> Vec<usize> {
-        let q = self.annotation_query();
+        let q = AnnotationList::query(self);
         let mut order: Vec<usize> = (0..self.annotations.len())
             .filter(|&i| self.annotation_matches(i, &q))
             .collect();
@@ -710,43 +691,6 @@ impl App {
             }
         }
         order
-    }
-
-    /// After a filter/sort change, keep the selection on a visible note: if the
-    /// current one no longer matches, jump to the first in display order (#822/#933).
-    fn annotation_snap(&mut self) {
-        let sel = match &self.mode {
-            Mode::Annotations { selected, .. } => *selected,
-            _ => return,
-        };
-        let order = self.annotation_visible_order();
-        if !order.contains(&sel) {
-            if let Some(&first) = order.first() {
-                self.set_annotations_selected(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) visible note in display order, or the
-    /// current selection unchanged at the end that way (#822/#933). Moves within
-    /// [`annotation_visible_order`](Self::annotation_visible_order) so the arrow
-    /// keys follow the sorted, filtered list the renderer shows.
-    fn annotation_step(&self, forward: bool) -> usize {
-        let from = match &self.mode {
-            Mode::Annotations { selected, .. } => *selected,
-            _ => return 0,
-        };
-        let order = self.annotation_visible_order();
-        let Some(pos) = order.iter().position(|&i| i == from) else {
-            // The selection isn't visible; land on the first visible note either way.
-            return order.first().copied().unwrap_or(from);
-        };
-        let next = if forward {
-            pos + 1
-        } else {
-            pos.wrapping_sub(1)
-        };
-        order.get(next).copied().unwrap_or(from)
     }
 
     /// Jump to the next (or previous, by `forward`) OPEN thread in display order

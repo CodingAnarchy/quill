@@ -414,7 +414,7 @@ impl Pane for NavPane<'_> {
         // chapters that match; body numbering still counts every chapter so the
         // numbers stay stable as you filter. The query is lowercased once here,
         // not once per chapter.
-        let filtering = matches!(&app.mode, Mode::Nav { filter, .. } if !filter.is_empty());
+        let filtering = matches!(&app.mode, Mode::Nav { filter, .. } if filter.is_active());
 
         // One cheap pass over the cached per-chapter metadata (no Strings): whether
         // the project has sections at all — the list groups by band (#181) only
@@ -439,7 +439,7 @@ impl Pane for NavPane<'_> {
                 .chapter_title(active)
                 .and_then(|title| redundant_title_heading(headings, title)),
             outline_query: app.outline_query(),
-            outline_typing: matches!(&app.mode, Mode::Outline { typing: true, .. }),
+            outline_typing: matches!(&app.mode, Mode::Outline { filter, .. } if filter.typing),
             nav_query: filtering.then(|| app.nav_query()),
             grouped,
         };

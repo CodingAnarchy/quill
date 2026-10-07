@@ -7,7 +7,7 @@ use super::*;
 /// The history view's `(selected, filter, typing)` state.
 fn history_state(app: &App) -> (usize, String, bool) {
     match &app.mode {
-        Mode::History(h) => (h.selected, h.filter.clone(), h.typing),
+        Mode::History(h) => (h.selected, h.filter.text.clone(), h.filter.typing),
         _ => panic!("expected the history view to be open"),
     }
 }

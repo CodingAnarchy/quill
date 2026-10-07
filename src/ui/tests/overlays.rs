@@ -6,8 +6,8 @@ use super::*;
 use crate::annotation::{Live, Reply};
 use crate::app::BackupEntry;
 use crate::mode::{
-    AnnoShow, AnnoSort, BackupBrowser, ImportPreview, Mode, ProjectMatch, ProjectSearch,
-    ProjectSearchStage, QuickSwitch, QuickTarget, ReviewImport,
+    AnnoShow, AnnoSort, BackupBrowser, ImportPreview, ListFilter, Mode, ProjectMatch,
+    ProjectSearch, ProjectSearchStage, QuickSwitch, QuickTarget, ReviewImport,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
@@ -253,8 +253,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
     ];
     app.mode = Mode::Annotations {
         selected: 0,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
         show: AnnoShow::All,
         sort: AnnoSort::default(),
         reviewer: None,

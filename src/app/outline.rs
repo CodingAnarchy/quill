@@ -22,9 +22,38 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::folds::section_end_byte;
+use super::list_filter::FilteredList;
 use super::App;
-use crate::mode::Mode;
+use crate::mode::{ListFilter, Mode};
 use crate::syntax::Heading;
+
+/// The focused outline as a [`FilteredList`] (#822): rows are the active
+/// chapter's headings, matched on their title.
+struct OutlineList;
+
+impl FilteredList for OutlineList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::Outline { selected, filter } => Some((*selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::Outline { selected, filter } => Some((selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        app.buffer.syntax().headings().len()
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        app.outline_heading_matches(index, q)
+    }
+}
 
 impl App {
     /// Focus the outline pane (#657) so its headings can be navigated. Starts the
@@ -69,8 +98,7 @@ impl App {
             .unwrap_or(0);
         self.mode = Mode::Outline {
             selected,
-            filter: String::new(),
-            typing: false,
+            filter: ListFilter::new(),
         };
     }
 
@@ -82,7 +110,8 @@ impl App {
     /// before it returns to editing.
     pub(crate) fn on_key_outline(&mut self, key: KeyEvent) {
         let Mode::Outline {
-            selected, typing, ..
+            selected,
+            filter: ListFilter { typing, .. },
         } = self.mode
         else {
             return;
@@ -105,30 +134,25 @@ impl App {
             self.mode = self.editing_mode();
             return;
         };
-        self.set_outline_selected(selected);
+        OutlineList::select(self, selected);
         // In the filter-input sub-mode, keystrokes build the query (#822); the
         // pane's single-key commands are reachable only outside it.
         if typing {
-            self.on_key_outline_filter(key);
+            self.on_key_list_filter::<OutlineList>(key);
+            return;
+        }
+        // `/`, the arrows, and Esc-clears-the-filter are the shared list keys.
+        if self.on_key_list_command::<OutlineList>(key) {
             return;
         }
         match key.code {
-            KeyCode::Char('/') => self.set_outline_typing(true),
             // Restructure the skeleton (#1008): promote/demote the heading's level,
             // or move the whole section past its sibling — one undoable gesture each.
             KeyCode::Char('<') => self.outline_reheading(selected, -1),
             KeyCode::Char('>') => self.outline_reheading(selected, 1),
             KeyCode::Char('K' | '[') => self.outline_move_section(selected, -1),
             KeyCode::Char('J' | ']') => self.outline_move_section(selected, 1),
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.outline_step(false);
-                self.set_outline_selected(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.outline_step(true);
-                self.set_outline_selected(s);
-            }
-            KeyCode::Enter if self.outline_query_matches(selected) => {
+            KeyCode::Enter if OutlineList::selected_matches(self) => {
                 let start = self
                     .buffer
                     .syntax()
@@ -144,50 +168,15 @@ impl App {
                     self.buffer.cursor = self.buffer.cursor_at_byte(at);
                 }
             }
-            // Esc clears an active filter first (restoring the full outline), then
-            // a second Esc returns to editing.
-            KeyCode::Esc => {
-                if self.outline_has_filter() {
-                    self.clear_outline_filter();
-                } else {
-                    self.mode = self.editing_mode();
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Keys for the outline's filter-input sub-mode (#822): printable characters
-    /// build the query (live), Backspace edits it, the arrows move within the
-    /// matches, Enter/Esc leave input — keeping the filter so the pane's commands
-    /// act on the narrowed set (a second Esc, in command mode, clears it).
-    fn on_key_outline_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_outline_typing(false),
-            KeyCode::Up => {
-                let s = self.outline_step(false);
-                self.set_outline_selected(s);
-            }
-            KeyCode::Down => {
-                let s = self.outline_step(true);
-                self.set_outline_selected(s);
-            }
-            KeyCode::Backspace => self.outline_filter_pop(),
-            KeyCode::Char(c) => self.outline_filter_push(c),
+            // With no filter to clear, Esc returns to editing.
+            KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
     }
 
     /// The active outline filter, lowercased (empty off the outline/unfiltered).
     pub(crate) fn outline_query(&self) -> String {
-        match &self.mode {
-            Mode::Outline { filter, .. } => filter.to_lowercase(),
-            _ => String::new(),
-        }
-    }
-
-    const fn outline_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::Outline { filter, .. } if !filter.is_empty())
+        OutlineList::query(self)
     }
 
     /// Whether heading `index` passes the outline's active filter (#822): a
@@ -202,88 +191,6 @@ impl App {
             .headings()
             .get(index)
             .is_some_and(|h| h.title.to_lowercase().contains(q))
-    }
-
-    fn outline_query_matches(&self, index: usize) -> bool {
-        let q = self.outline_query();
-        self.outline_heading_matches(index, &q)
-    }
-
-    const fn set_outline_typing(&mut self, on: bool) {
-        if let Mode::Outline { typing, .. } = &mut self.mode {
-            *typing = on;
-        }
-    }
-
-    const fn set_outline_selected(&mut self, selected: usize) {
-        if let Mode::Outline { selected: s, .. } = &mut self.mode {
-            *s = selected;
-        }
-    }
-
-    fn clear_outline_filter(&mut self) {
-        if let Mode::Outline { filter, typing, .. } = &mut self.mode {
-            filter.clear();
-            *typing = false;
-        }
-    }
-
-    fn outline_filter_push(&mut self, c: char) {
-        if let Mode::Outline { filter, .. } = &mut self.mode {
-            filter.push(c);
-        }
-        self.outline_snap();
-    }
-
-    fn outline_filter_pop(&mut self) {
-        if let Mode::Outline { filter, .. } = &mut self.mode {
-            filter.pop();
-        }
-        self.outline_snap();
-    }
-
-    /// After the filter changes, keep the selection on a visible heading: if the
-    /// current one no longer matches, jump to the first that does (#822).
-    fn outline_snap(&mut self) {
-        let q = self.outline_query();
-        let sel = match &self.mode {
-            Mode::Outline { selected, .. } => *selected,
-            _ => return,
-        };
-        if !self.outline_heading_matches(sel, &q) {
-            let len = self.buffer.syntax().headings().len();
-            if let Some(first) = (0..len).find(|&i| self.outline_heading_matches(i, &q)) {
-                self.set_outline_selected(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) heading that passes the filter, or the
-    /// current selection unchanged when there's no further match that way (#822).
-    fn outline_step(&self, forward: bool) -> usize {
-        let q = self.outline_query();
-        let from = match &self.mode {
-            Mode::Outline { selected, .. } => *selected,
-            _ => return 0,
-        };
-        let n = self.buffer.syntax().headings().len();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if self.outline_heading_matches(i, &q) {
-                return i;
-            }
-        }
     }
 
     /// Promote (`dir` −1, one fewer `#`) or demote (`dir` +1, one more `#`) the
@@ -373,7 +280,7 @@ impl App {
         self.commit_outline_edit();
         // Follow the moved section: after the swap the selected heading sits where
         // its sibling was in body order, so its new index is the sibling's old one.
-        self.set_outline_selected(sibling);
+        OutlineList::select(self, sibling);
         self.message = Some("Section moved.".into());
     }
 

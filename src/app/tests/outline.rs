@@ -209,11 +209,7 @@ fn selection_clamps_when_the_heading_list_shrinks() {
 /// Helper: the focused outline's `(selected, filter, typing)` state.
 fn outline_state(app: &App) -> (usize, String, bool) {
     match &app.mode {
-        Mode::Outline {
-            selected,
-            filter,
-            typing,
-        } => (*selected, filter.clone(), *typing),
+        Mode::Outline { selected, filter } => (*selected, filter.text.clone(), filter.typing),
         _ => panic!("expected the focused outline"),
     }
 }

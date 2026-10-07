@@ -1,14 +1,54 @@
 //! Chapter-list and reference-file navigation modes — split out of `app/mod.rs` to keep it under the ~1,000-line
 //! convention (#404). Pure move; `App`'s methods live across modules.
 
+use super::list_filter::FilteredList;
 use super::*;
+use crate::mode::ListFilter;
+
+/// The chapter browser as a [`FilteredList`] (#410): rows are the chapters,
+/// matched on cached metadata. Enter in the query line quick-jumps to the
+/// highlighted match rather than just leaving input.
+struct NavList;
+
+impl FilteredList for NavList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::Nav { selected, filter } => Some((*selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::Nav { selected, filter } => Some((selected, filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        app.chapter_count()
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        app.nav_chapter_matches(index, q)
+    }
+
+    /// Enter quick-jumps to the highlighted chapter (#410) — only when it passes
+    /// the query, so it never opens a row the filter hid; otherwise a no-op that
+    /// stays in the query line.
+    fn submit(app: &mut App) {
+        if Self::selected_matches(app) {
+            let sel = Self::state(app).map_or(0, |(sel, _)| sel);
+            app.open_from_browser(sel);
+        }
+    }
+}
 
 impl App {
     pub(super) fn on_key_nav(&mut self, key: KeyEvent) {
         let Mode::Nav {
             selected: sel,
-            typing,
-            ..
+            filter: ListFilter { typing, .. },
         } = self.mode
         else {
             return;
@@ -16,12 +56,16 @@ impl App {
         // In the filter-input sub-mode, keystrokes build the query (#410); the
         // browser's single-key commands are reachable only outside it.
         if typing {
-            self.on_key_nav_filter(key, sel);
+            self.on_key_list_filter::<NavList>(key);
+            return;
+        }
+        // `/` (the type-to-filter / quick-jump query, #410), the arrows (skipping
+        // chapters filtered out of the list), and Esc-clears-the-filter are the
+        // shared list keys.
+        if self.on_key_list_command::<NavList>(key) {
             return;
         }
         match key.code {
-            // Start the type-to-filter / quick-jump query (#410).
-            KeyCode::Char('/') => self.set_nav_typing(true),
             // Go to a chapter directly by number or title (#588): a prompt that
             // jumps without scrolling the list.
             KeyCode::Char('#') => self.open_prompt(
@@ -30,22 +74,7 @@ impl App {
                 "",
                 Some(sel),
             ),
-            // Movement skips chapters filtered out of the list.
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.nav_step(sel, false);
-                self.select(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.nav_step(sel, true);
-                self.select(s);
-            }
-            KeyCode::Enter => {
-                self.activate_chapter(sel);
-                // Opening a chapter keeps the pane (it shows where you landed);
-                // just drop the browser's claim on it (#529).
-                self.browser_opened_outline = false;
-                self.mode = self.editing_mode();
-            }
+            KeyCode::Enter => self.open_from_browser(sel),
             // Open the selected chapter in a side pane (#165) — compare two
             // chapters, or keep one as reference while editing another.
             KeyCode::Char('o') => {
@@ -238,17 +267,19 @@ impl App {
                     );
                 }
             }
-            // Esc clears an active filter first (restoring the full list), then
-            // leaves the browser on a second press (#410).
-            KeyCode::Esc => {
-                if self.nav_has_filter() {
-                    self.clear_nav_filter();
-                } else {
-                    self.leave_browser();
-                }
-            }
+            // With no filter to clear, Esc leaves the browser (#410).
+            KeyCode::Esc => self.leave_browser(),
             _ => {}
         }
+    }
+
+    /// Open chapter `sel` from the browser and return to editing. Opening a
+    /// chapter keeps the pane (it shows where you landed); just drop the browser's
+    /// claim on it (#529).
+    fn open_from_browser(&mut self, sel: usize) {
+        self.activate_chapter(sel);
+        self.browser_opened_outline = false;
+        self.mode = self.editing_mode();
     }
 
     /// Dismiss the chapter browser back to the editor (#529): if Ctrl-G was what
@@ -262,35 +293,6 @@ impl App {
             self.browser_opened_outline = false;
         }
         self.mode = self.editing_mode();
-    }
-
-    /// Keys for the chapter browser's filter-input sub-mode (#410): printable
-    /// characters build the query (live), Backspace edits it, the arrows move
-    /// within the matches, Enter quick-jumps to the highlighted one, and Esc
-    /// leaves input — keeping the filter so the browser's commands act on the
-    /// narrowed list (a second Esc, in command mode, clears it).
-    fn on_key_nav_filter(&mut self, key: KeyEvent, sel: usize) {
-        match key.code {
-            KeyCode::Esc => self.set_nav_typing(false),
-            KeyCode::Enter => {
-                if self.nav_chapter_matches(sel, &self.nav_query()) {
-                    self.activate_chapter(sel);
-                    self.browser_opened_outline = false;
-                    self.mode = self.editing_mode();
-                }
-            }
-            KeyCode::Up => {
-                let s = self.nav_step(sel, false);
-                self.select(s);
-            }
-            KeyCode::Down => {
-                let s = self.nav_step(sel, true);
-                self.select(s);
-            }
-            KeyCode::Backspace => self.nav_filter_pop(),
-            KeyCode::Char(c) => self.nav_filter_push(c),
-            _ => {}
-        }
     }
 
     /// Resolve a go-to-chapter query (#588) to a chapter index: a 1-based number
@@ -348,10 +350,7 @@ impl App {
     /// The active quick-jump query, lowercased (empty when not browsing or with
     /// no filter), for [`nav_chapter_matches`](Self::nav_chapter_matches) (#410).
     pub(crate) fn nav_query(&self) -> String {
-        match &self.mode {
-            Mode::Nav { filter, .. } => filter.to_lowercase(),
-            _ => String::new(),
-        }
+        NavList::query(self)
     }
 
     /// How many chapters pass the active filter (#410) — for the browser's
@@ -361,82 +360,6 @@ impl App {
         (0..self.chapter_count())
             .filter(|&i| self.nav_chapter_matches(i, &q))
             .count()
-    }
-
-    const fn nav_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::Nav { filter, .. } if !filter.is_empty())
-    }
-
-    const fn nav_selected(&self) -> usize {
-        if let Mode::Nav { selected, .. } = &self.mode {
-            *selected
-        } else {
-            0
-        }
-    }
-
-    const fn set_nav_typing(&mut self, on: bool) {
-        if let Mode::Nav { typing, .. } = &mut self.mode {
-            *typing = on;
-        }
-    }
-
-    fn clear_nav_filter(&mut self) {
-        if let Mode::Nav { filter, typing, .. } = &mut self.mode {
-            filter.clear();
-            *typing = false;
-        }
-    }
-
-    fn nav_filter_push(&mut self, c: char) {
-        if let Mode::Nav { filter, .. } = &mut self.mode {
-            filter.push(c);
-        }
-        self.nav_snap();
-    }
-
-    fn nav_filter_pop(&mut self) {
-        if let Mode::Nav { filter, .. } = &mut self.mode {
-            filter.pop();
-        }
-        self.nav_snap();
-    }
-
-    /// After the filter changes, keep the selection on a visible chapter: if the
-    /// current one no longer matches, jump to the first that does (#410).
-    fn nav_snap(&mut self) {
-        let q = self.nav_query();
-        if !self.nav_chapter_matches(self.nav_selected(), &q) {
-            if let Some(first) =
-                (0..self.chapter_count()).find(|&i| self.nav_chapter_matches(i, &q))
-            {
-                self.select(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) chapter that passes the filter, or
-    /// `from` unchanged when there's no further match in that direction (#410).
-    fn nav_step(&self, from: usize, forward: bool) -> usize {
-        let n = self.chapter_count();
-        let q = self.nav_query();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if self.nav_chapter_matches(i, &q) {
-                return i;
-            }
-        }
     }
 
     /// Enter the reference-file browser (#165): the project's bible entries and

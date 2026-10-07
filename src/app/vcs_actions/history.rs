@@ -5,8 +5,41 @@
 //! access to `App`'s private fields and reuse the parent's
 //! [`diff_lines`](super::diff_lines) colorizer.
 
+use super::super::list_filter::FilteredList;
 use super::super::*;
 use super::diff_lines;
+use crate::mode::ListFilter;
+
+/// The history view as a [`FilteredList`] (#822): rows span the combined
+/// milestone + commit list (#833), matched on the text each row shows.
+struct HistoryList;
+
+impl FilteredList for HistoryList {
+    fn state(app: &App) -> Option<(usize, &ListFilter)> {
+        match &app.mode {
+            Mode::History(h) => Some((h.selected, &h.filter)),
+            _ => None,
+        }
+    }
+
+    fn state_mut(app: &mut App) -> Option<(&mut usize, &mut ListFilter)> {
+        match &mut app.mode {
+            Mode::History(h) => Some((&mut h.selected, &mut h.filter)),
+            _ => None,
+        }
+    }
+
+    fn len(app: &App) -> usize {
+        match &app.mode {
+            Mode::History(h) => h.len(),
+            _ => 0,
+        }
+    }
+
+    fn matches(app: &App, index: usize, q: &str) -> bool {
+        matches!(&app.mode, Mode::History(h) if h.row(index).is_some_and(|r| r.matches(q)))
+    }
+}
 
 impl App {
     /// Open the navigable commit-history view (#587). A read-only list until a row
@@ -28,8 +61,7 @@ impl App {
                     commits,
                     milestones,
                     selected: 0,
-                    filter: String::new(),
-                    typing: false,
+                    filter: ListFilter::new(),
                     findings_anchor: None,
                 }));
             }
@@ -54,148 +86,24 @@ impl App {
         };
         // In the filter-input sub-mode, keystrokes build the query (#822); the
         // view's single-key commands are reachable only outside it.
-        if history.typing {
-            self.on_key_history_filter(key);
+        if history.filter.typing {
+            self.on_key_list_filter::<HistoryList>(key);
+            return;
+        }
+        // `/`, the arrows, and Esc-clears-the-filter are the shared list keys.
+        if self.on_key_list_command::<HistoryList>(key) {
             return;
         }
         match key.code {
-            KeyCode::Char('/') => self.set_history_typing(true),
-            KeyCode::Up | KeyCode::Char('k') => {
-                let s = self.history_filter_step(false);
-                self.set_history_selected(s);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let s = self.history_filter_step(true);
-                self.set_history_selected(s);
-            }
             KeyCode::Char('d') => self.diff_against_selected_commit(),
             KeyCode::Char('r') => self.restore_from_selected_commit(),
             KeyCode::Char('D') => self.diff_project_against_selected(),
             KeyCode::Char('R') => self.restore_project_from_selected(),
             KeyCode::Char('f') => self.findings_diff_step(),
             KeyCode::Char('n') => self.edit_selected_milestone_note(),
-            // Esc clears an active filter first (restoring the full list), then a
-            // second Esc closes the view.
-            KeyCode::Esc => {
-                if self.history_has_filter() {
-                    self.clear_history_filter();
-                } else {
-                    self.mode = self.editing_mode();
-                }
-            }
+            // With no filter to clear, Esc closes the view.
+            KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
-        }
-    }
-
-    /// Keys for the history view's filter-input sub-mode (#822): printable
-    /// characters build the query (live), Backspace edits it, the arrows move
-    /// within the matches, Enter leaves input, and Esc leaves input too — keeping
-    /// the filter so `d`/`r` act on the narrowed list (a second Esc, in command
-    /// mode, clears it).
-    fn on_key_history_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_history_typing(false),
-            KeyCode::Up => {
-                let s = self.history_filter_step(false);
-                self.set_history_selected(s);
-            }
-            KeyCode::Down => {
-                let s = self.history_filter_step(true);
-                self.set_history_selected(s);
-            }
-            KeyCode::Backspace => self.history_filter_pop(),
-            KeyCode::Char(c) => self.history_filter_push(c),
-            _ => {}
-        }
-    }
-
-    /// The active history filter, lowercased (empty off the view or unfiltered).
-    fn history_query(&self) -> String {
-        match &self.mode {
-            Mode::History(h) => h.filter.to_lowercase(),
-            _ => String::new(),
-        }
-    }
-
-    fn history_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::History(h) if !h.filter.is_empty())
-    }
-
-    fn set_history_typing(&mut self, on: bool) {
-        if let Mode::History(h) = &mut self.mode {
-            h.typing = on;
-        }
-    }
-
-    fn set_history_selected(&mut self, selected: usize) {
-        if let Mode::History(h) = &mut self.mode {
-            h.selected = selected;
-        }
-    }
-
-    fn clear_history_filter(&mut self) {
-        if let Mode::History(h) = &mut self.mode {
-            h.filter.clear();
-            h.typing = false;
-        }
-    }
-
-    fn history_filter_push(&mut self, c: char) {
-        if let Mode::History(h) = &mut self.mode {
-            h.filter.push(c);
-        }
-        self.history_snap();
-    }
-
-    fn history_filter_pop(&mut self) {
-        if let Mode::History(h) = &mut self.mode {
-            h.filter.pop();
-        }
-        self.history_snap();
-    }
-
-    /// After the filter changes, keep the selection on a visible row: if the
-    /// current one no longer matches, jump to the first that does (#822). Spans the
-    /// combined milestone + commit list (#833).
-    fn history_snap(&mut self) {
-        let q = self.history_query();
-        let Mode::History(h) = &self.mode else {
-            return;
-        };
-        let stays = h.row(h.selected).is_some_and(|r| r.matches(&q));
-        if !stays {
-            if let Some(first) = h.rows().iter().position(|r| r.matches(&q)) {
-                self.set_history_selected(first);
-            }
-        }
-    }
-
-    /// The next (or previous, by `forward`) row that passes the filter, or the
-    /// current selection unchanged when there's no further match that way (#822).
-    /// Spans the combined milestone + commit list (#833).
-    fn history_filter_step(&self, forward: bool) -> usize {
-        let q = self.history_query();
-        let Mode::History(h) = &self.mode else {
-            return 0;
-        };
-        let from = h.selected;
-        let n = h.len();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if h.row(i).is_some_and(|r| r.matches(&q)) {
-                return i;
-            }
         }
     }
 
@@ -204,7 +112,7 @@ impl App {
     /// hint. The prompt is prefilled with the current note (empty when the tag has
     /// only its name-fallback annotation, so there's no phantom text to clear).
     fn edit_selected_milestone_note(&mut self) {
-        let q = self.history_query();
+        let q = HistoryList::query(self);
         let Mode::History(h) = &self.mode else {
             return;
         };
@@ -231,7 +139,7 @@ impl App {
     /// diff/restore actions never act on a row the query narrowed out (#822).
     /// Resolves a milestone or a commit uniformly (#833).
     fn selected_commit_rev(&self) -> Option<String> {
-        let q = self.history_query();
+        let q = HistoryList::query(self);
         match &self.mode {
             Mode::History(h) => h
                 .row(h.selected)
