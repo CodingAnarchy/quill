@@ -261,6 +261,11 @@ impl Buffer {
         self.rope.len_lines().max(1)
     }
 
+    /// The text as a rope — an O(1) clone hands a snapshot to a worker thread.
+    pub const fn rope(&self) -> &Rope {
+        &self.rope
+    }
+
     /// The whole buffer as a string (used to commit a scratch metadata edit).
     pub fn text(&self) -> String {
         self.rope.to_string()

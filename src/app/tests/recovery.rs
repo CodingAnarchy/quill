@@ -33,6 +33,7 @@ fn a_clean_save_clears_the_sidecar() {
     assert!(recovery::read(&dir).is_some());
 
     app.on_key(ctrl('s')); // save
+    app.flush_recovery(); // the clear is queued on the background writer
     assert!(
         recovery::read(&dir).is_none(),
         "saving leaves nothing to recover"
@@ -79,6 +80,7 @@ fn discard_clears_the_sidecar_without_touching_the_buffer() {
     app.offer_recovery();
     let before = app.edit_buffer().text();
     app.on_key(key(KeyCode::Char('d'))); // discard
+    app.flush_recovery();
 
     assert!(
         recovery::read(&dir).is_none(),
@@ -398,6 +400,7 @@ fn quitting_despite_unsaved_changes_discards_the_sidecar() {
     app.on_key(ctrl('q')); // unsaved → quit confirm prompt
     app.on_key(key(KeyCode::Char('y'))); // confirm quit
     assert!(app.should_quit);
+    app.flush_recovery(); // as `main` does once the loop exits
     assert!(
         recovery::read(&dir).is_none(),
         "an explicit quit-with-unsaved discards recovery"
@@ -458,14 +461,17 @@ fn a_throttled_capture_is_deferred_not_dropped() {
     let (mut app, dir) = two_chapter_app("rec-throttle");
     type_str(&mut app, "A");
     app.tick_recovery();
+    app.flush_recovery();
     assert!(recovery::read(&dir).unwrap().body.contains('A'));
 
     type_str(&mut app, "B");
     app.tick_recovery(); // within the interval: held back
+    app.flush_recovery();
     assert!(!recovery::read(&dir).unwrap().body.contains('B'));
 
     // Once the interval has passed, the next tick writes the latest text.
     app.recovery_captured_at = Instant::now().checked_sub(RECOVERY_MIN_INTERVAL);
     app.tick_recovery();
+    app.flush_recovery();
     assert!(recovery::read(&dir).unwrap().body.contains("AB"));
 }

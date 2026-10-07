@@ -81,6 +81,10 @@ fn stage_and_swap<F>(path: &Path, durability: Durability, fill: F) -> io::Result
 where
     F: FnOnce(&mut File) -> io::Result<()>,
 {
+    // Test-only seam: count this thread's atomic writes, so a guard can prove
+    // the typing/idle path never does one on the UI thread.
+    #[cfg(test)]
+    write_count::bump();
     let synced = durability == Durability::Synced;
     let path = &resolve_symlink(path)?;
     let tmp = temp_path(path);
@@ -266,6 +270,31 @@ pub mod fail_point {
                 false
             }
         })
+    }
+}
+
+/// Test-only count of atomic writes (any entry point — [`write`], [`write_with`],
+/// [`write_hint`]) attempted on **this thread**. The UI-thread guard drives the
+/// typing and idle path and asserts this stays put: a durable write there blocks
+/// typing for as long as the disk takes, so it must happen on a worker thread
+/// (whose writes count on that thread, not the caller's). Compiled out of
+/// production builds.
+#[cfg(test)]
+pub mod write_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static WRITES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Record one atomic write on this thread.
+    pub(super) fn bump() {
+        WRITES.with(|w| w.set(w.get() + 1));
+    }
+
+    /// How many atomic writes this thread has attempted.
+    pub fn get() -> usize {
+        WRITES.with(Cell::get)
     }
 }
 
