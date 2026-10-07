@@ -11,7 +11,7 @@ use super::*;
 
 use super::assist::list_move;
 use crate::ai::{self, router};
-use crate::mode::{Action, AiAction, ExportScope, PaletteRow};
+use crate::mode::{Action, AiAction, ExportScope, Needs, PaletteRow};
 
 mod routing;
 
@@ -117,21 +117,17 @@ impl App {
     #[allow(clippy::match_same_arms)]
     pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
-            // Triage, the health dashboard, and the Ask history are local — they
-            // work with the AI backend off (browsing already-collected findings /
-            // past answers, #609/#827).
-            Action::Ai(
-                AiAction::Triage
-                | AiAction::Dashboard
-                | AiAction::CoOccurrence
-                | AiAction::AskHistory,
-            ) => None,
-            // Image generation has its own opt-in / key, separate from the text AI
-            // (and its own "local not compiled" fail-fast).
-            Action::Ai(AiAction::Portrait | AiAction::Scene) => {
-                self.image_backend_spec().err().map(|e| e.to_string())
-            }
-            Action::Ai(_) => self.ai_startable(),
+            // Which backend an AI action needs is a descriptor fact (`Needs`).
+            Action::Ai(a) => match a.needs() {
+                // The local views (triage, the health dashboard, the Ask history, …)
+                // work with the AI backend off — they browse already-collected
+                // findings / past answers (#609/#827).
+                Needs::Local => None,
+                // Image generation has its own opt-in / key, separate from the text
+                // AI (and its own "local not compiled" fail-fast).
+                Needs::Image => self.image_backend_spec().err().map(|e| e.to_string()),
+                Needs::Ai => self.ai_startable(),
+            },
             // The in-app on-ramp (#602) only makes sense while AI is off; once it's
             // enabled the switch, key, and backend actions cover the rest.
             Action::EnableAi if self.ai.enabled => Some("AI is already enabled".into()),
@@ -259,45 +255,13 @@ impl App {
     }
 
     /// Whether `action` needs the AI backend but AI is off (#602) — the case the
-    /// in-app enable on-ramp intercepts. Triage is local aggregation and the image
-    /// passes carry their own opt-in, so neither counts; a keyed-but-off setup
-    /// still routes here (the enable confirm chains to the key flow only when a key
-    /// is missing). `EnableAi` itself is excluded so its own dispatch runs.
-    const fn wants_ai_but_off(&self, action: Action) -> bool {
-        if self.ai.enabled {
-            return false;
-        }
-        matches!(
-            action,
-            Action::Ai(
-                AiAction::Ask
-                    | AiAction::Characters
-                    | AiAction::Continuity
-                    | AiAction::Setting
-                    | AiAction::Scaffold
-                    | AiAction::Naming
-                    | AiAction::Style
-                    | AiAction::Brainstorm
-                    | AiAction::DraftCharacters
-                    | AiAction::DraftSetting
-                    | AiAction::Voice
-                    | AiAction::Submission
-                    | AiAction::Marketing
-                    | AiAction::Social
-                    | AiAction::AdCreative
-                    | AiAction::Thesaurus
-                    | AiAction::NameGen
-                    | AiAction::Editorial
-                    | AiAction::Accuracy
-                    | AiAction::Relationship
-                    | AiAction::Foreshadow
-                    | AiAction::FactCheck
-                    | AiAction::Pacing
-            ) | Action::RefreshSeriesBible
-                | Action::RefreshBibles
-                | Action::QueuePasses
-                | Action::DescribeConfig
-        )
+    /// in-app enable on-ramp intercepts. The set is [`Action::needs_ai`], derived
+    /// from each AI action's descriptor: local views and the image passes (their
+    /// own opt-in) don't count; a keyed-but-off setup still routes here (the enable
+    /// confirm chains to the key flow only when a key is missing). `EnableAi`
+    /// itself is excluded so its own dispatch runs.
+    fn wants_ai_but_off(&self, action: Action) -> bool {
+        !self.ai.enabled && action.needs_ai()
     }
 
     /// Run an action's effect, its availability already checked by

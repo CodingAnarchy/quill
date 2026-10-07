@@ -4,7 +4,7 @@
 //! Split out of `action.rs` to keep each file under the ~1,000-line convention;
 //! re-exported from the module root, so callers are unaffected. Pure move.
 
-use super::AiAction;
+use super::{AiAction, Needs};
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
 /// command lists these and runs one by name, and author workflows (#89) will
@@ -737,18 +737,28 @@ impl Action {
     /// Whether this action completes synchronously, so a workflow (#226) can run
     /// it and move straight to the next step. The network AI passes are async
     /// (workflow support is #227) and "Ask" waits for typed input; `triage` is
-    /// local aggregation, so it counts as synchronous.
-    pub(crate) const fn is_sync(self) -> bool {
+    /// local aggregation, so it counts as synchronous. For AI actions this derives
+    /// from the descriptor's [`Needs`]: only the [`Needs::Local`] views are sync.
+    pub(crate) fn is_sync(self) -> bool {
         match self {
-            // Local, no network request — like Triage, these run synchronously.
-            Self::Ai(
-                AiAction::Triage
-                | AiAction::Dashboard
-                | AiAction::CoOccurrence
-                | AiAction::AskHistory,
-            ) => true,
-            Self::Ai(_) => false,
+            Self::Ai(a) => a.needs() == Needs::Local,
             _ => true,
+        }
+    }
+
+    /// Whether this action needs the `[ai]` backend — the set the enable-AI on-ramp
+    /// (#602) intercepts while AI is off. The AI passes say so in their descriptor
+    /// ([`Needs::Ai`]; local views and the separately opted-in image passes don't);
+    /// the non-palette actions that spawn AI passes or ask the AI for settings are
+    /// listed here. `EnableAi` itself is excluded so its own dispatch runs.
+    pub(crate) fn needs_ai(self) -> bool {
+        match self {
+            Self::Ai(a) => a.needs() == Needs::Ai,
+            Self::RefreshSeriesBible
+            | Self::RefreshBibles
+            | Self::QueuePasses
+            | Self::DescribeConfig => true,
+            _ => false,
         }
     }
 

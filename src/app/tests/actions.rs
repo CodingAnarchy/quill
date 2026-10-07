@@ -641,6 +641,48 @@ fn ai_action_when_ai_is_off_offers_to_enable() {
     }
 }
 
+/// Every action that needs the `[ai]` backend gets the enable on-ramp with AI off
+/// (#602) — including the plot and theme trackers and the embedding passes, which
+/// the old hand-maintained list had missed (they fell through to the dead-end
+/// "AI is disabled" message). Derived from the descriptor's `Needs`, so a new pass
+/// can't drift out of the set.
+#[test]
+fn every_ai_backed_action_offers_to_enable_when_ai_is_off() {
+    let (mut app, _dir) = two_chapter_app("action-ai-off-all");
+    for action in [
+        AiAction::Plot,
+        AiAction::Theme,
+        AiAction::SemanticFind,
+        AiAction::Echo,
+    ] {
+        app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
+        app.mode = Mode::Normal;
+        app.run_action(Action::Ai(action), false);
+        assert!(!app.ai_task.is_busy(), "nothing sent when AI is off");
+        match &app.mode {
+            Mode::Prompt(s) => assert!(
+                matches!(
+                    s.pending,
+                    Pending::ConfirmEnableAi { resume: Some(a) } if a == action
+                ),
+                "{action:?}: the enable prompt carries the action to resume"
+            ),
+            _ => panic!("{action:?}: expected the enable-AI prompt to open"),
+        }
+    }
+    // Local views and the image passes (own opt-in) never route to the on-ramp.
+    for action in [AiAction::Triage, AiAction::Portrait] {
+        app.ai = ai::Settings::default();
+        app.mode = Mode::Normal;
+        app.run_action(Action::Ai(action), false);
+        let on_ramp = matches!(
+            &app.mode,
+            Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmEnableAi { .. })
+        );
+        assert!(!on_ramp, "{action:?} must not open the enable-AI prompt");
+    }
+}
+
 /// Declining the enable prompt leaves AI off and writes nothing — the opt-in
 /// default is preserved (#602).
 #[test]
