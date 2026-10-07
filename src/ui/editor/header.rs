@@ -67,7 +67,11 @@ impl HeaderCache {
 /// epigraph, a paged window, a resize, a theme switch, entering/leaving epigraph
 /// editing), so a signature check lets an untouched frame reuse them rather than
 /// re-wrapping every epigraph line.
-pub(super) fn header_inserts(app: &App, width: u16) -> Rc<Vec<(usize, Vec<Line<'static>>)>> {
+pub(super) fn header_inserts(
+    app: &App,
+    width: u16,
+    active: usize,
+) -> Rc<Vec<(usize, Vec<Line<'static>>)>> {
     let edit_meta = matches!(app.mode, Mode::EditMeta(_));
     // When editing an epigraph in the editor, the buffer *is* the epigraph —
     // don't inject chapter/book headers above it.
@@ -84,7 +88,7 @@ pub(super) fn header_inserts(app: &App, width: u16) -> Rc<Vec<(usize, Vec<Line<'
             || {
                 vec![SegmentHeader {
                     start: 0,
-                    index: app.project.active_index(),
+                    index: active,
                     title: None,
                     structure: None,
                     epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),

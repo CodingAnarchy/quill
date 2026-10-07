@@ -235,11 +235,12 @@ fn read_only_tag(app: &App) -> String {
 
 /// A running writing sprint (#299): live countdown + net words written, always
 /// visible (independent of the transient message on the right).
-fn sprint_tag(app: &App) -> String {
+fn sprint_tag(app: &App, active: usize) -> String {
     app.sprint.as_ref().map_or_else(String::new, |s| {
+        let words = s.words(app.project_word_count_with_active(active));
         format!(
             " · {}",
-            crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))
+            crate::app::sprint::status_segment(s.remaining(), words)
         )
     })
 }
@@ -267,9 +268,9 @@ fn chapter_goal_tag(app: &App, active: usize) -> String {
 /// goal, shown only when the author has set one. The words-written figure diffs
 /// the maintained running project total against the session baseline (O(1)), so it
 /// fills as words are added without any per-draw file work.
-fn session_target_tag(app: &App) -> String {
+fn session_target_tag(app: &App, active: usize) -> String {
     app.session_target.as_ref().map_or_else(String::new, |t| {
-        let written = t.written(app.project_word_count());
+        let written = t.written(app.project_word_count_with_active(active));
         format!(
             " · {}",
             crate::app::sprint::session_target_segment(written, t.target())
@@ -347,14 +348,14 @@ pub(super) fn nav_status_bar(
 /// The editor bar: the active chapter's name and save state, the persistent
 /// AI / version-control / sprint tags, and a word/line count (or a transient
 /// message) on the right.
-pub(super) fn editor_status_bar(app: &App) -> (String, String) {
+pub(super) fn editor_status_bar(app: &App, active: usize) -> (String, String) {
     let buffer = app.edit_buffer();
     // The chapter the cursor is in: in continuous view that's the segment
     // under the cursor (with a marker); otherwise the single active chapter.
     let (name, dirtied) = app.manuscript.as_ref().map_or_else(
         // The focused buffer's own title — usually the active chapter, but
         // a reference pane swapped into focus (#165) shows its file name.
-        || (app.pane_title_for(buffer), buffer.dirty),
+        || (app.pane_title_for_with_active(buffer, active), buffer.dirty),
         |m| (format!("≡ {}", m.current_title()), m.dirty()),
     );
     let dirty = dirty_marker(dirtied);
@@ -383,19 +384,15 @@ pub(super) fn editor_status_bar(app: &App) -> (String, String) {
         },
         |m| format!("{m}  "),
     );
-    // Resolve the active chapter once (`active_index` is an O(chapters) scan) and
-    // thread it into the goal tag, which otherwise re-resolved it two more times
-    // per frame (once directly, once inside `chapter_word_count`).
-    let active = app.project.active_index();
     let left = format!(
         " {name}{dirty}{}{}{}{}{}{}{}{}",
         read_only_tag(app),
         vc_tag(app),
         local_backup_tag(app),
         ai_tag(app),
-        sprint_tag(app),
+        sprint_tag(app, active),
         chapter_goal_tag(app, active),
-        session_target_tag(app),
+        session_target_tag(app, active),
         daily_nudge_tag(app)
     );
     (left, right)

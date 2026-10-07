@@ -229,6 +229,7 @@ impl App {
             header_cache: std::cell::RefCell::new(crate::ui::HeaderCache::default()),
             list_layout: std::cell::RefCell::new(ListLayout::default()),
             scroll_offset: std::cell::Cell::new(0),
+            nav_scroll: std::cell::Cell::new(0),
             added: 0,
             removed: 0,
             moved_to_unused: 0,

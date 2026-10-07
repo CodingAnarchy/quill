@@ -14,6 +14,7 @@ mod editor_render;
 mod fenced_code;
 mod folds;
 mod highlights;
+mod nav_pane;
 mod overlays;
 mod perf;
 

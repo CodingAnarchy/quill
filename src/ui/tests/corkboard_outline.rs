@@ -6,6 +6,7 @@ use crate::frontmatter::SceneStatus;
 use crate::manuscript::Manuscript;
 use crate::mode::{Card, Corkboard};
 use crate::syntax::Heading;
+use crate::ui::nav_pane::redundant_title_heading;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
 
@@ -48,20 +49,32 @@ fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
     let skip = redundant_title_heading(&headings, "The Crossing");
     assert_eq!(skip, Some(0));
 
-    let texts: Vec<String> = heading_outline_lines(&headings, None, None, skip, "")
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
-    assert_eq!(texts.len(), 1);
-    assert!(texts[0].contains("At the ford"));
-    assert!(!texts[0].contains("The Crossing"));
-
     // A non-matching title keeps every heading.
     assert_eq!(redundant_title_heading(&headings, "Different"), None);
-    assert_eq!(
-        heading_outline_lines(&headings, None, None, None, "").len(),
-        2
-    );
+
+    // In the pane, the chapter row names "The Crossing" once and the nested
+    // outline lists only the H2 beneath it.
+    let mut app = app_with_chapters(&["The Crossing"], "# The Crossing\n\n## At the ford\n");
+    app.outline_visible = true;
+    let screen = render(&app, 90, 16);
+    let pane: Vec<String> = screen
+        .lines()
+        .map(|l| l.chars().take(27).collect())
+        .collect();
+    let rows = |needle: &str| pane.iter().filter(|l| l.contains(needle)).count();
+    assert_eq!(rows("The Crossing"), 1, "pane:\n{}", pane.join("\n"));
+    assert_eq!(rows("At the ford"), 1, "pane:\n{}", pane.join("\n"));
+
+    // A chapter titled differently keeps the H1 in its outline.
+    app.project.manifest.chapters[0].title = "Different".into();
+    let screen = render(&app, 90, 16);
+    let pane: Vec<String> = screen
+        .lines()
+        .map(|l| l.chars().take(27).collect())
+        .collect();
+    let rows = |needle: &str| pane.iter().filter(|l| l.contains(needle)).count();
+    assert_eq!(rows("The Crossing"), 1, "pane:\n{}", pane.join("\n"));
+    assert_eq!(rows("Different"), 1, "pane:\n{}", pane.join("\n"));
 }
 
 #[test]

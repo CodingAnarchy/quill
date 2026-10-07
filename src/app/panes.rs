@@ -561,12 +561,22 @@ impl App {
 
     /// The title bar for a reference pane (#163/#165): the chapter title if the
     /// pane shows a chapter, otherwise the file's stem (e.g. a bible entry's name),
-    /// falling back to "reference" for an unnamed buffer.
-    pub(crate) fn pane_title_for(&self, buffer: &Buffer) -> String {
-        if let Some(title) = self
-            .chapter_index_of(buffer)
-            .and_then(|i| self.project.chapter_title(i))
-        {
+    /// falling back to "reference" for an unnamed buffer. `active` is the active
+    /// chapter's index, resolved once per frame by the render path, so a pane
+    /// showing the active chapter — the common case — is named without the
+    /// O(chapters) file lookup.
+    pub(crate) fn pane_title_for_with_active(&self, buffer: &Buffer, active: usize) -> String {
+        let file = buffer
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str());
+        let index = if file == Some(self.project.active_file()) {
+            Some(active)
+        } else {
+            self.chapter_index_of(buffer)
+        };
+        if let Some(title) = index.and_then(|i| self.project.chapter_title(i)) {
             return title.to_string();
         }
         buffer

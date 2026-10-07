@@ -5,8 +5,11 @@
 
 use super::*;
 use crate::analysis::FlagCategory;
-use crate::buffer::Cursor;
+use crate::app::folds::section_end_byte;
+use crate::buffer::{Buffer, Cursor};
 use crate::mode::{Action, Mode};
+use std::collections::HashSet;
+use std::fmt::Write;
 
 /// A one-chapter project whose body has two `##` scenes, each with a body line.
 fn folding_app(name: &str) -> (App, TempProject) {
@@ -580,4 +583,85 @@ fn spell_flag_step_into_a_folded_section_reveals_it() {
         !app.folds.is_folded(one) && !cursor_is_hidden(&app),
         "the spell step revealed the fold so the caret is visible"
     );
+}
+
+/// The fold view as it was first written (#975): every hidden body line inserted
+/// into a set, walking line by line from each folded heading to its section end.
+/// The reference the range-based [`FoldState::view`] must agree with exactly.
+fn reference_fold_view(folds: &FoldState, buffer: &Buffer) -> (HashSet<usize>, HashSet<usize>) {
+    let headings = buffer.syntax().headings();
+    let mut hidden = HashSet::new();
+    let mut collapsed = HashSet::new();
+    for (i, h) in headings.iter().enumerate() {
+        if !folds.is_folded(h.start) {
+            continue;
+        }
+        let heading_line = buffer.cursor_at_byte(h.start).line;
+        collapsed.insert(heading_line);
+        let section_end = section_end_byte(headings, i);
+        let mut line = heading_line + 1;
+        while line < buffer.line_count() && buffer.line_start_byte(line) < section_end {
+            hidden.insert(line);
+            line += 1;
+        }
+    }
+    (hidden, collapsed)
+}
+
+#[test]
+fn range_fold_view_matches_the_per_line_reference() {
+    // Property-style: many generated chapters — nested heading levels, indented
+    // headings, runs of blank lines, with or without a trailing newline — each
+    // folded at a pseudo-random subset of headings (nested and overlapping folds
+    // included). The sorted-range view must answer `is_hidden` /
+    // `is_collapsed_heading` exactly like the old per-line set on every line.
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    let mut hidden_lines = 0;
+    for _ in 0..200 {
+        let mut text = String::new();
+        for _ in 0..(1 + next(30)) {
+            match next(4) {
+                0 => {
+                    let level = 1 + next(4) as usize;
+                    let indent = " ".repeat(next(3) as usize);
+                    let _ = writeln!(text, "{indent}{} Heading", "#".repeat(level));
+                }
+                1 => text.push('\n'),
+                _ => text.push_str("Some prose here.\n"),
+            }
+        }
+        if next(2) == 0 {
+            text.pop(); // no trailing newline
+        }
+        let mut buffer = Buffer::from_text(&text);
+        buffer.refresh_syntax();
+        let mut folds = FoldState::default();
+        for h in buffer.syntax().headings() {
+            if next(2) == 0 {
+                folds.toggle(h.start);
+            }
+        }
+        let view = folds.view(&buffer, buffer.syntax().headings());
+        let (hidden, collapsed) = reference_fold_view(&folds, &buffer);
+        hidden_lines += hidden.len();
+        for line in 0..buffer.line_count() + 2 {
+            assert_eq!(
+                view.is_hidden(line),
+                hidden.contains(&line),
+                "is_hidden({line}) differs for {text:?}"
+            );
+            assert_eq!(
+                view.is_collapsed_heading(line),
+                collapsed.contains(&line),
+                "is_collapsed_heading({line}) differs for {text:?}"
+            );
+        }
+    }
+    assert!(hidden_lines > 500, "the generated folds hide real lines");
 }

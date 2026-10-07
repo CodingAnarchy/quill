@@ -14,6 +14,7 @@
 //! until [`FoldState::prune`] drops it, so a stale fold never hides live prose.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use crate::app::App;
 use crate::buffer::Buffer;
@@ -67,36 +68,64 @@ pub struct FoldState {
 /// — computed once per frame from the headings and the fold state. `hidden` lines
 /// render as zero rows (like a concealed fence, #723); `collapsed` heading lines
 /// render their header text with a leading fold glyph.
+///
+/// Both are kept as sorted lists answered by binary search rather than a set of
+/// every hidden line: one range per folded section, so building the view costs
+/// O(folded headings), not O(hidden lines) — folding a whole long chapter used to
+/// insert every body line into a `HashSet` on every frame.
 pub struct FoldView {
-    /// Logical (buffer) line indices hidden by a fold — the body of every collapsed
-    /// section. Rendered as zero visual rows so the section reads as just its header.
-    pub hidden: HashSet<usize>,
-    /// Logical line indices of the headings that are collapsed — each shows a fold
-    /// marker so the author can see the section is folded (and expand it).
-    pub collapsed: HashSet<usize>,
+    /// Logical (buffer) line ranges hidden by a fold — the body of every collapsed
+    /// section, merged into sorted, disjoint, non-adjacent `start..end` ranges (a
+    /// nested fold inside a folded section folds into its parent's range). Rendered
+    /// as zero visual rows so the section reads as just its header.
+    hidden: Vec<Range<usize>>,
+    /// Logical line indices of the headings that are collapsed, sorted and
+    /// deduplicated — each shows a fold marker so the author can see the section is
+    /// folded (and expand it).
+    collapsed: Vec<usize>,
 }
 
 impl FoldView {
     /// An empty view — nothing hidden, nothing collapsed. The reference pane and
     /// any never-folding surface use this so `render_body` takes one uniform param.
     #[must_use]
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
-            hidden: HashSet::new(),
-            collapsed: HashSet::new(),
+            hidden: Vec::new(),
+            collapsed: Vec::new(),
         }
+    }
+
+    /// Build a view from each folded section's hidden line range (in any order,
+    /// possibly overlapping or empty) and its heading line.
+    fn from_parts(mut ranges: Vec<Range<usize>>, mut collapsed: Vec<usize>) -> Self {
+        ranges.retain(|r| r.start < r.end);
+        ranges.sort_unstable_by_key(|r| r.start);
+        let mut hidden: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for r in ranges {
+            match hidden.last_mut() {
+                Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+                _ => hidden.push(r),
+            }
+        }
+        collapsed.sort_unstable();
+        collapsed.dedup();
+        Self { hidden, collapsed }
     }
 
     /// Whether logical line `line` is hidden by a fold (renders as zero rows).
     #[must_use]
     pub fn is_hidden(&self, line: usize) -> bool {
-        self.hidden.contains(&line)
+        // The last range starting at or before `line` is the only one that can
+        // cover it (the ranges are sorted and disjoint).
+        let after = self.hidden.partition_point(|r| r.start <= line);
+        after > 0 && line < self.hidden[after - 1].end
     }
 
     /// Whether logical line `line` is a collapsed heading (shows a fold marker).
     #[must_use]
     pub fn is_collapsed_heading(&self, line: usize) -> bool {
-        self.collapsed.contains(&line)
+        self.collapsed.binary_search(&line).is_ok()
     }
 }
 
@@ -174,32 +203,43 @@ impl FoldState {
     /// state yields an empty view without touching the buffer.
     #[must_use]
     pub fn view(&self, buffer: &Buffer, headings: &[Heading]) -> FoldView {
-        let mut hidden = HashSet::new();
-        let mut collapsed = HashSet::new();
         if self.folded.is_empty() {
-            return FoldView { hidden, collapsed };
+            return FoldView::none();
         }
+        let line_count = buffer.line_count();
+        let mut hidden = Vec::new();
+        let mut collapsed = Vec::new();
         for (i, h) in headings.iter().enumerate() {
             if !self.folded.contains(&h.start) {
                 continue;
             }
-            let heading_line = buffer.cursor_at_byte(h.start).line;
-            collapsed.insert(heading_line);
-            let section_end = section_end_byte(headings, i);
-            // Hide every line strictly after the heading's line, up to the line that
-            // holds the next same-or-higher heading (exclusive) — the section body.
-            let mut line = heading_line + 1;
-            while line < buffer.line_count() {
-                let line_start = buffer.line_start_byte(line);
-                if line_start >= section_end {
-                    break;
-                }
-                hidden.insert(line);
-                line += 1;
-            }
+            // The line only (no column): `cursor_at_byte` would also walk the
+            // line's graphemes for a column this never reads.
+            let heading_line = buffer.line_of_byte(h.start);
+            collapsed.push(heading_line);
+            // Hide every line strictly after the heading's line, up to the first
+            // line starting at or past the section end (the line holding the next
+            // same-or-higher heading) — the section body.
+            let end = first_line_at_or_after(buffer, section_end_byte(headings, i), line_count);
+            hidden.push(heading_line + 1..end);
         }
-        FoldView { hidden, collapsed }
+        FoldView::from_parts(hidden, collapsed)
     }
+}
+
+/// The first logical line whose start byte is at or past `byte` (`line_count` when
+/// none is) — where a fold's hidden body stops. O(log n) on the rope.
+fn first_line_at_or_after(buffer: &Buffer, byte: usize, line_count: usize) -> usize {
+    if byte > buffer.len_bytes() {
+        return line_count;
+    }
+    let line = buffer.line_of_byte(byte);
+    let end = if buffer.line_start_byte(line) >= byte {
+        line
+    } else {
+        line + 1
+    };
+    end.min(line_count)
 }
 
 /// The byte offset where the section opened by heading `idx` ends: the start of the
@@ -323,10 +363,7 @@ impl App {
     #[must_use]
     pub fn fold_view(&self) -> FoldView {
         if self.folds.is_empty() {
-            return FoldView {
-                hidden: HashSet::new(),
-                collapsed: HashSet::new(),
-            };
+            return FoldView::none();
         }
         let buffer = self.edit_buffer();
         self.folds.view(buffer, buffer.syntax().headings())

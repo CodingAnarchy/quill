@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::buffer::{Buffer, Cursor};
+use crate::ui::nav_pane::NavPane;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::fmt::Write;
@@ -235,5 +236,80 @@ fn render_stays_within_a_frame() {
     assert!(
         assistant_dt.as_millis() < perf_budget_ms(16),
         "assistant-pane render took {assistant_dt:?}"
+    );
+}
+
+/// An app over `chapters` chapters with cached counts, the outline pane visible,
+/// and the active chapter near the end of the list (so the pane must scroll to
+/// it) with a heading outline nested under it.
+fn outline_app(chapters: usize) -> App {
+    let titles: Vec<String> = (0..chapters).map(|i| format!("Chapter {i}")).collect();
+    let title_refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+    let mut project = Project::scratch_with(&title_refs);
+    for i in 0..chapters {
+        project.set_chapter_words(i, 1000 + i);
+    }
+    let mut text = String::new();
+    for i in 0..40 {
+        let _ = writeln!(text, "## Scene {i}\n\nThe night was *dark* and long.\n");
+    }
+    let mut buffer = Buffer::from_text(&text);
+    buffer.refresh_syntax();
+    let mut app = App::new(buffer, project);
+    app.outline_visible = true;
+    app.project.set_active(chapters - chapters / 10);
+    app
+}
+
+/// The fastest of five 30-draw means of the outline pane alone (min-of-N keeps
+/// scheduler noise out of the ratio below).
+fn pane_time(app: &App) -> Duration {
+    let mut terminal = Terminal::new(TestBackend::new(28, 60)).unwrap();
+    let active = app.project.active_index();
+    let draw_pane = |t: &mut Terminal<TestBackend>| {
+        t.draw(|f| NavPane { app, active }.render(f, f.area()))
+            .unwrap();
+    };
+    draw_pane(&mut terminal); // warm
+    (0..5)
+        .map(|_| {
+            let t = Instant::now();
+            for _ in 0..30 {
+                draw_pane(&mut terminal);
+            }
+            t.elapsed() / 30
+        })
+        .min()
+        .unwrap()
+}
+
+/// Performance guard (`cargo perf`). The outline pane walks a cheap row model to
+/// place its scroll and styles only the rows on screen, so its cost barely moves
+/// between a novel (150 chapters) and a series (1500) — and a full frame beside a
+/// series-sized outline stays well within budget. It used to format a styled
+/// `Line` for every chapter on every frame (and never scrolled), so the pane cost
+/// grew linearly with the project.
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn outline_pane_is_flat_in_chapter_count() {
+    let (small_app, large_app) = (outline_app(150), outline_app(1500));
+    let small = pane_time(&small_app);
+    let large = pane_time(&large_app);
+    println!("outline pane: 150 chapters = {small:?}, 1500 chapters = {large:?}");
+    // Scale-independence: 10× the chapters may cost a little (one cheap pass over
+    // cached metadata for band grouping and the section total, two row walks),
+    // never what a styled row per chapter costs (~66µs → ~190µs here, ~2.9×; now
+    // ~1.2×).
+    assert!(
+        large.as_micros() < small.as_micros() * 3 / 2 + 20,
+        "the outline pane grew with the chapter count: {small:?} → {large:?}"
+    );
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
+    let frame = mean_frame(&mut terminal, &large_app);
+    println!("full frame beside a 1500-chapter outline = {frame:?}");
+    assert!(
+        frame.as_micros() < perf_budget_us(PROSE_BUDGET_US),
+        "series-sized outline frame took {frame:?}"
     );
 }
