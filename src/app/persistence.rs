@@ -8,8 +8,30 @@ use crate::lastpos;
 use crate::mode::Pending;
 use crate::recovery;
 
+use std::time::{Duration, Instant};
+
 use super::App;
 use crate::project::Project;
+
+/// The fewest seconds between two recovery-sidecar writes while edits keep
+/// arriving. Each write copies the buffer, serializes it, and does a durable
+/// atomic write (two `fsync`s — `F_FULLFSYNC` on macOS, several ms), so writing
+/// on every pause in a stop-start typing rhythm is wasted disk churn. A crash
+/// loses at most this much typing beyond the last capture; the throttled write
+/// is deferred, never dropped (see [`App::tick_recovery`]).
+pub(super) const RECOVERY_MIN_INTERVAL: Duration = Duration::from_secs(2);
+
+/// What a recovery capture wrote: the edit buffer's process-unique content
+/// [`revision`](crate::buffer::Buffer::revision) (re-issued on every edit and
+/// undo/redo, never reused across buffers) and the chapter files the text was
+/// attributed to (the continuous view's dirty segments, or the active chapter).
+/// Equal keys mean the sidecar already holds exactly the text a capture would
+/// write — the "unchanged since last capture" check.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct RecoveryKey {
+    revision: u64,
+    chapters: Vec<String>,
+}
 
 impl App {
     /// Reset the per-chapter word baselines to the current counts, so the next
@@ -147,7 +169,24 @@ impl App {
     /// (#566). The sidecar is written while there are unsaved edits and removed
     /// once everything is clean — tracked by `recovery_written`, so a clean
     /// buffer issues at most one remove rather than one per idle tick.
+    ///
+    /// Only on change: a capture is keyed on the edit buffer's content revision
+    /// plus the chapters it attributes text to ([`RecoveryKey`]), and an idle
+    /// pass whose key matches the last successful write returns before copying,
+    /// serializing, or fsyncing anything — an arrow key, a mouse move, or a pause
+    /// with no new edits costs a comparison, not a durable write. Unthrottled:
+    /// the event loop goes through [`tick_recovery`](Self::tick_recovery), which
+    /// adds the write-rate limit; tests and explicit callers capture at once.
     pub(super) fn capture_recovery(&mut self) {
+        let Some(key) = self.recovery_key() else {
+            if self.recovery_written {
+                self.clear_recovery();
+            }
+            return;
+        };
+        if self.recovery_written && self.recovery_key.as_ref() == Some(&key) {
+            return; // the sidecar already holds exactly this text
+        }
         let rec = match &self.manuscript {
             // Continuous view: snapshot each dirty segment's in-memory prose,
             // attributing it to that segment's chapter file.
@@ -162,34 +201,76 @@ impl App {
                     .collect();
                 recovery::Recovery::from_chapters(chapters)
             }
-            // Single-chapter view: the active chapter's buffer, 1:1 to its file —
-            // but only when the focused editor actually *is* the active chapter.
-            // A focused reference pane (a story-bible entry / loose note opened
-            // beside the prose, #165) is also `self.buffer`, yet its text is NOT
-            // the active chapter's. Tagging it with `active_file()` would make
-            // crash recovery offer to overwrite the active chapter with the
-            // reference file's content — data corruption. We can't instead tag it
-            // with the reference file's own name either: the restore path resolves
-            // a captured file through the manifest (`index_of_file` in
-            // `restore_single_recovery` / `offer_recovery`), and a non-chapter
-            // reference file has no manifest entry, so such a record could never be
-            // restored anyway. So skip the snapshot while a reference pane is
-            // focused; the active chapter's file on disk is left untouched
-            // (#165 follow-up).
-            None => (self.buffer.dirty && self.focus_shows_active_chapter()).then(|| {
-                recovery::Recovery::single(
-                    self.project.active_file().to_string(),
-                    self.buffer.text(),
-                )
-            }),
+            // Single-chapter view: the active chapter's buffer, 1:1 to its file
+            // (the key already checked it's dirty and actually the active chapter).
+            None => Some(recovery::Recovery::single(
+                self.project.active_file().to_string(),
+                self.buffer.text(),
+            )),
         };
         if let Some(rec) = rec {
             if recovery::write(&self.project.root, &rec).is_ok() {
                 self.recovery_written = true;
+                self.recovery_key = Some(key);
+                self.recovery_captured_at = Some(Instant::now());
             }
-        } else if self.recovery_written {
-            self.clear_recovery();
         }
+    }
+
+    /// The event loop's recovery capture: [`capture_recovery`](Self::capture_recovery)
+    /// rate-limited to one write per [`RECOVERY_MIN_INTERVAL`] while edits keep
+    /// coming. Called after every frame (so sustained typing that never pauses is
+    /// still captured every couple of seconds) and from the debounced idle pass.
+    /// A write the throttle holds back is not lost: the next call after the
+    /// interval — at most one loop tick (~100ms) late, input or not — sees the
+    /// changed key and writes the latest text, so the final state of a burst is
+    /// always captured within about `RECOVERY_MIN_INTERVAL` of the last edit.
+    /// Clearing the sidecar (everything saved) is never throttled.
+    pub(crate) fn tick_recovery(&mut self) {
+        let throttled = self
+            .recovery_captured_at
+            .is_some_and(|t| t.elapsed() < RECOVERY_MIN_INTERVAL);
+        if throttled && self.recovery_key().is_some() {
+            return;
+        }
+        self.capture_recovery();
+    }
+
+    /// The change key for a capture right now, or `None` when there is nothing
+    /// to recover (clean, or no dirty text attributable to a chapter).
+    ///
+    /// Single-chapter view: only when the focused editor actually *is* the active
+    /// chapter. A focused reference pane (a story-bible entry / loose note opened
+    /// beside the prose, #165) is also `self.buffer`, yet its text is NOT the
+    /// active chapter's. Tagging it with `active_file()` would make crash recovery
+    /// offer to overwrite the active chapter with the reference file's content —
+    /// data corruption. We can't instead tag it with the reference file's own name
+    /// either: the restore path resolves a captured file through the manifest
+    /// (`index_of_file` in `restore_single_recovery` / `offer_recovery`), and a
+    /// non-chapter reference file has no manifest entry, so such a record could
+    /// never be restored anyway. So skip the snapshot while a reference pane is
+    /// focused; the active chapter's file on disk is left untouched (#165
+    /// follow-up).
+    fn recovery_key(&self) -> Option<RecoveryKey> {
+        self.manuscript.as_ref().map_or_else(
+            || {
+                (self.buffer.dirty && self.focus_shows_active_chapter()).then(|| RecoveryKey {
+                    revision: self.buffer.revision(),
+                    chapters: vec![self.project.active_file().to_string()],
+                })
+            },
+            |m| {
+                let chapters: Vec<String> = m
+                    .dirty_chapters()
+                    .into_iter()
+                    .map(|index| self.project.chapter_file(index).to_string())
+                    .collect();
+                (!chapters.is_empty()).then(|| RecoveryKey {
+                    revision: m.buffer().revision(),
+                    chapters,
+                })
+            },
+        )
     }
 
     /// Remove the recovery sidecar — nothing left to recover (a clean save, an
@@ -197,6 +278,7 @@ impl App {
     pub(super) fn clear_recovery(&mut self) {
         recovery::clear(&self.project.root);
         self.recovery_written = false;
+        self.recovery_key = None;
     }
 
     /// At launch, offer back any unsaved work a previous session left behind.

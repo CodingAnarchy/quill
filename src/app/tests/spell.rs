@@ -323,3 +323,37 @@ fn navigation_skips_a_word_thats_since_been_fixed() {
         app.message
     );
 }
+
+#[test]
+fn the_settled_pass_keeps_spell_flags_on_their_words_while_typing() {
+    // Between idle passes the flags aren't recomputed, only carried through the
+    // burst's edits, so an underline never lands on shifted text mid-typing.
+    let (mut app, _dir) = two_chapter_app("spell-remap");
+    app.buffer = Buffer::from_text("The quikc fox\n");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 1);
+
+    // Type before the misspelling, one batch per key.
+    for c in "Big ".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+        app.on_input_settled();
+    }
+    assert_eq!(app.buffer.text(), "Big The quikc fox\n");
+    let (s, e) = app.spell_flags[0];
+    assert_eq!(
+        &app.buffer.text()[s..e],
+        "quikc",
+        "the flag moved with its word"
+    );
+
+    // An undo swaps the rope without edit deltas: the settled pass recomputes.
+    app.on_idle();
+    app.on_key(ctrl('z'));
+    app.on_input_settled();
+    let (s, e) = app.spell_flags[0];
+    assert_eq!(
+        &app.buffer.text()[s..e],
+        "quikc",
+        "recomputed after the undo"
+    );
+}

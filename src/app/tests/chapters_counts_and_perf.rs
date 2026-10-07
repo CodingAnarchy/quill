@@ -409,3 +409,62 @@ fn save_is_independent_of_project_size() {
         "save roll-up scaled with project size: 150 = {small_per:?}, 1500 = {large_per:?}"
     );
 }
+
+/// Performance guard (`cargo perf`). A keystroke as the event loop pays for it:
+/// `on_key` plus the per-batch settled pass (reparse, fold prune, annotation and
+/// spell-flag re-anchoring) plus the loop's throttled recovery tick — on a dirty,
+/// window-sized chapter inside a project on disk. The heavy idle work (spell
+/// re-judging, revision passes, tally, the fsync'd recovery write, sealing the
+/// undo group) is debounced to a pause in typing and must stay off this path: a
+/// regression that runs it per batch roughly doubles the cost and trips the
+/// budget. The remaining cost is dominated by the incremental reparse. See
+/// `docs/performance.md`.
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn keystroke_with_settled_pass_stays_within_a_frame() {
+    let dir = TempProject::new(crate::testutil::scratch_dir("perf", "keystroke"));
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    // ~6k words of blank-line-separated paragraphs with inline emphasis: a long
+    // chapter, the realistic single-view worst case.
+    let para = "The night was *dark* and the road ran long beneath the hills, \
+                and she walked on without a word to anyone. ";
+    let mut body = String::from("# Chapter\n\n");
+    for _ in 0..72 {
+        for _ in 0..4 {
+            body.push_str(para);
+        }
+        body.push_str("\n\n");
+    }
+    fs::write(dir.join("one.md"), body).unwrap();
+    let mut app = open_test_app(&dir);
+    let mid = app.buffer.len_bytes() / 2;
+    app.buffer.cursor = app.buffer.cursor_at_byte(mid);
+
+    // Dirty the buffer and run one full idle pass (warm caches, first capture),
+    // so the timed keys hit the steady state: dirty, sidecar recently written.
+    app.on_key(key(KeyCode::Char('z')));
+    app.on_idle();
+
+    let keys = 30;
+    let t = Instant::now();
+    for i in 0..keys {
+        let c = if i % 6 == 5 { ' ' } else { 'a' };
+        app.on_key(key(KeyCode::Char(c)));
+        app.on_input_settled();
+        app.tick_recovery();
+    }
+    let per = t.elapsed() / keys;
+
+    println!(
+        "keystroke + settled pass on a {}-word chapter = {per:?}",
+        app.buffer.word_count()
+    );
+    assert!(
+        per.as_millis() < perf_budget_ms(12),
+        "keystroke + settled pass took {per:?}"
+    );
+}

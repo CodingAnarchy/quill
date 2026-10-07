@@ -170,6 +170,7 @@ impl App {
             auto_pair,
             theme,
             spell_flags: Vec::new(),
+            spell_rev: 0,
             spell_scratch: String::new(),
             style_flag_category: None,
             style_flags: Vec::new(),
@@ -271,6 +272,8 @@ impl App {
             batch_apply_book: std::cell::Cell::new(None),
             pending_recovery: None,
             recovery_written: false,
+            recovery_key: None,
+            recovery_captured_at: None,
             pending_switch: None,
             pending_manage: None,
             pending_restore_rev: None,
@@ -426,27 +429,79 @@ impl App {
         }
     }
 
-    /// Called from the event loop once input goes idle: reparse the active
-    /// buffer for highlighting, and book the day's word delta. Both are off the
-    /// keystroke path, so typing stays instant.
-    pub fn on_idle(&mut self) {
-        let buffer = self.edit_buffer_mut();
-        buffer.refresh_syntax();
-        buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
-                                  // Drop fold keys whose heading the reparse just deleted or rewrote (#975), so
-                                  // a stale fold can never hide live prose.
+    /// The cheap pass the event loop runs after **every** input batch, before the
+    /// next frame is drawn: bring every byte-offset cache the renderer reads back
+    /// into line with the buffer the batch just edited, and nothing more.
+    ///
+    /// What must stay per batch (the renderer would otherwise style, conceal, or
+    /// fold against offsets that no longer match the text):
+    /// - the syntax reparse (`refresh_syntax`, dirty-gated) — highlight, conceal,
+    ///   fence, scene-break, and heading offsets come from it, and a stale list
+    ///   hides or italicizes the wrong characters while typing;
+    /// - fold pruning against the fresh headings (#975), so a fold never hides
+    ///   live prose under a heading the batch deleted;
+    /// - annotation re-anchoring (#302/#370), which also remaps the spell flags
+    ///   through the same edit deltas — or, when the buffer changed some other way
+    ///   (undo, a rebuilt buffer), recomputes them.
+    ///
+    /// The style-flag and proximity caches need nothing here: an edit already
+    /// clears them ([`invalidate_revision_highlights`](Self::invalidate_revision_highlights)).
+    /// Everything else — spell re-judging, the revision passes, the word tally,
+    /// VCS status, the lock re-check, the recovery capture, sealing the undo
+    /// group — is deferred to [`on_quiet`](Self::on_quiet), which runs once input
+    /// has been quiet for a moment.
+    pub fn on_input_settled(&mut self) {
+        self.edit_buffer_mut().refresh_syntax();
+        // Drop fold keys whose heading the reparse just deleted or rewrote (#975),
+        // so a stale fold can never hide live prose.
         self.prune_folds();
+        self.sync_annotations();
+        if self.spell_rev != self.edit_buffer().revision() {
+            self.refresh_spell_flags();
+        }
+        // Mark the latest input, so autosave fires only after the configured
+        // seconds of genuine idle (#409).
+        self.last_activity = std::time::Instant::now();
+    }
+
+    /// The full idle pass with an immediate recovery capture — the test
+    /// stand-in for "the author paused". The event loop runs the same pass as
+    /// [`on_quiet`](Self::on_quiet), whose capture is rate-limited; tests call this
+    /// one so back-to-back pauses each capture deterministically.
+    #[cfg(test)]
+    pub fn on_idle(&mut self) {
+        self.idle_work();
+        self.capture_recovery();
+    }
+
+    /// The debounced idle pass, run by the event loop once input has been quiet
+    /// for `IDLE_QUIET` (see `main.rs`) — not after every batch:
+    /// [`on_input_settled`](Self::on_input_settled), then the heavier work kept
+    /// off the typing path (sealing the undo group, re-judging spelling, the
+    /// revision passes, the word tally, VCS status, the lock re-check, batch and
+    /// findings polls), then a rate-limited recovery capture
+    /// ([`tick_recovery`](Self::tick_recovery)).
+    pub fn on_quiet(&mut self) {
+        self.idle_work();
+        self.tick_recovery();
+    }
+
+    /// Everything in the idle pass except the recovery capture.
+    fn idle_work(&mut self) {
+        self.on_input_settled();
+        // A pause in typing ends the undo group, so one undo reverses the whole
+        // burst (a word or phrase), not a single keystroke.
+        self.edit_buffer_mut().seal_undo_group();
+        // Re-judge every word (the per-batch pass only remaps the flags).
         self.refresh_spell_flags();
         self.refresh_style_flags();
         self.refresh_proximity_repeats();
-        self.sync_annotations();
         // Turn the day over before booking any words, so the first post-midnight
         // tally lands on the new day rather than compounding yesterday's total (#1170).
         self.roll_day_if_needed(&crate::date::iso(crate::date::today()));
         self.tally_words();
         self.refresh_vc_status_on_idle();
         self.recheck_instance_lock();
-        self.capture_recovery();
         // Poll any in-flight background bible batches (#950) — cheap: a no-op unless
         // the opt-in is on and the durable record has batches to reconcile.
         self.reconcile_batch_update();
@@ -454,9 +509,6 @@ impl App {
         // opt-in is on; bounded to the open findings' changed chapters (content-digest
         // keyed), never a whole-manuscript sweep, and off the keystroke path.
         self.verify_findings_on_idle();
-        // Mark this input burst's end, so autosave fires only after the
-        // configured seconds of genuine idle (#409).
-        self.last_activity = std::time::Instant::now();
     }
 
     /// Drop the revision-pass highlight caches on an edit (#1035), so the
@@ -467,7 +519,7 @@ impl App {
     /// between the edit and the next idle recompute a cached span points at the
     /// wrong characters. Clearing them here suppresses the marks for the length
     /// of an active typing burst — they reappear at the correct offsets on the
-    /// next idle pass ([`on_idle`](Self::on_idle) re-runs both refreshes), which
+    /// next idle pass ([`on_quiet`](Self::on_quiet) re-runs both refreshes), which
     /// is the behavior we want (a mark shouldn't drift onto the wrong word
     /// mid-keystroke). This mirrors how the spell underline already blinks off
     /// while a misspelled word is being retyped.

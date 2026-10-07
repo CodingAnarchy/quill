@@ -50,7 +50,9 @@ impl App {
         // Snapshot annotations for any edit group that opened, before the deltas
         // below move them — keeps the undo history aligned with the buffer's (#370).
         self.note_annotation_undo_point();
-        let edits = self.edit_buffer_mut().drain_anchor_edits();
+        let buffer = self.edit_buffer_mut();
+        let base = buffer.anchor_base();
+        let edits = buffer.drain_anchor_edits();
         if edits.is_empty() {
             return;
         }
@@ -71,6 +73,10 @@ impl App {
                 None => false,
             });
         self.annotations.sort_by_key(|a| (a.start, a.end));
+        // The spell flags address the same byte space: carry them through the
+        // burst with the same map, so they stay on their words between full
+        // idle-time spell passes.
+        self.remap_spell_flags(&mapper, base);
     }
 
     /// Reload the loaded chapters' annotations from disk, re-translated to the

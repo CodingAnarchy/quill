@@ -8,6 +8,7 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ropey::Rope;
 use tree_sitter::{InputEdit, Point};
@@ -29,6 +30,21 @@ pub use motions::{CaseChange, CaseEdit, FindKind, TextObject};
 /// copying the whole rope; the doubling retry keeps a pathological grapheme that
 /// straddles the window edge correct.
 const GRAPHEME_WINDOW: usize = 64;
+
+/// The source of [`Buffer::revision`] values: process-wide, so a revision names
+/// one content state of one buffer and never repeats — not even across a buffer
+/// that is dropped and rebuilt (a chapter switch, a continuous-view reslide).
+/// Starts at 1 so [`NO_REVISION`] (0) is never handed out.
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
+/// Sentinel for "no revision": the anchor base after a wholesale rope swap, which
+/// no recorded edit delta maps from.
+const NO_REVISION: u64 = 0;
+
+/// A fresh, never-before-issued revision.
+fn fresh_revision() -> u64 {
+    NEXT_REVISION.fetch_add(1, Ordering::Relaxed)
+}
 
 /// A cursor position expressed in (line, grapheme-column).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -88,6 +104,20 @@ pub struct Buffer {
     /// changed the document (a pure motion leaves it unchanged), which is how
     /// Vim's `.` (repeat) decides what to record as the last change.
     edits: u64,
+    /// Content revision: a process-unique id for the document text as it stands,
+    /// re-issued on every text change — an edit, an undo/redo restore, or a
+    /// wholesale [`replace_text`](Buffer::replace_text). Unlike [`edits`](Self::edits)
+    /// (which Vim's `.` reads, and which undo must not move), this changes whenever
+    /// the text does, so it is a cheap "has the content changed since I last
+    /// looked?" key: the recovery sidecar skips rewriting an unchanged buffer, and
+    /// the spell flags know when to recompute.
+    revision: u64,
+    /// The revision the pending [`anchor_edits`](Self::anchor_edits) start from —
+    /// the text as of the last [`drain_anchor_edits`](Buffer::drain_anchor_edits).
+    /// A cache computed against that revision can be remapped through the drained
+    /// deltas instead of recomputed. [`NO_REVISION`] after a rope swap (undo/redo,
+    /// `replace_text`), which the deltas don't describe.
+    anchor_base: u64,
 }
 
 impl Buffer {
@@ -105,6 +135,7 @@ impl Buffer {
     /// others ([`empty`](Self::empty), [`from_path`](Self::from_path)) build their
     /// body and delegate here, so a new field is initialized in one place.
     pub fn from_text(text: &str) -> Self {
+        let revision = fresh_revision();
         Self {
             syntax: Syntax::new(text),
             rope: Rope::from_str(text),
@@ -121,6 +152,8 @@ impl Buffer {
             anchor_edits: Vec::new(),
             checkpointed: false,
             edits: 0,
+            revision,
+            anchor_base: revision,
         }
     }
 
@@ -130,6 +163,21 @@ impl Buffer {
     /// absolute value. Vim's `.` uses this to record only commands that edited.
     pub const fn edit_seq(&self) -> u64 {
         self.edits
+    }
+
+    /// The content revision: process-unique, re-issued whenever the text changes
+    /// (edit, undo/redo, wholesale replace) and never reused, so two equal reads
+    /// mean the same buffer with the same text. See the field docs.
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The revision the pending anchor edits apply to (#302): a cache computed at
+    /// this revision is brought current by remapping it through the deltas
+    /// [`drain_anchor_edits`](Self::drain_anchor_edits) returns. `0` after a rope
+    /// swap, which no delta describes — such a cache must be recomputed.
+    pub const fn anchor_base(&self) -> u64 {
+        self.anchor_base
     }
 
     /// Load a file from disk, or start an empty buffer pointed at `path` if the
@@ -243,6 +291,8 @@ impl Buffer {
         self.group_open = false;
         self.checkpointed = false; // fresh baseline — no annotation snapshot to take (#370)
         self.dirty = true;
+        self.revision = fresh_revision();
+        self.anchor_base = NO_REVISION; // a wholesale swap no edit delta describes
     }
 
     /// The text of a single line, without its trailing newline.
@@ -329,6 +379,7 @@ impl Buffer {
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
         self.checkpoint();
         self.edits = self.edits.wrapping_add(1);
+        self.revision = fresh_revision();
         let start_byte = self.rope.char_to_byte(char_idx);
         let start_position = point_at_byte(&self.rope, start_byte);
 
@@ -366,6 +417,7 @@ impl Buffer {
     fn edit_remove(&mut self, start: usize, end: usize) {
         self.checkpoint();
         self.edits = self.edits.wrapping_add(1);
+        self.revision = fresh_revision();
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
         let start_position = point_at_byte(&self.rope, start_byte);
@@ -436,6 +488,7 @@ impl Buffer {
     /// author annotations off the keystroke path. Each is `(start, old_end,
     /// new_end)`: bytes `[start, old_end)` became `new_end - start` new bytes.
     pub fn drain_anchor_edits(&mut self) -> Vec<(usize, usize, usize)> {
+        self.anchor_base = self.revision;
         std::mem::take(&mut self.anchor_edits)
     }
 

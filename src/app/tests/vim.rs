@@ -681,3 +681,33 @@ fn modeless_default_is_unchanged_when_vim_is_off() {
         "Esc does nothing without Vim mode"
     );
 }
+
+#[test]
+fn u_undoes_one_normal_command_even_without_a_pause() {
+    // Undo groups seal on a pause in input, but a Vim command settling back into
+    // Normal mode is its own undo step regardless: a quick `A…<Esc>` then `0x`
+    // (no idle pass between, as a fast typist would) undoes as two steps.
+    let (mut app, _dir) = vim_app("vim-u-step");
+    type_str(&mut app, "A"); // append at end of line
+    app.on_input_settled();
+    type_str(&mut app, " sea");
+    app.on_input_settled();
+    app.on_key(key(KeyCode::Esc));
+    app.on_input_settled();
+    type_str(&mut app, "0x"); // to line start, delete the `f`
+    app.on_input_settled();
+    assert_eq!(app.buffer.text(), "irst chapter sea\n");
+
+    type_str(&mut app, "u");
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter sea\n",
+        "u reverts only the `x`"
+    );
+    type_str(&mut app, "u");
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\n",
+        "a second u reverts the whole Insert session"
+    );
+}
