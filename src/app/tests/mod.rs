@@ -94,6 +94,7 @@ mod imports;
 mod join_reflow;
 mod keychain;
 mod launch;
+mod manifest_overrides;
 mod marks;
 mod models;
 mod mouse;

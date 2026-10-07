@@ -325,8 +325,9 @@ fn open_survives_unknown_future_keys_end_to_end_and_stamps_the_version() {
     // COMPAT (#1097), end to end: a `book.toml` written by a *newer* Quill — with
     // unknown keys at the top level and inside a chapter entry — must open through
     // the real `Project::open` path with no error and no loss of the known fields.
-    // On save the manifest is re-serialized from the typed struct: the unknown keys
-    // are DROPPED (documented behavior), and the current `format_version` is stamped.
+    // On save the manifest is re-serialized from the typed struct with the file's
+    // unknown *top-level* keys carried over; an unknown key nested inside a modeled
+    // table (here a chapter entry) is still dropped (documented behavior).
     let dir = temp_dir("compat-unknown-keys");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -357,13 +358,18 @@ future_chapter_key = 99
         "an absent version reads as the current one"
     );
 
-    // Re-save: unknown keys drop, known data survives, and an untouched existing
-    // project stays byte-stable (no new format_version key).
+    // Re-save: the unknown top-level key survives, the nested one drops, known
+    // data survives, and an untouched existing project stays byte-stable (no new
+    // format_version key).
     project.save_manifest().unwrap();
     let written = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
     assert!(
-        !written.contains("future_top_level") && !written.contains("future_chapter_key"),
-        "unknown keys are dropped on re-save (documented): {written}"
+        written.contains("future_top_level = \"a newer version wrote this\""),
+        "an unknown top-level key is kept on re-save: {written}"
+    );
+    assert!(
+        !written.contains("future_chapter_key"),
+        "an unknown key inside a chapter entry is dropped (documented): {written}"
     );
     assert!(
         written.contains("title = \"Forward Compat\""),

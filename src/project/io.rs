@@ -488,17 +488,33 @@ impl Project {
     /// Write the manifest back to `book.toml`. A standalone novel serializes the
     /// flat manifest exactly as before; a multi-book series (#328) folds the live
     /// active book back into the series list and writes the `[[books]]` form.
+    ///
+    /// Top-level keys the manifest doesn't model — the `[quill]` config-override
+    /// table (#710), or an additive key from a newer 1.x (#1097) — are carried
+    /// over from the file on disk rather than dropped. They're read at save time,
+    /// not cached at open, so a hand edit made while Quill is running survives the
+    /// next structural save too. A file that no longer parses aborts the save
+    /// instead of being overwritten (its unknown keys can't be recovered).
     pub fn save_manifest(&self) -> std::io::Result<()> {
         if self.is_read_only() {
             return Err(Self::read_only_error()); // #871: don't race another instance
         }
-        let err = |e| std::io::Error::other(format!("could not serialize manifest: {e}"));
-        let text = if self.books.is_empty() {
-            toml::to_string_pretty(&self.manifest).map_err(err)?
-        } else {
-            series::series_to_toml(&self.manifest, &self.books, self.active_book).map_err(err)?
-        };
-        atomic::write(&Self::manifest_path(&self.root), text.as_bytes())?;
+        let path = Self::manifest_path(&self.root);
+        // A failed read must abort (#565): writing without the file's unknown keys
+        // would silently erase the author's `[quill]` overrides.
+        let existing = read_existing(&path)?;
+        let extra = series::unknown_keys(&existing).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{} no longer parses, so it wasn't rewritten: {e}",
+                    path.display()
+                ),
+            )
+        })?;
+        let text = series::manifest_to_toml(&self.manifest, &self.books, self.active_book, &extra)
+            .map_err(|e| std::io::Error::other(format!("could not serialize manifest: {e}")))?;
+        atomic::write(&path, text.as_bytes())?;
         // The manifest carries the `[quill.*]` config overrides (#710): an open
         // config load session must re-read it rather than serve the old parse.
         config::forget_parsed();

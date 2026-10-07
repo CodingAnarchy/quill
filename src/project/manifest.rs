@@ -237,6 +237,12 @@ pub fn shift_parts_for_delete(parts: &mut Vec<Part>, body_pos: usize) {
 /// back. Scalar keys are declared before the `goals` table and the `chapters`
 /// array, so the TOML tables stay last (a TOML requirement).
 ///
+/// Top-level keys this struct doesn't model — the `[quill]` per-project config
+/// overrides (#710), or an additive key from a newer 1.x — aren't fields here and
+/// so don't survive a plain re-serialization; [`Project::save_manifest`] carries
+/// them over from the file on disk (see `extra_keys`). Unknown keys nested inside
+/// a modeled table (`[goals]`, a `[[chapters]]` entry, …) are still dropped.
+///
 /// For a multi-book series (#328), this holds the *active* book's structure;
 /// `title` is then the active book's title, `series` is the series title, and the
 /// full book list lives on [`Project`].
@@ -618,21 +624,19 @@ future_chapter_field = \"ignored\"
         assert!(manifest.goals.is_some(), "the [goals] table still parsed");
     }
 
-    // DECISION (#1097): unknown top-level keys are DROPPED on re-save, not
-    // preserved. The manifest is a typed struct re-serialized on every save, so a
-    // key this version doesn't model isn't round-tripped. Documented on `Manifest`
-    // and in the compatibility promise: a newer version's *additive* field is lost
-    // if an older version re-saves the project. (Front matter, by contrast, is kept
-    // verbatim — see `frontmatter`.) This test pins the drop so the choice is
-    // deliberate and can't silently flip.
+    // The typed struct alone does NOT round-trip a key it doesn't model: an
+    // unknown top-level key is gone from its serialization. `save_manifest` is what
+    // carries such keys (the `[quill]` overrides, a newer 1.x's additive field)
+    // over from the file on disk (`extra_keys`); this pins that the struct itself
+    // stays a plain typed view, so that merge step is what preserves them.
     #[test]
-    fn unknown_top_level_keys_are_dropped_on_resave() {
+    fn the_typed_manifest_alone_drops_unknown_top_level_keys() {
         let toml = "title = \"Book\"\nfuture_scalar = \"newer version wrote this\"\n";
         let manifest: Manifest = toml::from_str(toml).unwrap();
         let reserialized = toml::to_string_pretty(&manifest).unwrap();
         assert!(
             !reserialized.contains("future_scalar"),
-            "unknown keys are dropped on re-save (documented behavior): {reserialized}"
+            "the typed struct doesn't model unknown keys: {reserialized}"
         );
         assert!(
             reserialized.contains("title = \"Book\""),
