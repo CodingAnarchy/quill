@@ -19,6 +19,7 @@
 //! keystroke, so the cost no longer scales with chapter size. The result is
 //! identical to a fresh whole-document parse (the property tests assert it).
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use ropey::str_utils::byte_to_line_idx;
@@ -78,6 +79,10 @@ pub struct Heading {
     pub start: usize,
 }
 
+/// A memoized cursor-revealed conceal list: the enclosing spans it reveals (the
+/// key) and the conceal ranges left once their markers are dropped.
+type Revealed = (Vec<(usize, usize)>, Rc<[(usize, usize)]>);
+
 /// The live parse of a single document (one chapter file).
 pub struct Syntax {
     /// The per-block parse cache that makes a reparse proportional to the edit,
@@ -90,8 +95,18 @@ pub struct Syntax {
     scratch: String,
     /// Highlight spans for the whole document, sorted by start byte.
     highlights: Vec<Highlight>,
-    /// Emphasis delimiters, for soft-rendering (concealing) the markers.
+    /// `highlight_reach[i]` is the furthest `end` among `highlights[..=i]` —
+    /// non-decreasing even though the spans nest, so [`highlights_in`]
+    /// (Self::highlights_in) can binary-search past every span that ends before
+    /// its window instead of filtering the whole prefix of the list.
+    highlight_reach: Vec<usize>,
+    /// Emphasis delimiters, for soft-rendering (concealing) the markers. Sorted by
+    /// `delim_start`; the delimiter ranges are pairwise disjoint.
     markers: Vec<Marker>,
+    /// `marker_reach[i]` is the furthest `span_end` among `markers[..=i]`, so
+    /// [`conceal_ranges`](Self::conceal_ranges) finds the spans enclosing the
+    /// cursor by binary search rather than a scan of every marker each frame.
+    marker_reach: Vec<usize>,
     /// Every marker's conceal range (all delimiters hidden), start-sorted — the
     /// full list [`conceal_ranges`](Self::conceal_ranges) returns when nothing is
     /// revealed. Built once per parse/reparse (markers change only then) and shared
@@ -105,6 +120,11 @@ pub struct Syntax {
     /// highlight and allocating a line-lookup `String` per break each frame — the
     /// same shape as the `conceal_all`/`highlights` caches.
     scene_breaks: Vec<usize>,
+    /// The last cursor-revealed conceal list, keyed by the spans it reveals. A
+    /// cursor resting on an emphasis span asks for the same filtered list every
+    /// frame; this hands back the shared `Rc` instead of rebuilding it per frame.
+    /// Cleared on every parse/reparse (the markers it was built from change).
+    revealed: RefCell<Option<Revealed>>,
 }
 
 impl Syntax {
@@ -114,10 +134,13 @@ impl Syntax {
             segments: Segments::default(),
             scratch: String::new(),
             highlights: Vec::new(),
+            highlight_reach: Vec::new(),
             markers: Vec::new(),
+            marker_reach: Vec::new(),
             conceal_all: Rc::from([]),
             headings: Vec::new(),
             scene_breaks: Vec::new(),
+            revealed: RefCell::new(None),
         };
         syntax.rebuild(text);
         syntax
@@ -166,16 +189,31 @@ impl Syntax {
                     start: h.start + base,
                 }));
         }
+        self.highlight_reach = running_max(self.highlights.iter().map(|h| h.end));
+        self.marker_reach = running_max(self.markers.iter().map(|m| m.span_end));
         self.conceal_all = conceal_all_from(&self.markers);
+        // The renderer narrows the conceal list to each row by binary search on
+        // both ends, which needs the delimiter ranges start-sorted and disjoint.
+        debug_assert!(
+            self.conceal_all.windows(2).all(|w| w[0].1 <= w[1].0),
+            "conceal ranges must be start-sorted and disjoint"
+        );
+        self.revealed.replace(None);
         self.scene_breaks = scene_break_lines_from(&self.highlights, text);
     }
 
     /// Highlights overlapping `[start, end)` in document order. The list is
     /// start-sorted, so a binary search skips every highlight starting at or
-    /// after `end` rather than scanning the whole list per rendered line (#218).
+    /// after `end` rather than scanning the whole list per rendered line (#218);
+    /// a second one on the running end (`highlight_reach`) skips every earlier
+    /// highlight that ends at or before `start`, so the scan covers only the
+    /// spans near the window rather than the whole prefix of the document.
     pub fn highlights_in(&self, start: usize, end: usize) -> impl Iterator<Item = &Highlight> {
+        let lower = self.highlight_reach.partition_point(|&r| r <= start);
         let upper = self.highlights.partition_point(|h| h.start < end);
-        self.highlights[..upper]
+        self.highlights
+            .get(lower..upper)
+            .unwrap_or(&[])
             .iter()
             .filter(move |h| h.end > start)
     }
@@ -189,25 +227,45 @@ impl Syntax {
     /// nor clones it into the click-inversion layout (#869). The common cases —
     /// `None`, or a cursor not inside any emphasis span — hand back the cached
     /// full list (a refcount bump, no allocation); only a cursor actually sitting
-    /// on a span (which reveals that span's markers) builds a filtered list.
+    /// on a span (which reveals that span's markers) builds a filtered list, and
+    /// that list is memoized so a cursor resting on the span reuses it per frame.
+    ///
+    /// Finding the enclosing spans is a binary search, not a scan of every marker:
+    /// each span's first marker sits at the span's own start (an emphasis node's
+    /// opening delimiter, a block's first fence line, a break's own line), so a
+    /// span holding `b` has a marker starting at or before `b`; and the running
+    /// `marker_reach` skips every earlier marker whose span ends before `b`.
     pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Rc<[(usize, usize)]> {
         let Some(b) = reveal_at else {
             return Rc::clone(&self.conceal_all);
         };
-        // Reveal only when the cursor is actually within some span; otherwise the
-        // filtered result is byte-for-byte the full list, so reuse the cache.
-        let reveals_any = self
-            .markers
-            .iter()
-            .any(|m| m.span_start <= b && b <= m.span_end);
-        if !reveals_any {
+        let upper = self.markers.partition_point(|m| m.delim_start <= b);
+        let lower = self.marker_reach[..upper].partition_point(|&r| r < b);
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for m in &self.markers[lower..upper] {
+            let span = (m.span_start, m.span_end);
+            if m.span_start <= b && b <= m.span_end && !spans.contains(&span) {
+                spans.push(span);
+            }
+        }
+        // Not within any span: the filtered result is byte-for-byte the full
+        // list, so reuse the cache.
+        if spans.is_empty() {
             return Rc::clone(&self.conceal_all);
         }
-        self.markers
+        if let Some((key, list)) = self.revealed.borrow().as_ref() {
+            if *key == spans {
+                return Rc::clone(list);
+            }
+        }
+        let list: Rc<[(usize, usize)]> = self
+            .markers
             .iter()
-            .filter(|m| !(m.span_start <= b && b <= m.span_end))
+            .filter(|m| !spans.contains(&(m.span_start, m.span_end)))
             .map(|m| (m.delim_start, m.delim_end))
-            .collect()
+            .collect();
+        self.revealed.replace(Some((spans, Rc::clone(&list))));
+        list
     }
 
     /// Headings in document order — the in-chapter outline.
@@ -222,6 +280,20 @@ impl Syntax {
     pub fn scene_break_lines(&self) -> &[usize] {
         &self.scene_breaks
     }
+}
+
+/// The running maximum of `values`: element `i` is the largest of the first
+/// `i + 1`. Over a start-sorted list of (possibly nested) spans' ends it is
+/// non-decreasing, so a window query can binary-search past every span that ends
+/// before the window.
+fn running_max(values: impl Iterator<Item = usize>) -> Vec<usize> {
+    let mut furthest = 0;
+    values
+        .map(|v| {
+            furthest = furthest.max(v);
+            furthest
+        })
+        .collect()
 }
 
 /// The full conceal list (every marker's delimiter range) as a shared slice, in

@@ -49,12 +49,21 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
         }
     };
     let block = Block::default().borders(Borders::ALL).title(title);
-    let mut paragraph = Paragraph::new(lines.clone())
-        .block(block)
-        .scroll((scroll, 0));
-    if wrap {
-        paragraph = paragraph.wrap(Wrap { trim: false });
-    }
+    let paragraph = if wrap {
+        // Wrapped overlays scroll by visual rows, which only the paragraph's own
+        // wrap knows, so they hand over every line (these are the short ones: an
+        // AI answer, the quick-start card).
+        Paragraph::new(lines.clone())
+            .block(block)
+            .scroll((scroll, 0))
+            .wrap(Wrap { trim: false })
+    } else {
+        // Unwrapped, one line is one row: clone only the rows the box shows rather
+        // than the whole report or guide every frame.
+        let first = usize::from(scroll).min(lines.len());
+        let last = (first + usize::from(area.height.saturating_sub(2))).min(lines.len());
+        Paragraph::new(lines[first..last].to_vec()).block(block)
+    };
     frame.render_widget(paragraph, area);
 }
 

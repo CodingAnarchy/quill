@@ -780,10 +780,10 @@ impl Pane for StatusBar<'_> {
         };
 
         let chip = mode_chip(app);
-        let chip_w = chip.as_ref().map_or(0, |s| s.content.chars().count());
+        let chip_w = chip.as_ref().map_or(0, |s| s.content.width());
 
         let pad = (area.width as usize)
-            .saturating_sub(chip_w + left.len() + right.len())
+            .saturating_sub(chip_w + left.width() + right.width())
             .max(1);
         let mut spans = Vec::new();
         spans.extend(chip);

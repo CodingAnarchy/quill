@@ -15,6 +15,7 @@ use crate::syntax::{Highlight, HighlightKind, Syntax};
 use crate::theme::{self, Theme};
 
 use super::header::centered_line;
+use super::ranges::{covers, disjoint_within, Overlapping};
 use super::{ByteRange, PARAGRAPH_INDENT};
 
 /// The typeset scene-break divider (#908) a concealed thematic break renders as —
@@ -43,6 +44,10 @@ pub(super) struct SpanHighlights<'a> {
     /// Emphasis-marker ranges to hide, except on the cursor's span (#296). Held as
     /// the `Rc` the parse caches (#869) so the layout recorder shares it for click
     /// inversion rather than cloning the ranges each frame.
+    ///
+    /// This and the plain-slice lists below cover the whole buffer and must each
+    /// be start-sorted and pairwise disjoint: [`styled_row`] narrows them to the
+    /// row with [`disjoint_within`] (checked in debug builds where they're built).
     pub(super) conceal: Rc<[(usize, usize)]>,
     /// Search/replace matches or the Visual selection, dim-highlighted (#144/#205).
     pub(super) matches: &'a [ByteRange],
@@ -59,8 +64,9 @@ pub(super) struct SpanHighlights<'a> {
     /// marker while the toggle is on so the local repetition is visible where it
     /// happens. Empty (no marking) when the toggle is off.
     pub(super) proximity: &'a [ByteRange],
-    /// Annotated spans, tinted background (#302).
-    pub(super) annotations: &'a [ByteRange],
+    /// Annotated spans, tinted background (#302). Indexed for row-window lookup
+    /// because, unlike the other lists, annotations may overlap or nest.
+    pub(super) annotations: &'a Overlapping,
     /// The focus-mode paragraph; everything outside it dims (#301).
     pub(super) focus: Option<ByteRange>,
 }
@@ -116,14 +122,14 @@ pub(super) fn row_kind(
         {
             // Revealed exactly when this break's own line is not concealed — the same
             // all-or-nothing reveal the conceal list carries for a fenced block.
-            let revealed = !conceal.iter().any(|&(s, e)| s < brk.end && e > brk.start);
+            let revealed = disjoint_within(conceal, brk.start, brk.end).is_empty();
             return RowKind::SceneBreak { revealed };
         }
     }
     // A fence row is fully hidden: its content range lies within one conceal range.
     // (Fence lines are never blank, so an empty line is only ordinary blank prose.)
     if !text.is_empty()
-        && conceal
+        && disjoint_within(conceal, line_start, line_end)
             .iter()
             .any(|&(s, e)| s <= line_start && line_end <= e)
     {
@@ -135,7 +141,7 @@ pub(super) fn row_kind(
         .highlights_in(line_start, line_end.max(line_start + 1))
         .find(|h| h.kind == HighlightKind::Code && h.start <= probe && probe < h.end)
     {
-        let verbatim = conceal.iter().any(|&(s, e)| s < code.end && e > code.start);
+        let verbatim = !disjoint_within(conceal, code.start, code.end).is_empty();
         return RowKind::Code { verbatim };
     }
     RowKind::Prose
@@ -371,43 +377,31 @@ fn styled_row(
             Style::default().fg(theme.dim),
         ));
     }
+    // Narrow every whole-buffer range list to this row's window once (a binary
+    // search each), so the per-character checks below walk only the few ranges
+    // that can touch the row rather than every range in the buffer.
+    let conceal = disjoint_within(&hl.conceal, seg_start, seg_end);
+    let matches = disjoint_within(hl.matches, seg_start, seg_end);
+    let spell = disjoint_within(hl.spell, seg_start, seg_end);
+    let style_flags = disjoint_within(hl.style_flags, seg_start, seg_end);
+    let proximity = disjoint_within(hl.proximity, seg_start, seg_end);
+    let annotations = hl.annotations.within(seg_start, seg_end);
     let has_highlight = syntax.highlights_in(seg_start, seg_end).next().is_some();
-    let concealed_here = hl
-        .conceal
-        .iter()
-        .any(|&(s, e)| s < seg_end && e > seg_start);
-    let match_here = hl
-        .matches
-        .iter()
-        .any(|&(s, e)| s < seg_end && e > seg_start);
     // `current` (the search current match, or the Visual selection #205) can be
     // set without any entry in `matches`, so check it too before skipping styling.
     let current_here = hl
         .current
         .is_some_and(|(s, e)| s < seg_end && e > seg_start);
-    let spell_here = hl.spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    let style_flag_here = hl
-        .style_flags
-        .iter()
-        .any(|&(s, e)| s < seg_end && e > seg_start);
-    let proximity_here = hl
-        .proximity
-        .iter()
-        .any(|&(s, e)| s < seg_end && e > seg_start);
-    let annotated_here = hl
-        .annotations
-        .iter()
-        .any(|&(s, e)| s < seg_end && e > seg_start);
     // A row fully inside the focused span (or focus off) needs no per-char dimming.
     let focus_covers_row = hl.focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
     if !has_highlight
-        && !concealed_here
-        && !match_here
+        && conceal.is_empty()
+        && matches.is_empty()
         && !current_here
-        && !spell_here
-        && !style_flag_here
-        && !proximity_here
-        && !annotated_here
+        && spell.is_empty()
+        && style_flags.is_empty()
+        && proximity.is_empty()
+        && annotations.is_empty()
         && focus_covers_row
     {
         return Line::raw(seg.to_string());
@@ -424,31 +418,23 @@ fn styled_row(
     let mut run_style = Style::default();
     for (local_byte, ch) in seg.char_indices() {
         let abs = seg_start + local_byte;
-        if is_concealed(abs, &hl.conceal) {
+        if covers(conceal, abs) {
             continue;
         }
-        let mut style = search_style(
-            style_at(&hls, abs, theme),
-            abs,
-            hl.matches,
-            hl.current,
-            theme,
-        );
+        let mut style = search_style(style_at(&hls, abs, theme), abs, matches, hl.current, theme);
         // Misspelled words (#357) and active style-flag hits (#1001) get an
         // underline, layered on whatever else — the shared "flagged in place" mark.
-        if hl.spell.iter().any(|&(s, e)| abs >= s && abs < e)
-            || hl.style_flags.iter().any(|&(s, e)| abs >= s && abs < e)
-        {
+        if covers(spell, abs) || covers(style_flags, abs) {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
         // Near-proximity repeats (#1002) get a dim marker — a subdued cue that this
         // content word was echoed within a short window, layered on the rest so the
         // author sees the local repetition without it shouting like a misspelling.
-        if hl.proximity.iter().any(|&(s, e)| abs >= s && abs < e) {
+        if covers(proximity, abs) {
             style = style.add_modifier(Modifier::DIM);
         }
         // Annotated spans (#302) get a tinted background, layered on the rest.
-        if hl.annotations.iter().any(|&(s, e)| abs >= s && abs < e) {
+        if covers(&annotations, abs) {
             style = style.bg(theme.annotation);
         }
         // Focus mode (#301): a char outside the focused paragraph renders flat-dim,
@@ -492,12 +478,9 @@ fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
     style
 }
 
-fn is_concealed(byte: usize, conceal: &[(usize, usize)]) -> bool {
-    conceal.iter().any(|&(s, e)| byte >= s && byte < e)
-}
-
 /// Layer search highlighting onto a character's base style: the current match
-/// gets a bright background, any other match a dim one (#144).
+/// gets a bright background, any other match a dim one (#144). `matches` is the
+/// row's narrowed slice, so the membership test is a few compares.
 fn search_style(
     base: Style,
     byte: usize,
@@ -510,7 +493,7 @@ fn search_style(
             return base.bg(theme.match_current).fg(theme.on_accent);
         }
     }
-    if matches.iter().any(|&(s, e)| byte >= s && byte < e) {
+    if covers(matches, byte) {
         return base.bg(theme.match_other);
     }
     base
@@ -525,13 +508,15 @@ pub(super) fn visible_width_before(
     cursor_byte: usize,
     conceal: &[(usize, usize)],
 ) -> u16 {
+    // Only the markers on this line can hide one of its characters.
+    let conceal = disjoint_within(conceal, line_start, line_start + text.len());
     let mut width = 0u16;
     for (local_byte, ch) in text.char_indices() {
         let abs = line_start + local_byte;
         if abs >= cursor_byte {
             break;
         }
-        if is_concealed(abs, conceal) {
+        if covers(conceal, abs) {
             continue;
         }
         width += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
