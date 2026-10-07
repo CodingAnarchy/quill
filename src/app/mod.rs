@@ -32,6 +32,7 @@ use crate::mode::{
     RefFiles, VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
+use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 use crate::typography;
 
@@ -284,6 +285,7 @@ impl App {
             recovery_written: false,
             recovery_key: None,
             recovery_captured_at: None,
+            recovery_writer: recovery::writer::Writer::new(),
             pending_switch: None,
             pending_manage: None,
             pending_restore_rev: None,
@@ -480,6 +482,9 @@ impl App {
     pub fn on_idle(&mut self) {
         self.idle_work();
         self.capture_recovery();
+        // The capture only hands the writer a snapshot; settle it, so a test
+        // that reads the sidecar after a pause sees what the pause captured.
+        self.flush_recovery();
     }
 
     /// The debounced idle pass, run by the event loop once input has been quiet

@@ -109,6 +109,7 @@ mod prompt_editing;
 mod publish;
 mod quick_switch;
 mod recovery;
+mod recovery_writer;
 mod research_notebook;
 mod resume;
 mod review_import;
