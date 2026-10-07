@@ -141,7 +141,7 @@ pub(in crate::ui) fn draw_project_browser(
     current: &Path,
 ) {
     let current = current.canonicalize();
-    let query = browser.filter.to_lowercase();
+    let query = browser.filter.query();
     let matches = |p: &crate::recent::RecentProject| {
         query.is_empty()
             || p.title.to_lowercase().contains(&query)
@@ -169,14 +169,14 @@ pub(in crate::ui) fn draw_project_browser(
             )
         })
         .collect();
-    let help = if browser.typing {
-        format!("Filter: {}_", browser.filter)
-    } else if browser.filter.is_empty() {
+    let help = if browser.filter.typing {
+        format!("Filter: {}_", browser.filter.text)
+    } else if browser.filter.text.is_empty() {
         "Projects — ↑↓ move · enter open · / filter · r rename · d delete · b browse files · n new · esc cancel".to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears · r rename · d delete",
-            browser.filter,
+            browser.filter.text,
             visible.len(),
             if visible.len() == 1 { "" } else { "es" }
         )

@@ -14,7 +14,7 @@ mod text;
 
 use crossterm::event::KeyEvent;
 
-use crate::mode::{Mode, Pending, PromptState};
+use crate::mode::{ListFilter, Mode, Pending, PromptState};
 
 use super::App;
 
@@ -26,8 +26,7 @@ impl App {
         match nav_return {
             Some(selected) => Mode::Nav {
                 selected,
-                filter: String::new(),
-                typing: false,
+                filter: ListFilter::new(),
             },
             None => self.editing_mode(),
         }
@@ -81,8 +80,7 @@ impl App {
         } else {
             self.mode = Mode::Nav {
                 selected,
-                filter: String::new(),
-                typing: false,
+                filter: ListFilter::new(),
             };
         }
     }

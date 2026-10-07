@@ -1,11 +1,13 @@
 //! Commit-history view state (#587/#822/#833): the navigable list of commits and
 //! milestones and its type-to-filter. Split out of `states.rs` (pure move).
 
+use crate::mode::ListFilter;
+
 /// State for the navigable commit-history view (#587): the commits (newest first)
 /// and the selected row. From the selected row the author diffs the current chapter
 /// against it or restores that chapter to it (`d`/`r`), or — since #833 — diffs or
 /// restores the *whole project* against it (`D`/`R`). The list is captured when the
-/// view opens, so it's a stable target for the arrow keys. `filter`/`typing` are the
+/// view opens, so it's a stable target for the arrow keys. `filter` is the
 /// type-to-filter query and its input sub-mode (#822): `/` starts typing, keystrokes
 /// narrow the list to rows whose summary, id, or date match, Esc leaves input
 /// (keeping the filter) and a second Esc clears it.
@@ -17,8 +19,7 @@ pub struct History {
     pub(crate) commits: Vec<crate::vcs::CommitMeta>,
     pub(crate) milestones: Vec<crate::vcs::TagMeta>,
     pub(crate) selected: usize,
-    pub(crate) filter: String,
-    pub(crate) typing: bool,
+    pub(crate) filter: ListFilter,
     /// The first point picked for a findings diff (#1051): the revision the author
     /// anchored with `f`, awaiting a second `f` on another row to compare against.
     /// `None` until a first point is chosen, cleared once the diff runs.

@@ -369,13 +369,8 @@ impl Pane for StatusBar<'_> {
             return;
         }
 
-        let (left, right) = if let Mode::Nav {
-            selected,
-            filter,
-            typing,
-        } = &app.mode
-        {
-            nav_status_bar(app, *selected, filter, *typing)
+        let (left, right) = if let Mode::Nav { selected, filter } = &app.mode {
+            nav_status_bar(app, *selected, &filter.text, filter.typing)
         } else {
             editor_status_bar(app, self.1)
         };

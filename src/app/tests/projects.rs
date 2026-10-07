@@ -699,7 +699,7 @@ fn browser_selection(app: &App) -> (String, String) {
                 .get(s.selected)
                 .map(|p| p.title.clone())
                 .unwrap_or_default(),
-            s.filter.clone(),
+            s.filter.text.clone(),
         ),
         _ => panic!("not in the project browser"),
     }

@@ -34,14 +34,14 @@ fn nav_sel(app: &App) -> usize {
 
 fn nav_filter(app: &App) -> String {
     match &app.mode {
-        Mode::Nav { filter, .. } => filter.clone(),
+        Mode::Nav { filter, .. } => filter.text.clone(),
         _ => panic!("expected Nav mode"),
     }
 }
 
 fn nav_typing(app: &App) -> bool {
     match &app.mode {
-        Mode::Nav { typing, .. } => *typing,
+        Mode::Nav { filter, .. } => filter.typing,
         _ => panic!("expected Nav mode"),
     }
 }

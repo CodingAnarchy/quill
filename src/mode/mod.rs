@@ -7,9 +7,9 @@
 //! re-exported so callers (`crate::mode::…`) are unaffected: the
 //! action/command/palette layer ([`action`]), the per-overlay list-state structs
 //! ([`states`]), the read-only [`Overlay`] and annotation-display cycles
-//! ([`overlay`]), the navigator/browser state ([`nav`]), the Vim Normal-mode
-//! state ([`vim`]), and the prompt-resolution / metadata-field selectors
-//! ([`pending`]).
+//! ([`overlay`]), the shared type-to-filter state ([`list_filter`]), the
+//! navigator/browser state ([`nav`]), the Vim Normal-mode state ([`vim`]), and
+//! the prompt-resolution / metadata-field selectors ([`pending`]).
 
 mod action;
 pub use action::*;
@@ -19,6 +19,9 @@ pub use states::*;
 
 mod overlay;
 pub use overlay::*;
+
+mod list_filter;
+pub use list_filter::*;
 
 mod nav;
 pub use nav::*;
@@ -48,15 +51,11 @@ pub enum Mode {
     /// Browsing the chapter list: arrows move the `selected` chapter, Enter
     /// opens it. `filter` is the type-to-filter / quick-jump query (#410): when
     /// non-empty the list shows only chapters whose title, status, or POV matches
-    /// (case-insensitive substring). `typing` is the filter-input sub-mode —
+    /// (case-insensitive substring). `filter.typing` is the filter-input sub-mode —
     /// `/` enters it so keystrokes build the query instead of running the
     /// browser's single-key commands; Esc leaves it (keeping the filter) and a
     /// second Esc clears the filter.
-    Nav {
-        selected: usize,
-        filter: String,
-        typing: bool,
-    },
+    Nav { selected: usize, filter: ListFilter },
     /// Editing a multi-line metadata field (an epigraph quotation) in the main
     /// editor: the full editing keys apply to a scratch buffer, Ctrl-S commits,
     /// Esc cancels. Boxed because it carries a whole [`Buffer`], far larger than
@@ -96,7 +95,7 @@ pub enum Mode {
     /// Reviewing the active chapter's inline annotations (#302): a navigable list
     /// where each can be jumped to, replied to (#889), resolved/reopened (#889), or
     /// deleted. The items are read live from `App::annotations`; this carries only
-    /// the selected row. `filter`/`typing` are the type-to-filter query and its
+    /// the selected row. `filter` is the type-to-filter query and its
     /// input sub-mode (#822): `/` starts typing, keystrokes narrow the list to notes
     /// whose text or anchored snippet match, Esc leaves input (keeping the filter)
     /// and a second Esc clears it. `show` (#889) is the resolved/open state filter,
@@ -110,8 +109,7 @@ pub enum Mode {
     /// filter/resolve behavior is unchanged when they're at their defaults.
     Annotations {
         selected: usize,
-        filter: String,
-        typing: bool,
+        filter: ListFilter,
         show: AnnoShow,
         sort: AnnoSort,
         reviewer: Option<String>,
@@ -123,15 +121,11 @@ pub enum Mode {
     /// to the selected heading's byte offset, then returns to editing (leaving
     /// the pane up). Read-only over the prose. `selected` indexes the active
     /// chapter's `headings()` in document order — the same list the pane renders
-    /// and the corkboard jumps by. `filter`/`typing` are the type-to-filter query
+    /// and the corkboard jumps by. `filter` is the type-to-filter query
     /// and its input sub-mode (#822): `/` starts typing, keystrokes narrow the
     /// pane to headings whose title matches (case-insensitive substring), Esc
     /// leaves input (keeping the filter) and a second Esc clears it.
-    Outline {
-        selected: usize,
-        filter: String,
-        typing: bool,
-    },
+    Outline { selected: usize, filter: ListFilter },
     /// The read-only corkboard for the active chapter (#589, Phase 1): an
     /// index-card overview of the chapter's `##`/`###` scene headings — each card
     /// is a heading + its first line of prose. Navigable; Enter jumps the editor

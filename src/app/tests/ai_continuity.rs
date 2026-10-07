@@ -3,6 +3,7 @@
 //! and the setting / worldbuilding pass.
 
 use super::*;
+use crate::mode::ListFilter;
 use std::fs;
 
 // --- AI: timeline & continuity ---------------------------------------------
@@ -489,8 +490,7 @@ fn recheck_is_a_noop_for_a_finding_without_a_pass() {
             corroborators: Vec::new(),
         }],
         selected: 0,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     }));
     app.recheck_finding(0);
     assert!(!app.ai_task.is_busy(), "nothing is sent");
@@ -531,7 +531,7 @@ fn findings_over(name: &str, summaries: &[(&str, &str)]) -> (App, TempProject) {
 
 fn findings_state(app: &App) -> (usize, String, bool) {
     match &app.mode {
-        Mode::Findings(f) => (f.selected, f.filter.clone(), f.typing),
+        Mode::Findings(f) => (f.selected, f.filter.text.clone(), f.filter.typing),
         _ => panic!("expected the findings overlay"),
     }
 }
@@ -656,8 +656,7 @@ fn recheckable_findings(name: &str, findings: &[(&str, &str)]) -> (App, TempProj
     app.mode = Mode::Findings(Box::new(Findings {
         items,
         selected: 0,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     }));
     // Seed durable triage too, so a cleared finding can actually leave it.
     let seeded: Vec<crate::mode::Finding> = findings
@@ -772,8 +771,7 @@ fn recheck_all_skips_a_finding_without_a_pass() {
     app.mode = Mode::Findings(Box::new(Findings {
         items: vec![restored.clone()],
         selected: 0,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     }));
 
     // No re-runnable findings, so nothing is sent and it stays put.

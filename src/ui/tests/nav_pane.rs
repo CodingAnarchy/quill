@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::frontmatter::Role;
-use crate::mode::Mode;
+use crate::mode::{ListFilter, Mode};
 use std::fmt::Write;
 
 /// Screen size for these tests: 90 wide gives a 28-column pane (27 inside its
@@ -42,8 +42,10 @@ fn row_of(rows: &[String], needle: &str) -> Option<usize> {
 fn nav(selected: usize, filter: &str) -> Mode {
     Mode::Nav {
         selected,
-        filter: filter.into(),
-        typing: false,
+        filter: ListFilter {
+            text: filter.into(),
+            typing: false,
+        },
     }
 }
 
@@ -149,8 +151,7 @@ fn the_focused_outline_keeps_its_selected_heading_visible() {
     let mut app = many_chapters(3, &body);
     app.mode = Mode::Outline {
         selected: 35,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     };
     let rows = pane_rows(&app);
     assert!(
@@ -162,8 +163,10 @@ fn the_focused_outline_keeps_its_selected_heading_visible() {
     // Filtered (#822): the matching heading and the filter line both show.
     app.mode = Mode::Outline {
         selected: 35,
-        filter: "35".into(),
-        typing: true,
+        filter: ListFilter {
+            text: "35".into(),
+            typing: true,
+        },
     };
     let rows = pane_rows(&app);
     let pane = rows.join("\n");

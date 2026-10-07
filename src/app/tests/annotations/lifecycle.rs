@@ -234,11 +234,8 @@ fn undo_and_redo_move_annotations_with_the_text() {
 fn anno_state(app: &App) -> (usize, String, bool) {
     match &app.mode {
         Mode::Annotations {
-            selected,
-            filter,
-            typing,
-            ..
-        } => (*selected, filter.clone(), *typing),
+            selected, filter, ..
+        } => (*selected, filter.text.clone(), filter.typing),
         _ => panic!("expected the annotation list"),
     }
 }

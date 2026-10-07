@@ -30,7 +30,7 @@ pub(in crate::ui) fn draw_findings(
     // The type-to-filter query (#822) narrows the list to findings whose summary
     // or chapters match; the row index is preserved so the selection marker and
     // the click map land on the right finding.
-    let query = findings.filter.to_lowercase();
+    let query = findings.filter.query();
     let matches = |item: &crate::mode::Finding| {
         query.is_empty()
             || item.summary.to_lowercase().contains(&query)
@@ -76,14 +76,14 @@ pub(in crate::ui) fn draw_findings(
             )
         })
         .collect();
-    let help = if findings.typing {
-        format!("Filter: {}_", findings.filter)
-    } else if findings.filter.is_empty() {
+    let help = if findings.filter.typing {
+        format!("Filter: {}_", findings.filter.text)
+    } else if findings.filter.text.is_empty() {
         "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · R re-check all · d dismiss · s save · / filter · esc close".to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",
-            findings.filter,
+            findings.filter.text,
             visible.len(),
             if visible.len() == 1 { "" } else { "es" }
         )

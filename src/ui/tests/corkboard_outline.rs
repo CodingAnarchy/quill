@@ -4,7 +4,7 @@
 use super::*;
 use crate::frontmatter::SceneStatus;
 use crate::manuscript::Manuscript;
-use crate::mode::{Card, Corkboard};
+use crate::mode::{Card, Corkboard, ListFilter};
 use crate::syntax::Heading;
 use crate::ui::nav_pane::redundant_title_heading;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -315,8 +315,7 @@ fn nav_status_bar_shows_the_selected_chapters_metadata() {
     app.outline_visible = true;
     app.mode = Mode::Nav {
         selected: 1,
-        filter: String::new(),
-        typing: false,
+        filter: ListFilter::new(),
     };
     let screen = render(&app, 90, 14);
     assert!(screen.contains("A grand opening"), "screen:\n{screen}");

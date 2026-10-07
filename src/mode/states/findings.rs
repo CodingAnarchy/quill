@@ -2,10 +2,10 @@
 //! the triage list, the manuscript-health dashboard rows, and the motif /
 //! character co-occurrence report. Split out of `states.rs` (pure move).
 
-use crate::mode::AiAction;
+use crate::mode::{AiAction, ListFilter};
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
-/// `filter`/`typing` are the type-to-filter query and its input sub-mode (#822),
+/// `filter` is the type-to-filter query and its input sub-mode (#822),
 /// lifted from the chapter browser: `/` starts typing, keystrokes narrow the list
 /// to findings whose summary or chapters match (case-insensitive substring), Esc
 /// leaves input (keeping the filter) and a second Esc clears it.
@@ -13,8 +13,7 @@ use crate::mode::AiAction;
 pub struct Findings {
     pub(crate) items: Vec<Finding>,
     pub(crate) selected: usize,
-    pub(crate) filter: String,
-    pub(crate) typing: bool,
+    pub(crate) filter: ListFilter,
 }
 /// The category / lens a [`Finding`] belongs to (#827) — which analysis pass it
 /// speaks for, kept on the finding so the pass survives the map to a summary

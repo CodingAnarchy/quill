@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::frontmatter::SceneStatus;
+use crate::mode::ListFilter;
 use crate::recent::RecentProject;
 
 /// State for an open [`Mode::RefFiles`](super::Mode): the reference files (bible +
@@ -28,14 +29,13 @@ pub struct RefFiles {
 /// so the list is a stable target for the arrow keys. `filter` is the
 /// type-to-filter query (#612), lifted from the chapter browser: when non-empty the
 /// list shows only projects whose title or path matches (case-insensitive
-/// substring). `typing` is the filter-input sub-mode — `/` enters it so keystrokes
-/// build the query instead of running the browser's single-key commands; Esc leaves
-/// it (keeping the filter) and a second Esc clears the filter.
+/// substring). `filter.typing` is the filter-input sub-mode — `/` enters it so
+/// keystrokes build the query instead of running the browser's single-key
+/// commands; Esc leaves it (keeping the filter) and a second Esc clears the filter.
 pub struct ProjectBrowser {
     pub(crate) projects: Vec<RecentProject>,
     pub(crate) selected: usize,
-    pub(crate) filter: String,
-    pub(crate) typing: bool,
+    pub(crate) filter: ListFilter,
 }
 
 /// State for the series tree navigator (#330): the selected visible row and the
