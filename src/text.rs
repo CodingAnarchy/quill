@@ -22,6 +22,7 @@
 //! ([`match_ranges_opts`] and friends) treat a bad pattern as "no matches".
 
 use regex::{Regex, RegexBuilder};
+use ropey::Rope;
 
 /// The refinements find & replace can apply to the base substring rule (#570,
 /// #891). The default — all `false` — is case-insensitive substring matching,
@@ -180,6 +181,19 @@ pub fn count_matches(text: &str, needle: &str) -> usize {
     let mut n = 0;
     scan(text, needle, MatchOpts::default(), |_, _| n += 1);
     n
+}
+
+/// Lines `[start, end)` of `rope` as a string (with their newlines), clamped to
+/// its length — `Buffer::line_range_text` over a detached rope, for the
+/// background writers that slice a snapshot off the UI thread.
+pub fn rope_line_range(rope: &Rope, start: usize, end: usize) -> String {
+    let last = rope.len_lines();
+    let (start, end) = (start.min(last), end.min(last));
+    if start >= end {
+        return String::new();
+    }
+    rope.slice(rope.line_to_char(start)..rope.line_to_char(end))
+        .to_string()
 }
 
 /// Case-insensitive single-character comparison via Unicode lowercase folding.

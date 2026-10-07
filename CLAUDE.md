@@ -189,6 +189,18 @@ What they assert:
   `atomic::write_count` test seam). The crash-recovery sidecar is written by a
   background writer (`src/recovery/writer.rs`); a durable write on the UI thread
   stalled typing for up to seconds on a busy disk.
+- `an_autosave_cycle_never_writes_on_the_ui_thread` (`app/tests/save_writer.rs`)
+  — the same guard for saves, also plain `cargo test`: typing, the idle pass, an
+  autosave, and applying its completion (clean, recovery clear, history
+  snapshot, resume position) do **zero** atomic writes on the UI thread, in the
+  single and continuous views, with an annotation whose offsets the save
+  rewrites. Saves go to the project files writer (`src/app/saving.rs` over the
+  shared `src/bgwrite.rs` queue); a chapter `fsync` under contention was measured
+  at ~0.9s, freezing keys typed as autosave fired. Only typing and cursor moves
+  run while a save is in flight: every other key, action, and click — and every
+  synchronous write path (`flush_active`, leaving/paging the continuous view,
+  the annotations side file, quit) — calls `settle_saves` first, so don't add a
+  chapter-file read or write that bypasses it.
 - `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
   words), so flagging on idle never stutters. It runs on the idle tick, never the

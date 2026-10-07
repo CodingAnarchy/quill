@@ -38,6 +38,7 @@ mod words;
 use annotations::load_annotations;
 #[cfg(test)]
 pub use annotations::write_count as annotation_writes;
+pub use annotations::AnnotationsWrite;
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 pub use io::read_existing;
 use io::{cache_chapter, record_read};

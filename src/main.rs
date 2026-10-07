@@ -10,6 +10,7 @@ mod annotation;
 mod app;
 mod archive;
 mod atomic;
+mod bgwrite;
 mod buffer;
 mod clipboard;
 mod config;
@@ -227,6 +228,9 @@ fn main() -> io::Result<()> {
     // including a `?` error — leaves the terminal usable.
     let mut tui = Tui::new()?;
     let result = run(&mut tui, &mut app);
+    // Let a save still in flight land (bounded) before anything else: its
+    // outcome decides whether the recovery sidecar is cleared below.
+    let unsaved = app.finish_saves();
     // Let the background recovery writer finish (bounded): a quit that discarded
     // unsaved work queued a sidecar clear, and a clean quit may still have a
     // write or clear in flight. Not a capture — a deliberate discard must not
@@ -244,9 +248,14 @@ fn main() -> io::Result<()> {
     app.record_session();
     // Remember where the author left off, to resume here next open (#588).
     app.persist_position();
+    // The snapshot and position go through the background writer too.
+    app.settle_saves();
     // Drop the TUI (leaving the alternate screen, restoring the terminal) before
     // printing the recap, so it appears on the normal screen the author returns to.
     drop(tui);
+    if let Some(note) = unsaved {
+        eprintln!("{note}");
+    }
     if let Some(recap) = recap {
         println!("{recap}");
     }
@@ -542,7 +551,8 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         app.poll_ai();
         app.tick_sprint(); // end a writing sprint when its time is up (#299)
         app.tick_session_target(); // signal reaching the session word target (#1011)
-        app.tick_autosave(); // idle-timer autosave, when enabled (#409)
+        app.poll_saves(); // apply a finished background save: clean, "Saved", recovery clear
+        app.tick_autosave(); // idle-timer autosave, when enabled (#409) — handed to the writer
         app.tick_backup(); // automatic off-site backup on its cadence, when enabled (#887)
         app.tick_local_backup(); // scheduled local archive on its cadence, when enabled (#888)
         app.poll_assistant(); // advance the assistant pane's tool-use loop (#307)

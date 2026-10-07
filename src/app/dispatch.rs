@@ -33,6 +33,16 @@ impl App {
         }
     }
 
+    /// Whether input goes straight to the editor as typing or a cursor move —
+    /// the only input handled while a background save may be in flight.
+    pub(super) const fn typing_context(&self) -> bool {
+        matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+            && self.overlay.is_none()
+            && !self.surface_pane_focused()
+            && !self.assistant_pane_focused()
+            && !self.window_pending
+    }
+
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
     #[allow(clippy::needless_pass_by_value)] // consumes the event, moving its inner Key/Mouse to handlers
@@ -73,6 +83,14 @@ impl App {
         if self.in_galley() {
             self.on_key_galley(key);
             return;
+        }
+
+        // A background save may be in flight only while the author types or
+        // moves the cursor; any other input — a prompt, a list, an overlay, a
+        // pane — may read or rewrite the files, so let the save land first. A
+        // single uncontended lock when nothing is pending.
+        if !self.typing_context() {
+            self.settle_saves();
         }
 
         // Any editing-mode keystroke (a cursor move or an edit) snaps a read-ahead
@@ -290,6 +308,9 @@ impl App {
     /// are detached and never joined, quitting abandons the result; so a busy task
     /// warns and asks before exiting rather than dropping it without a word.
     pub(super) fn request_quit(&mut self) {
+        // A save in flight finishes first, so the prompt reflects whether the
+        // edits actually reached the disk (and a quit never cuts one short).
+        self.settle_saves();
         if self.edit_dirty() {
             self.open_prompt(
                 Pending::Quit,
@@ -331,6 +352,16 @@ impl App {
     /// mode, so handling is fire-and-forget — an unrecognized one is simply
     /// ignored.
     pub(super) fn on_key_ctrl(&mut self, code: KeyCode) {
+        // Editor commands may read or rewrite the files, so a background save
+        // lands first — except undo/redo (plain editing) and the actions, which
+        // `dispatch_action` settles itself (all but a plain save).
+        let action = match code {
+            KeyCode::Char(c) => Action::from_ctrl_key(c),
+            _ => None,
+        };
+        if action.is_none() && !matches!(code, KeyCode::Char('z' | 'y')) {
+            self.settle_saves();
+        }
         // The `Ctrl-` combos that run a registry action resolve through the one
         // binding table on `Action` (#1103), so the shortcut the run-action menu
         // shows is exactly the key that runs the action — it can't drift. Ctrl-E

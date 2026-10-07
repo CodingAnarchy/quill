@@ -11,7 +11,7 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -74,7 +74,30 @@ impl Project {
     /// The on-disk form is unchanged by the batching: the whole set is stably
     /// sorted by `(chapter, start, end)`, and a chapter's notes that tie on
     /// `(start, end)` keep the order they were handed in.
+    ///
+    /// The editor runs the two halves itself — [`stage_annotations`](Self::stage_annotations)
+    /// in memory, then [`AnnotationsWrite::perform`] — so a background save can
+    /// write the file off the UI thread; this is their composition.
+    #[cfg(test)]
     pub fn set_annotations<'a, I>(&mut self, updates: I) -> io::Result<()>
+    where
+        I: IntoIterator<Item = (&'a str, &'a [Live])>,
+    {
+        if let Some(write) = self.stage_annotations(updates)? {
+            let result = write.perform();
+            self.annotations_written(result.is_ok());
+            result?;
+        }
+        Ok(())
+    }
+
+    /// The in-memory half of [`set_annotations`](Self::set_annotations): fold
+    /// the updates into the stored set and return the side-file write that's
+    /// now owed — `None` when nothing changed and no earlier write is owed — for
+    /// the caller to [`perform`](AnnotationsWrite::perform) (the background save
+    /// does it off the UI thread) and then report with
+    /// [`annotations_written`](Self::annotations_written).
+    pub fn stage_annotations<'a, I>(&mut self, updates: I) -> io::Result<Option<AnnotationsWrite>>
     where
         I: IntoIterator<Item = (&'a str, &'a [Live])>,
     {
@@ -109,7 +132,7 @@ impl Project {
             changed = true;
         }
         if !changed && !self.annotations_unsaved {
-            return Ok(());
+            return Ok(None);
         }
         // Owed until a write lands: if this one fails, the next call retries even
         // though memory then already matches what it's handed.
@@ -117,22 +140,54 @@ impl Project {
         let path = self.root.join(ANNOTATIONS_NAME);
         if self.annotations.is_empty() {
             // Nothing left anywhere — remove the side file rather than write `[]`.
-            match fs::remove_file(&path) {
+            return Ok(Some(AnnotationsWrite { path, text: None }));
+        }
+        self.annotations
+            .sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
+        let file = AnnotationFileRef {
+            items: &self.annotations,
+        };
+        let text = toml::to_string_pretty(&file).map_err(io::Error::other)?;
+        Ok(Some(AnnotationsWrite {
+            path,
+            text: Some(text),
+        }))
+    }
+
+    /// Record how a staged [`AnnotationsWrite`] went: a write that landed pays
+    /// off what was owed; a failed one leaves it owed, so the next
+    /// [`set_annotations`](Self::set_annotations) retries.
+    #[allow(clippy::missing_const_for_fn)] // not const in tests, where it counts the write
+    pub fn annotations_written(&mut self, ok: bool) {
+        self.annotations_unsaved = !ok;
+        // Counted here, where the landed write is reported on the thread that
+        // owns the project, rather than where it ran (possibly the save writer).
+        #[cfg(test)]
+        if ok {
+            write_count::bump();
+        }
+    }
+}
+
+/// A side-file write staged by [`Project::stage_annotations`]: the serialized
+/// set, or a removal when no notes are left. Self-contained, so it can be
+/// performed on a background thread.
+pub struct AnnotationsWrite {
+    path: PathBuf,
+    /// The TOML to write, or `None` to remove the file.
+    text: Option<String>,
+}
+
+impl AnnotationsWrite {
+    /// Write (or remove) the side file.
+    pub fn perform(&self) -> io::Result<()> {
+        match &self.text {
+            None => match fs::remove_file(&self.path) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
-            }
-        } else {
-            self.annotations
-                .sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
-            let file = AnnotationFileRef {
-                items: &self.annotations,
-            };
-            let text = toml::to_string_pretty(&file).map_err(io::Error::other)?;
-            atomic::write(&path, text.as_bytes())?;
+            },
+            Some(text) => atomic::write(&self.path, text.as_bytes())?,
         }
-        #[cfg(test)]
-        write_count::bump();
-        self.annotations_unsaved = false;
         Ok(())
     }
 }
@@ -147,8 +202,9 @@ pub(super) fn load_annotations(root: &Path) -> Vec<Annotation> {
         .unwrap_or_default()
 }
 
-/// Test-only count of side-file writes (and removals) on this thread, so tests
-/// can assert a batch writes once and an unchanged one writes nothing — content
+/// Test-only count of side-file writes (and removals) reported landed to a
+/// project on this thread — including those a background save performed for
+/// it ([`Project::annotations_written`]) — so tests can assert a batch writes once and an unchanged one writes nothing — content
 /// alone can't tell "rewritten identically" from "not touched". Compiled out of
 /// production builds.
 #[cfg(test)]

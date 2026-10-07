@@ -126,6 +126,18 @@ where
     Ok(())
 }
 
+/// Create the directory `dir` itself — never its parents — when it's missing.
+/// For the project's `.quill/` state folder, written from background writers
+/// that may run a moment after the project folder was renamed or deleted: a
+/// late write must then fail rather than resurrect the folder (as
+/// `create_dir_all` would).
+pub fn create_leaf_dir(dir: &Path) -> io::Result<()> {
+    match fs::create_dir(dir) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => Err(e),
+        _ => Ok(()),
+    }
+}
+
 /// Resolve `path` to the real file the write should land on: if `path` is a
 /// symlink, follow it to its target so the temp is staged beside — and the
 /// rename replaces — the target rather than the link (#871). A non-symlink (or a

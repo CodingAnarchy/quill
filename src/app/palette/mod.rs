@@ -267,7 +267,15 @@ impl App {
     /// [`action_status`](App::action_status). Shared by the run-action menu and the
     /// workflow runner (#226).
     pub(crate) fn dispatch_action(&mut self, action: Action, force: bool) {
+        // A plain save goes to the background writer and returns; everything
+        // else — and a workflow's save step, whose next step may read the files —
+        // first lets any save in flight land (see `App::settle_saves`).
+        let background_save = matches!(action, Action::Save) && self.workflow_run.is_none();
+        if !background_save {
+            self.settle_saves();
+        }
         match action {
+            Action::Save if background_save => self.request_save(),
             Action::Save => self.save_edit(),
             Action::Export(f) => self.run_export(f, ExportScope::ActiveBook),
             Action::ProgressReport => self.open_progress_report(),

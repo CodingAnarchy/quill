@@ -545,6 +545,43 @@ impl Manuscript {
         Ok(())
     }
 
+    /// What a background save of the window writes: each dirty segment's
+    /// `(manifest index, start line, end line, front matter)` — its span of the
+    /// buffer (as [`dirty_spans`](Self::dirty_spans)) and the raw front matter
+    /// [`save`](Self::save) would re-attach. No text copied; the writer slices an
+    /// O(1) clone of the rope off the UI thread.
+    pub fn dirty_saves(&self) -> Vec<(usize, usize, usize, Option<String>)> {
+        self.dirty_spans()
+            .into_iter()
+            .map(|(index, start, end)| (index, start, end, self.front_raw(index)))
+            .collect()
+    }
+
+    /// The raw front matter [`save`](Self::save) would write for the loaded
+    /// chapter `index` (none when it's empty or the chapter isn't loaded).
+    fn front_raw(&self, index: usize) -> Option<String> {
+        self.segments
+            .iter()
+            .find(|s| s.index == index)
+            .and_then(|s| s.front_matter.as_ref())
+            .filter(|f| !f.is_empty())
+            .map(|f| f.as_str().to_string())
+    }
+
+    /// Mark the chapters a background save wrote as clean — each listed
+    /// `(index, front matter)` whose segment is still loaded with that front
+    /// matter. The caller has checked the buffer's revision is the one the save
+    /// snapshotted, so the prose on disk is exactly what's in the window.
+    pub fn mark_saved(&mut self, saved: &[(usize, Option<String>)]) {
+        for (index, front) in saved {
+            if self.front_raw(*index) == *front {
+                if let Some(s) = self.segments.iter_mut().find(|s| s.index == *index) {
+                    s.dirty = false;
+                }
+            }
+        }
+    }
+
     // --- Recovery ----------------------------------------------------------
 
     /// The manifest indices of the window's dirty chapters, in window order —
