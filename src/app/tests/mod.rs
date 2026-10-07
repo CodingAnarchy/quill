@@ -112,6 +112,7 @@ mod recovery_writer;
 mod research_notebook;
 mod resume;
 mod review_import;
+mod save_writer;
 mod session_recap;
 mod similar;
 mod snippets;

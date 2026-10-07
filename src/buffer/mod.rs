@@ -978,7 +978,7 @@ pub fn normalize_trailing_newline(text: &str) -> String {
 }
 
 /// [`normalize_trailing_newline`] on an owned string, without copying it.
-fn normalize_trailing_newline_in_place(content: &mut String) {
+pub fn normalize_trailing_newline_in_place(content: &mut String) {
     content.truncate(content.trim_end_matches('\n').len());
     if !content.is_empty() {
         content.push('\n');

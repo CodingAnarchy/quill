@@ -100,67 +100,6 @@ impl App {
         self.session_base_removed = self.removed;
     }
 
-    /// Write today's snapshot to the history log (best-effort).
-    ///
-    /// [`history::persist`] appends, and `load`/`compact` coalesce to one line per
-    /// day — so a run of autosaves with unchanged totals would leave a stack of
-    /// identical day lines to tidy later. Skip the append when this snapshot equals
-    /// the last one we wrote (#869): the same totals produce the same coalesced
-    /// record, so nothing is lost, and an untouched idle autosave stops growing the
-    /// log. (Only equal snapshots are skipped, so the first write of the day and any
-    /// changed write still land.)
-    pub fn persist_snapshot(&self) {
-        let snapshot = history::Snapshot {
-            date: date::iso(date::today()),
-            words: self.project_word_count(),
-            added: self.added,
-            removed: self.removed,
-            todo: self.count_todo(),
-            moved_to_unused: self.moved_to_unused,
-            parts: self.part_word_counts(),
-            part_added: self.part_added.clone(),
-            part_removed: self.part_removed.clone(),
-        };
-        if self.last_history_snapshot.borrow().as_ref() == Some(&snapshot) {
-            return;
-        }
-        if history::persist(&self.project.root, &snapshot).is_ok() {
-            *self.last_history_snapshot.borrow_mut() = Some(snapshot);
-        }
-    }
-
-    /// Record where the author is editing right now, so the next clean open can
-    /// resume here (#588). Written on a clean save and at quit — the last-position
-    /// counterpart to the crash-recovery sidecar, and separate from it: this
-    /// remembers the *location* of a saved session, not unsaved *text*. In the
-    /// single-chapter view the cursor is a byte offset into that chapter's prose;
-    /// the continuous view (a multi-chapter window) records only the active
-    /// chapter, resuming at its top. Best-effort — a failed write just means the
-    /// next open starts at the top.
-    ///
-    /// Skipped when the position equals the one last written (or read at launch)
-    /// for this project: a save or autosave that leaves the cursor where it was —
-    /// the usual case for an idle autosave — costs a comparison, not a file write.
-    pub fn persist_position(&self) {
-        let cursor = match &self.manuscript {
-            Some(_) => 0,
-            None => self.buffer.cursor_byte(),
-        };
-        let pos = lastpos::Position {
-            chapter_file: self.project.active_file().to_string(),
-            cursor,
-        };
-        let root = &self.project.root;
-        if let Some((last_root, last)) = self.last_position.borrow().as_ref() {
-            if last_root == root && *last == pos {
-                return;
-            }
-        }
-        if lastpos::write(root, &pos).is_ok() {
-            *self.last_position.borrow_mut() = Some((root.clone(), pos));
-        }
-    }
-
     /// At launch, resume the cursor at the last editing position a clean exit
     /// recorded (#588). The launch ([`App::launch`]) has already loaded the
     /// remembered chapter when it still exists; this places the cursor at the
@@ -338,7 +277,12 @@ impl App {
     /// [`clear_recovery`](Self::clear_recovery) and wait for it to land — for an
     /// action about to replace the project (switch, rename, backup restore), which
     /// must not have a queued sidecar write or clear land in what replaces it.
+    /// Its caller has already saved, so a failed settle here only risks a
+    /// best-effort history line or resume point.
     pub(super) fn settle_recovery_cleared(&mut self) {
+        // The same goes for the project files writer: a landed save queues the
+        // history snapshot and resume position, which must reach this project.
+        self.settle_saves();
         self.clear_recovery();
         self.flush_recovery();
     }

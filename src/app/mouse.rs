@@ -108,6 +108,10 @@ impl App {
     /// extends a Visual selection; release leaves it active; the wheel scrolls the
     /// focused scrollable surface. Other mouse events are ignored.
     pub(crate) fn on_mouse(&mut self, ev: MouseEvent) {
+        // A click outside plain editing may act on files: let a save land first.
+        if matches!(ev.kind, MouseEventKind::Down(_)) && !self.typing_context() {
+            self.settle_saves();
+        }
         match ev.kind {
             MouseEventKind::Down(MouseButton::Left) => self.on_press(ev.column, ev.row),
             MouseEventKind::Drag(MouseButton::Left) => self.on_drag(ev.column, ev.row),

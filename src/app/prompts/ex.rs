@@ -24,7 +24,7 @@ impl App {
     pub(super) fn run_ex_command(&mut self, cmd: &str) {
         match cmd {
             "" => {} // bare `:` — nothing to do
-            "w" => self.save_edit(),
+            "w" => self.request_save(),
             // In a split, `:q` closes the focused pane (Vim's window `:q`); only with
             // no split does it quit — prompting on unsaved changes, like Ctrl-Q.
             "q" => {

@@ -17,6 +17,7 @@ use super::list_filter::{snap_in_order, step_in_order, FilteredList};
 use super::App;
 use crate::annotation::{Live, Remapper, Reply};
 use crate::mode::{JumpPos, ListFilter, Mode, Pending};
+use crate::project::AnnotationsWrite;
 
 /// The annotation review list as a [`FilteredList`] (#822/#933). It differs from
 /// the other lists in two ways, both overridden here: it steps and snaps in its
@@ -234,7 +235,7 @@ impl App {
     /// Each loaded chapter's `(file, base_byte)` for the current view (#370): the
     /// active chapter at 0 in the single view; each segment's chapter and start
     /// byte in the continuous view. The seam for translating annotation offsets.
-    fn chapter_bases(&self) -> Vec<(String, usize)> {
+    pub(super) fn chapter_bases(&self) -> Vec<(String, usize)> {
         self.manuscript.as_ref().map_or_else(
             || vec![(self.project.active_file().to_string(), 0)],
             |m| {
@@ -847,6 +848,29 @@ impl App {
     /// at all when no chapter's notes changed — the common case on a chapter switch
     /// or a save, which would otherwise pay the side file's `fsync`s every time.
     pub(crate) fn persist_annotations_to(&mut self, bases: &[(String, usize)]) {
+        // A background save may still carry an earlier staged write of the side
+        // file; let it land first so this newer one can't be overwritten by it.
+        // On a stuck disk, leave the notes unstaged — the next persist retries.
+        if !self.settle_saves() {
+            return;
+        }
+        if let Some(write) = self.stage_annotations_to(bases) {
+            let result = write.perform();
+            self.project.annotations_written(result.is_ok());
+            if let Err(e) = result {
+                self.message = Some(format!("Couldn't save annotations: {e}"));
+            }
+        }
+    }
+
+    /// Fold the live annotations for the chapters in `bases` into the project's
+    /// stored set and return the side-file write that's owed, if any — the
+    /// in-memory half of [`persist_annotations_to`](Self::persist_annotations_to),
+    /// which the background save uses to write the file off the UI thread.
+    pub(crate) fn stage_annotations_to(
+        &mut self,
+        bases: &[(String, usize)],
+    ) -> Option<AnnotationsWrite> {
         let updates: Vec<(&str, Vec<Live>)> = bases
             .iter()
             .map(|(file, base)| {
@@ -870,9 +894,10 @@ impl App {
         let batch = updates
             .iter()
             .map(|(file, local)| (*file, local.as_slice()));
-        if let Err(e) = self.project.set_annotations(batch) {
+        self.project.stage_annotations(batch).unwrap_or_else(|e| {
             self.message = Some(format!("Couldn't save annotations: {e}"));
-        }
+            None
+        })
     }
 
     /// The byte range of the word under the cursor (letters/digits/apostrophes),
