@@ -199,11 +199,18 @@ impl App {
         if !self.records_edits() {
             return;
         }
+        let pos = self.current_position();
+        self.record_edit_at(pos);
+    }
+
+    /// [`record_edit_location`](Self::record_edit_location) for an already
+    /// resolved cursor position, so a caller that needs the position too (an
+    /// insertion's `gi` target) computes it once per keystroke, not twice.
+    fn record_edit_at(&mut self, pos: JumpPos) {
         // The edit just shifted the byte offsets the revision-pass highlight
         // caches address; drop them so no stale span renders until the next idle
         // recompute (#1035). O(1): truncates two small vectors, no rope work.
         self.invalidate_revision_highlights();
-        let pos = self.current_position();
         let line = self.edit_buffer().cursor.line;
         // Whether the newest spot sits on the same line as this edit — only
         // decidable when that spot is in the *active* chapter (its byte addresses
@@ -211,7 +218,7 @@ impl App {
         // matter that we can't cheaply resolve its line.
         let coalesce = match self.vim_state.edits.spots.back() {
             Some(last) if last.chapter == pos.chapter => {
-                self.edit_buffer().cursor_at_byte(last.byte).line == line
+                self.edit_buffer().line_of_byte(last.byte) == line
             }
             _ => false,
         };
@@ -239,8 +246,9 @@ impl App {
         if !self.records_edits() {
             return;
         }
-        self.vim_state.edits.last_insertion = Some(self.current_position());
-        self.record_edit_location();
+        let pos = self.current_position();
+        self.vim_state.edits.last_insertion = Some(pos);
+        self.record_edit_at(pos);
     }
 
     /// Cycle one step **older** through the recent-edit ring (#1010): move the

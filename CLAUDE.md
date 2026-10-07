@@ -119,10 +119,12 @@ cargo perf   # alias for: cargo test --release -- --ignored --nocapture
 What they assert:
 
 - `keystroke_is_decoupled_from_document_size` (`buffer.rs`) — a keystroke only
-  *records* the edit (no parse), so it stays cheap (~tens of µs) even on a
-  75k-word buffer.
-- `reparse_is_fast_at_window_size` (`buffer.rs`) — a full reparse on a
-  ~3-chapter window (the realistic worst case) is under one 16ms frame.
+  marks the parse stale (no parse, no tree bookkeeping), so it stays cheap
+  (~µs) even on a ~110k-word buffer of realistic paragraphs.
+- `reparse_is_fast_at_window_size` (`buffer.rs`) — on a ~13k-word, 3-chapter
+  window, the reparse after a keystroke re-parses only the edited block (see
+  `src/syntax/segment.rs`; ~0.2ms, budget 2ms), and the worst case — an
+  unclosed fence near the top, re-parsing the rest — stays under a 16ms frame.
 - `render_stays_within_a_frame` (`ui.rs`) — a full `draw()` (large chapter +
   a many-chapter outline pane) stays under one frame. The status bar's live
   word count is O(document) per draw; the pane reads cached per-chapter
@@ -154,8 +156,8 @@ What they assert:
 - `keystroke_with_settled_pass_stays_within_a_frame`
   (`app/tests/chapters_counts_and_perf.rs`) — a keystroke as the event loop pays
   for it (`on_key` + the per-batch `on_input_settled` pass + the throttled
-  recovery tick) on a dirty ~6k-word chapter stays under a frame (~8ms, mostly
-  the reparse). The heavy idle work (spell re-judging, tally, the fsync'd recovery
+  recovery tick) on a dirty ~6k-word chapter stays under a frame (~0.2ms since
+  the per-block reparse; ~10ms before it). The heavy idle work (spell re-judging, tally, the fsync'd recovery
   write, undo sealing) is debounced to a pause in input (`on_quiet`); running it
   per batch again would roughly double this and trip the guard.
 - `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
@@ -169,8 +171,9 @@ The corpus, every benchmark, its target, and the rationale are written up in
 rendering, or project load.
 
 If you make per-keystroke work depend on document size, the first guard will
-catch it. Keep parsing off the keystroke path (record on edit, reparse on idle
-in the `main.rs` event loop). Keep per-frame rendering off the filesystem —
+catch it. Keep parsing off the keystroke path (mark dirty on edit, reparse per
+input batch in the `main.rs` event loop), and keep the reparse proportional to
+the edit (the per-block parse cache in `src/syntax/segment.rs`). Keep per-frame rendering off the filesystem —
 cache file-derived data (word counts, front-matter metadata) on the manifest
 at open, like `ChapterEntry` does.
 

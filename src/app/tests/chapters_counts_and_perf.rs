@@ -417,7 +417,8 @@ fn save_is_independent_of_project_size() {
 /// re-judging, revision passes, tally, the fsync'd recovery write, sealing the
 /// undo group) is debounced to a pause in typing and must stay off this path: a
 /// regression that runs it per batch roughly doubles the cost and trips the
-/// budget. The remaining cost is dominated by the incremental reparse. See
+/// budget. So would a regression to re-parsing the whole chapter per batch
+/// (~10ms here before the per-block reparse; ~0.2ms with it). See
 /// `docs/performance.md`.
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
@@ -464,7 +465,7 @@ fn keystroke_with_settled_pass_stays_within_a_frame() {
         app.buffer.word_count()
     );
     assert!(
-        per.as_millis() < perf_budget_ms(12),
+        per.as_millis() < perf_budget_ms(4),
         "keystroke + settled pass took {per:?}"
     );
 }
