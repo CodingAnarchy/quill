@@ -64,10 +64,9 @@ jobs:
       # non-native target — E0463 "can't find crate for `core`" on the (since
       # dropped, #1203) x86_64-apple-darwin cross build in the 1.2.0 release. For a
       # native row this is a no-op, kept so the step is uniform across the matrix.
-      # `cargo --version` makes the
-      # rustup proxy install whichever toolchain applies (the pin, or default
-      # stable for a pre-pin tag rebuilt via workflow_dispatch), then the target
-      # goes onto it.
+      # `cargo --version` makes the rustup proxy install whichever toolchain
+      # applies (the pin, or default stable for a pre-pin tag rebuilt via
+      # workflow_dispatch), then the target goes onto it.
       - name: Install Rust target
         run: |
           cargo --version
