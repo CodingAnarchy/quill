@@ -46,10 +46,15 @@ fn reopening_restores_the_active_chapter_and_cursor() {
         assert_eq!(lastpos::read(&dir).unwrap().cursor, cursor);
     }
 
-    // Next open resumes there rather than at chapter 0, top of file.
-    let mut app = open_test_app(&dir);
-    app.restore_position();
+    // Next launch resumes there rather than at chapter 0, top of file — loading
+    // chapter two directly.
+    let app = launch_test_app(&dir);
     assert_eq!(app.project.active_index(), 1, "resumed on chapter two");
+    assert_eq!(
+        app.buffer.text(),
+        "second chapter\n",
+        "chapter two is loaded"
+    );
     assert_eq!(app.buffer.cursor_byte(), 7, "resumed at the saved offset");
 
     fs::remove_dir_all(&dir).ok();
@@ -57,7 +62,7 @@ fn reopening_restores_the_active_chapter_and_cursor() {
 
 #[test]
 fn a_stale_chapter_reference_falls_back_to_the_top() {
-    let (mut app, dir) = two_chapter_app("resume-stale");
+    let dir = two_chapter_dir("resume-stale");
     // A record for a chapter that no longer exists.
     lastpos::write(
         &dir,
@@ -68,17 +73,19 @@ fn a_stale_chapter_reference_falls_back_to_the_top() {
     )
     .unwrap();
 
-    app.restore_position();
+    let app = launch_test_app(&dir);
     assert_eq!(
         app.project.active_index(),
         0,
         "a missing chapter starts at the top"
     );
+    assert_eq!(app.buffer.text(), "first chapter\n");
+    assert_eq!(app.buffer.cursor_byte(), 0);
 }
 
 #[test]
 fn an_offset_past_the_end_is_clamped() {
-    let (mut app, dir) = two_chapter_app("resume-clamp");
+    let dir = two_chapter_dir("resume-clamp");
     lastpos::write(
         &dir,
         &lastpos::Position {
@@ -88,7 +95,7 @@ fn an_offset_past_the_end_is_clamped() {
     )
     .unwrap();
 
-    app.restore_position();
+    let app = launch_test_app(&dir);
     assert_eq!(app.project.active_index(), 0);
     assert!(
         app.buffer.cursor_byte() <= app.buffer.len_bytes(),
@@ -98,8 +105,8 @@ fn an_offset_past_the_end_is_clamped() {
 
 #[test]
 fn no_record_leaves_the_open_at_the_top() {
-    let (mut app, _dir) = two_chapter_app("resume-none");
-    app.restore_position(); // nothing on disk
+    let dir = two_chapter_dir("resume-none");
+    let app = launch_test_app(&dir); // nothing on disk
     assert_eq!(app.project.active_index(), 0);
     assert_eq!(app.buffer.cursor_byte(), 0);
 }
@@ -133,8 +140,7 @@ fn a_mid_codepoint_offset_does_not_panic_at_startup() {
     )
     .unwrap();
 
-    let mut app = open_test_app(&dir);
-    app.restore_position(); // panicked here before the fix
+    let app = launch_test_app(&dir); // panicked here before the fix
     assert_eq!(app.project.active_index(), 0);
     // Floored back onto the em-dash's boundary rather than crashing.
     assert_eq!(app.buffer.cursor_byte(), dash);
@@ -192,11 +198,77 @@ fn a_position_read_at_launch_is_not_rewritten_by_a_save_there() {
     .unwrap();
     let marked = mark_position(&dir);
 
-    let mut app = open_test_app(&dir);
-    app.restore_position();
+    let mut app = launch_test_app(&dir);
     app.on_key(ctrl('s'));
     assert_eq!(
         fs::read_to_string(dir.join(".quill").join("position.json")).unwrap(),
         marked
     );
+}
+
+#[test]
+fn an_unreadable_remembered_chapter_falls_back_to_the_first() {
+    // The remembered chapter won't read (a directory where its file should be):
+    // the launch opens on the first chapter instead rather than refusing to open
+    // the book, and the on-open damage check flags the unreadable chapter.
+    let dir = two_chapter_dir("resume-unreadable");
+    fs::remove_file(dir.join("two.md")).unwrap();
+    fs::create_dir(dir.join("two.md")).unwrap();
+    lastpos::write(
+        &dir,
+        &lastpos::Position {
+            chapter_file: "two.md".into(),
+            cursor: 3,
+        },
+    )
+    .unwrap();
+
+    let app = launch_test_app(&dir);
+    assert_eq!(app.project.active_index(), 0, "fell back to chapter one");
+    assert_eq!(app.buffer.text(), "first chapter\n");
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        0,
+        "the saved offset isn't applied"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .is_some_and(|m| m.contains("looks damaged")),
+        "the launch reports the damage: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn a_chapter_in_another_book_of_a_series_starts_at_the_top() {
+    // The record names a chapter of a book that isn't the active one: it isn't in
+    // the active manifest, so the launch starts at the active book's first chapter.
+    let dir = TempProject::new(app_scratch_dir("resume-other-book"));
+    for sub in ["b1", "b2"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(dir.join("b1/one.md"), "book one\n").unwrap();
+    fs::write(dir.join("b2/one.md"), "book two\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Series\"\n\n\
+         [[books]]\ntitle = \"One\"\n\n[[books.chapters]]\ntitle = \"A\"\nfile = \"b1/one.md\"\n\n\
+         [[books]]\ntitle = \"Two\"\n\n[[books.chapters]]\ntitle = \"B\"\nfile = \"b2/one.md\"\n",
+    )
+    .unwrap();
+    lastpos::write(
+        &dir,
+        &lastpos::Position {
+            chapter_file: "b2/one.md".into(),
+            cursor: 2,
+        },
+    )
+    .unwrap();
+
+    let app = launch_test_app(&dir);
+    assert_eq!(app.project.active_book(), 0);
+    assert_eq!(app.project.active_file(), "b1/one.md");
+    assert_eq!(app.buffer.text(), "book one\n");
+    assert_eq!(app.buffer.cursor_byte(), 0);
 }

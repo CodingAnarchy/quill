@@ -148,8 +148,17 @@ What they assert:
   word counts for series rollups, the same total file work as one book of that
   size (~20ms); catches a regression to O(n²) work on the larger manifest.
 - `switching_books_is_fast_in_a_series` (`project.rs`) — switching the active
-  book of a multi-book series (#329) caches the target book's chapters once
+  book of a multi-book series (#329) re-reads the target book's chapters once
   (the bounded work `open` does for one book), never the whole series (~10ms).
+  The re-read is deliberate — a switch reflects chapters edited outside Quill
+  since open.
+- `startup_is_fast_for_a_series` (`app/tests/launch.rs`) — the real launch
+  `main` runs (`App::launch`: open, every config section, the remembered
+  chapter, the recovery / damage-restore / pass-queue offers) at 1500 chapters
+  costs about one project open (~39ms vs ~38ms); fails at 1.5× a bare open. It
+  catches opening the project twice, re-parsing the series-sized `book.toml` per
+  config section (startup loads run in one `config::LoadSession`), or loading
+  chapter 0 before the remembered chapter.
 - `navigation_is_fast_in_a_series_sized_project`
   (`app/tests/chapters_counts_and_perf.rs`) — switching chapters in a
   600-chapter (series-sized) project reads/parses one chapter file, never work

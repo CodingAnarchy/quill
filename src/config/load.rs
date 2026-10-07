@@ -5,12 +5,124 @@
 //! merge is untyped ([`toml::Value`]) so the two layers overlay key by key before
 //! either becomes a concrete type.
 //!
+//!
+//! A batch of loads — startup, a project switch, a live config reload — runs
+//! inside a [`LoadSession`], which parses each file at most once for the batch
+//! and serves every section from that parse. Outside a session every load reads
+//! the files fresh, exactly as before.
+//!
 //! [`EditorConfig`]: super::EditorConfig
 //! [`load_theme`]: super::load_theme
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 
 use super::{config_path, project_manifest_path};
+
+/// A [`LoadSession`]'s parsed files, keyed by (is-project-manifest, path): the
+/// global config's full table, or the manifest's narrowed `[quill]` table.
+type ParsedFiles = HashMap<(bool, PathBuf), Option<toml::Table>>;
+
+thread_local! {
+    /// The parsed files of the active [`LoadSession`] on this thread, keyed by
+    /// (is-project-manifest, path), or `None` with no session open. Per-thread
+    /// like the config/project dir overrides, so the parallel test suite stays
+    /// hermetic.
+    static SESSION: RefCell<Option<ParsedFiles>> =
+        const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many config files this thread has read and parsed (test-only), so a
+    /// test can prove a session parses each file once.
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Parse each config file at most once across a batch of section loads.
+///
+/// Startup loads a dozen sections (editor, theme, workflows, triggers, snippets,
+/// AI, image, backup, general, …), and each used to read and TOML-parse both the
+/// global `config.toml` and the project's `book.toml` — which for a series-sized
+/// project is ~100KB+ of chapter list — to pull out one table. Inside a session
+/// the first load of each file parses it and every later load reuses that parse.
+///
+/// The cache lives only as long as the guard, so it can't serve a stale file to a
+/// later batch: open one around a burst of loads that does no writing (App
+/// construction, a live config reload), never across a write. As a backstop,
+/// Quill's own config writers and the manifest save call [`forget_parsed`], so
+/// even a write made mid-session is seen by the next load. Sessions nest: only
+/// the outermost guard clears the cache when it drops.
+pub struct LoadSession {
+    outermost: bool,
+}
+
+impl LoadSession {
+    /// Open a load session on this thread (or join the one already open).
+    #[must_use = "the session ends when the guard drops"]
+    pub fn begin() -> Self {
+        let outermost = SESSION.with(|s| {
+            let mut s = s.borrow_mut();
+            let fresh = s.is_none();
+            if fresh {
+                *s = Some(HashMap::new());
+            }
+            fresh
+        });
+        Self { outermost }
+    }
+}
+
+impl Drop for LoadSession {
+    fn drop(&mut self) {
+        if self.outermost {
+            SESSION.with(|s| *s.borrow_mut() = None);
+        }
+    }
+}
+
+/// Drop every parse the open [`LoadSession`] holds (a no-op with none open), so
+/// the next load re-reads the files. Called after any write to `config.toml` or
+/// `book.toml` that Quill makes, so a session can never serve a file as it was
+/// before the write.
+pub fn forget_parsed() {
+    SESSION.with(|s| {
+        if let Some(cache) = s.borrow_mut().as_mut() {
+            cache.clear();
+        }
+    });
+}
+
+/// The parsed table of the TOML file at `path`, narrowed by `extract`, or `None`
+/// when the file is absent, unreadable, unparseable, or `extract` finds nothing.
+/// Within a [`LoadSession`] the result is computed once per file and cloned from
+/// the cache after; `project` distinguishes the manifest's narrowed `[quill]`
+/// table from a full config table at the same path.
+fn parsed(
+    path: &Path,
+    project: bool,
+    extract: fn(toml::Table) -> Option<toml::Table>,
+) -> Option<toml::Table> {
+    let load = || {
+        #[cfg(test)]
+        PARSES.with(|n| n.set(n.get() + 1));
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
+            .and_then(extract)
+    };
+    SESSION.with(|s| {
+        s.borrow_mut().as_mut().map_or_else(load, |cache| {
+            cache
+                .entry((project, path.to_path_buf()))
+                .or_insert_with(load)
+                .clone()
+        })
+    })
+}
 
 /// Read one `[section]` table, deserialized into `T` (#430), layering the open
 /// project's override over the global config (#710). The global home config is
@@ -24,8 +136,8 @@ use super::{config_path, project_manifest_path};
 /// malformed section, contributes nothing (rather than failing), so an absent
 /// section on both layers yields `T::default()`. Collapses the per-section
 /// wrapper-struct idiom (`struct File { <section>: T }`) every loader used to
-/// re-derive into one call. The config files are small, so re-reading them per
-/// section at startup is negligible.
+/// re-derive into one call. Each call reads both files afresh unless a
+/// [`LoadSession`] is open, which parses each once for the whole batch.
 ///
 /// [`set_project_dir`]: super::set_project_dir
 pub fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
@@ -70,24 +182,21 @@ pub fn global_config_warning() -> Option<String> {
 /// is deserialized into the section's concrete type. A malformed file is swallowed
 /// here (defaults still load); [`global_config_warning`] surfaces that case to the
 /// author so the silent reset (#1100) at least announces itself.
-fn read_section(path: Option<&std::path::Path>, section: &str) -> Option<toml::Value> {
-    path.and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
-        .and_then(|mut table| table.remove(section))
+fn read_section(path: Option<&Path>, section: &str) -> Option<toml::Value> {
+    parsed(path?, false, Some)?.remove(section)
 }
 
 /// The project's override for `section`: the `[quill.<section>]` table in the open
 /// project's `book.toml` (#710), or `None` when no project is registered or the
 /// manifest has no such override. Best-effort like [`read_section`].
 fn read_project_section(section: &str) -> Option<toml::Value> {
-    project_manifest_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
-        .and_then(|mut table| table.remove("quill"))
-        .and_then(|quill| match quill {
-            toml::Value::Table(mut t) => t.remove(section),
-            _ => None,
-        })
+    // Keep only the `[quill]` table: the rest of the manifest (the chapter list)
+    // is never needed here, so a session caches and clones just the overrides.
+    let quill = |mut table: toml::Table| match table.remove("quill") {
+        Some(toml::Value::Table(t)) => Some(t),
+        _ => None,
+    };
+    parsed(&project_manifest_path()?, true, quill)?.remove(section)
 }
 
 /// Overlay a project section over the global section, key by key (#710): a key
@@ -119,8 +228,11 @@ fn merge_sections(
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::{set_config_dir, set_project_dir, EditorConfig};
+    use super::super::{
+        load_snippets, load_theme, set_config_dir, set_project_dir, set_values, EditorConfig,
+    };
     use super::*;
+    use crate::project::Project;
 
     /// Point the global config at a scratch dir and register a scratch project,
     /// both hermetic (#528/#531). `global` is the home `config.toml`; `project`, if
@@ -296,5 +408,91 @@ mod tests {
             Some(only_project)
         );
         assert_eq!(merge_sections(None, None), None);
+    }
+
+    /// How many config files this thread has parsed so far.
+    fn parses() -> usize {
+        PARSES.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn a_load_session_parses_each_file_once() {
+        // Startup loads many sections; inside a session the global config and the
+        // project manifest are each read and parsed once, not once per section.
+        let _fx = LayerFixture::new(
+            "session-once",
+            "[editor]\ncolumn_width = 72\n[theme]\nname = \"light\"\n",
+            Some("title = \"Book\"\n\n[quill.editor]\ncolumn_width = 100\n"),
+        );
+        let before = parses();
+        {
+            let _session = LoadSession::begin();
+            assert_eq!(EditorConfig::load().column_width, 100);
+            let _ = load_theme();
+            let _ = load_snippets();
+            let _nested = LoadSession::begin(); // joins the open session
+            let _ = EditorConfig::load();
+        }
+        assert_eq!(parses() - before, 2, "one parse per file for the batch");
+
+        // Outside a session every load reads afresh, as before.
+        let before = parses();
+        let _ = EditorConfig::load();
+        let _ = EditorConfig::load();
+        assert_eq!(parses() - before, 4);
+    }
+
+    #[test]
+    fn a_settings_write_is_seen_by_the_next_load() {
+        // The in-app settings writer splices config.toml; a load after it — even
+        // one inside the same session — sees the new value, never the old parse.
+        let _fx = LayerFixture::new("session-write", "[editor]\ncolumn_width = 72\n", None);
+        let _session = LoadSession::begin();
+        assert_eq!(EditorConfig::load().column_width, 72);
+        set_values(&[(
+            "editor".to_string(),
+            "column_width".to_string(),
+            "90".to_string(),
+        )])
+        .unwrap();
+        assert_eq!(EditorConfig::load().column_width, 90, "the write is seen");
+    }
+
+    #[test]
+    fn an_outside_edit_is_seen_by_the_next_session() {
+        // An external edit (or any write that doesn't go through Quill) is seen by
+        // the next batch of loads: a session's cache dies with its guard.
+        let fx = LayerFixture::new("session-external", "[editor]\ncolumn_width = 72\n", None);
+        {
+            let _session = LoadSession::begin();
+            assert_eq!(EditorConfig::load().column_width, 72);
+        }
+        std::fs::write(
+            fx.cfg_dir.join("config.toml"),
+            "[editor]\ncolumn_width = 66\n",
+        )
+        .unwrap();
+        let _session = LoadSession::begin();
+        assert_eq!(EditorConfig::load().column_width, 66);
+    }
+
+    #[test]
+    fn a_manifest_save_drops_the_sessions_parse() {
+        // `book.toml` carries the `[quill.*]` overrides; saving the manifest drops
+        // the session's parse so the next load re-reads the saved file.
+        let fx = LayerFixture::new(
+            "session-manifest",
+            "",
+            Some("title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n"),
+        );
+        let project = Project::open(&fx.project_dir).unwrap();
+        let _session = LoadSession::begin();
+        let _ = EditorConfig::load();
+        let before = parses();
+        let _ = EditorConfig::load();
+        assert_eq!(parses(), before, "served from the session");
+        project.save_manifest().unwrap();
+        let _ = EditorConfig::load();
+        assert_eq!(parses() - before, 2, "both files re-read after the save");
     }
 }

@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::atomic;
 use crate::frontmatter::{self, Epigraph, FrontMatter};
 
-use super::super::io::cache_chapter;
+use super::super::io::{cache_chapter, record_read};
 use super::super::structure::unique_dest;
 use super::super::{ChapterEntry, Part, Project};
 use super::{Book, BookPublishing};
@@ -39,8 +39,9 @@ impl Project {
         self.books[self.active_book] = self.manifest.to_book();
         self.manifest.load_book(&self.books[index]);
         self.active_book = index;
-        // Cache the new book's chapters (word count + front matter) once, then
-        // band-order them — the same work `open` does for the first book.
+        // Re-read the new book's chapters (word count + front matter) once, then
+        // band-order them — fresh from disk on purpose (see
+        // `activate_hoisted_book`), the same work `open` does for the first book.
         self.activate_hoisted_book(true);
     }
 
@@ -64,9 +65,18 @@ impl Project {
             // the total would be left at 0, and a file that shrank on disk since
             // open would underflow it. A single `sync_words_total` rebuilds it
             // cleanly — exactly what `add_book` does for its starter chapter.
+            //
+            // The re-read is deliberate. Since #331 `open` already caches every
+            // book, so the cached counts would do; but a book can sit untouched
+            // for a whole session while its files change underneath — another
+            // editor, a synced folder, a `git pull` — and switching to it should
+            // show those chapters as they are now, not as they were at open. It's
+            // one read per chapter of the target book (bounded, never the series),
+            // covered by the `switching_books_is_fast_in_a_series` perf guard.
             let marker = self.manifest.todo_marker().to_string();
             for chapter in &mut self.manifest.chapters {
-                cache_chapter(&self.root, chapter, &marker);
+                let outcome = cache_chapter(&self.root, chapter, &marker);
+                record_read(&mut self.damaged_chapters, &chapter.file, outcome);
             }
             self.reorder_by_band();
             self.sync_words_total();

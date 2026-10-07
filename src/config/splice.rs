@@ -9,7 +9,7 @@ use std::io;
 
 use crate::atomic;
 
-use super::config_path;
+use super::{config_path, forget_parsed};
 
 /// Read the config file ahead of an in-place splice + rewrite. A missing file is
 /// the legitimate first-run case (`""`, the splice creates it); any other read
@@ -36,6 +36,7 @@ pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<std::path::PathB
         std::fs::create_dir_all(parent)?;
     }
     atomic::write(&path, updated.as_bytes())?;
+    forget_parsed(); // a load session must not serve the pre-write file
     Ok(path)
 }
 
@@ -79,6 +80,7 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<std::path:
         std::fs::create_dir_all(parent)?;
     }
     atomic::write(&path, text.as_bytes())?;
+    forget_parsed(); // a load session must not serve the pre-write file
     Ok(path)
 }
 
@@ -222,6 +224,7 @@ pub fn remove_value(section: &str, key: &str) -> io::Result<bool> {
     let (updated, removed) = strip_value(&existing, section, key);
     if removed {
         atomic::write(&path, updated.as_bytes())?;
+        forget_parsed(); // a load session must not serve the pre-write file
     }
     Ok(removed)
 }
