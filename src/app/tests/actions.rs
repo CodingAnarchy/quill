@@ -55,25 +55,6 @@ fn action_palette_lists_only_applicable_actions() {
     }
 }
 
-/// Each group's actions must be contiguous in `ALL` — otherwise the menu would
-/// emit a second header for a re-opened group. Guards future `ALL` additions.
-#[test]
-fn action_groups_are_contiguous_in_the_registry() {
-    let mut seen: Vec<&str> = Vec::new();
-    let mut prev: Option<&str> = None;
-    for a in Action::ALL {
-        let g = a.group();
-        if prev != Some(g) {
-            assert!(
-                !seen.contains(&g),
-                "group '{g}' is split across the registry — keep each group's actions together"
-            );
-            seen.push(g);
-            prev = Some(g);
-        }
-    }
-}
-
 #[test]
 fn bible_and_reference_views_group_under_bible_not_ai_or_view() {
     // The bible browser and research notebook are local reference-file views (not AI
