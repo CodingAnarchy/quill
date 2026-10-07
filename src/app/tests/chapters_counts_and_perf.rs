@@ -1,7 +1,7 @@
 //! Rolled-up word counts, body-vs-section counting, and the navigation / tally performance guards.
 
 use super::*;
-use crate::project::Project;
+use crate::project::{annotation_writes, Project};
 use crate::testutil::{perf_budget_ms, perf_budget_us};
 use std::fmt::Write;
 use std::fs;
@@ -31,6 +31,44 @@ fn report_counts_todo_markers_across_chapters() {
     // A live edit to the active chapter is reflected immediately (buffer, not cache).
     app.buffer.replace_text("no markers here\n");
     assert_eq!(app.count_todo(), 1);
+}
+
+#[test]
+fn todo_count_tracks_edits_through_the_save_path_memo() {
+    // The save path counts the active chapter's markers once (cache_focus_words)
+    // and the roll-up reuses that count for the same buffer revision; any edit
+    // must invalidate it.
+    let dir = crate::testutil::scratch_dir("rep", "todo-memo");
+    let dir = TempProject::new(dir);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "a xxx b\n").unwrap();
+    fs::write(dir.join("two.md"), "xxx\n").unwrap();
+    let mut app = open_test_app(&dir);
+    assert_eq!(app.count_todo(), 2);
+
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, "XXX ");
+    assert_eq!(app.count_todo(), 3, "a typed marker counts before the save");
+    app.on_key(ctrl('s'));
+    assert_eq!(app.count_todo(), 3, "and after it");
+    assert_eq!(
+        app.project.chapter_todo(0),
+        2,
+        "the cache took the live count"
+    );
+
+    app.buffer.seal_undo_group(); // so the undo below reverts only the deletion
+    app.on_key(key(KeyCode::Backspace));
+    app.on_key(key(KeyCode::Backspace));
+    assert_eq!(app.count_todo(), 2, "an edit invalidates the memo");
+    app.history_step(false); // undo restores the marker: a new revision again
+    assert_eq!(app.count_todo(), 3);
 }
 
 #[test]
@@ -170,7 +208,9 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
 /// project must stay instant: only a window is ever loaded, so a switch
 /// reads/parses one chapter file — never work proportional to the project. If a
 /// future change makes navigation re-read or re-scan other chapters, this catches
-/// it. See `docs/performance.md`.
+/// it. Every third chapter carries annotations, and the guard also asserts a
+/// clean switch never rewrites `annotations.toml` — a durable, fsync'd write that
+/// costs several ms on macOS. See `docs/performance.md`.
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn navigation_is_fast_in_a_series_sized_project() {
@@ -179,6 +219,9 @@ fn navigation_is_fast_in_a_series_sized_project() {
     let dir = crate::testutil::scratch_dir("perf", "nav");
     let dir = TempProject::new(dir);
     let mut manifest = String::from("title = \"Series\"\n\n");
+    // Every third chapter carries a few notes, so the side file is non-empty and a
+    // switch away from (or through) an annotated chapter is exercised.
+    let mut annotations = String::new();
     for i in 0..n {
         let file = format!("ch{i}.md");
         write!(
@@ -191,8 +234,19 @@ fn navigation_is_fast_in_a_series_sized_project() {
             body.push_str("The night was dark and the road was very long indeed.\n");
         }
         fs::write(dir.join(&file), body).unwrap();
+        if i % 3 == 0 {
+            for k in 0..3 {
+                let (start, end) = (12 + k * 60, 17 + k * 60);
+                write!(
+                    annotations,
+                    "[[annotation]]\nchapter = \"{file}\"\nstart = {start}\nend = {end}\nnote = \"n\"\n\n"
+                )
+                .unwrap();
+            }
+        }
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();
+    fs::write(dir.join("annotations.toml"), annotations).unwrap();
 
     let project = Project::open(&dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -202,11 +256,21 @@ fn navigation_is_fast_in_a_series_sized_project() {
     // costs that aren't part of the steady-state per-switch cost we're guarding.
     app.on_key(ctrl('n'));
     let switches = 50;
+    let writes = annotation_writes::get();
     let t = Instant::now();
     for _ in 0..switches {
         app.on_key(ctrl('n'));
     }
     let per = t.elapsed() / switches; // average over many switches smooths noise
+                                      // A clean switch changes no note, so it must never rewrite (and fsync) the
+                                      // annotations side file. Counted, not timed: one fsync'd write per annotated
+                                      // chapter averages to only a few ms per switch, which a timing bound would
+                                      // miss on fast disks.
+    assert_eq!(
+        annotation_writes::get(),
+        writes,
+        "a clean chapter switch rewrote annotations.toml"
+    );
 
     println!("chapter switch in a {n}-chapter project = {per:?}");
     assert!(

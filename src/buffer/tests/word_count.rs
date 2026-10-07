@@ -228,3 +228,30 @@ fn word_count_matches_after_randomized_edit_sequences() {
         assert_count_tracks(&buf);
     }
 }
+
+// `Buffer::count_matches` scans line by line over the rope's chunks instead of
+// materializing the document; it must agree exactly with the whole-text count —
+// across chunk boundaries, CRLF, case folding, multibyte text, adjacent
+// (non-overlapping) runs, and a document with no trailing newline.
+#[test]
+fn count_matches_agrees_with_the_whole_text_count() {
+    let mut big = String::new();
+    for i in 0..4000 {
+        big.push_str(match i % 5 {
+            0 => "plain line with XXX and xxxx inside\n",
+            1 => "café — ÉTÉ xXx\r\n",
+            2 => "xxxxxx\n",
+            3 => "no marker here\n",
+            _ => "x\nxx\n",
+        });
+    }
+    big.push_str("trailing xxx without newline");
+    let buf = Buffer::from_text(&big);
+    for needle in ["xxx", "XXX", "x", "été", "marker here", "", "x\nxx"] {
+        assert_eq!(
+            buf.count_matches(needle),
+            text::count_matches(&big, needle),
+            "needle {needle:?}"
+        );
+    }
+}

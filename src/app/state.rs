@@ -6,7 +6,7 @@
 //! sibling `app/` submodule, all of which spell the type `crate::app::App` (the
 //! re-export in `mod.rs` keeps that path resolving exactly as before).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::ai::{self, Backend, Outcome};
 use crate::buffer::Buffer;
 use crate::history;
+use crate::lastpos;
 use crate::manuscript::Manuscript;
 use crate::mode::{Finding, Mode, Overlay, VimState};
 use crate::project::Project;
@@ -335,6 +336,16 @@ pub struct App {
     /// a duplicate day line (#869). A `RefCell` because the best-effort persist runs
     /// off `&self`; `None` until the first write this session.
     pub(super) last_history_snapshot: std::cell::RefCell<Option<history::Snapshot>>,
+    /// The resume position [`persist_position`](Self::persist_position) last wrote
+    /// (or [`restore_position`](Self::restore_position) read), keyed by project
+    /// root, so a save that leaves the cursor where it was skips rewriting the
+    /// sidecar. A `RefCell` because the best-effort persist runs off `&self`.
+    pub(super) last_position: RefCell<Option<(PathBuf, lastpos::Position)>>,
+    /// The content revision of the focused chapter buffer whose TODO count
+    /// [`cache_focus_words`](Self::cache_focus_words) last took, with that count —
+    /// so [`count_todo`](Self::count_todo) reuses it rather than re-scanning the
+    /// same text (the save path refreshes the cache and then rolls the count up).
+    pub(super) focus_todo: Cell<Option<(u64, usize)>>,
     /// Per-chapter word baselines (chapter file → last counted words) the tally
     /// measures against. Keyed by file identity so it survives reordering; an
     /// edit's delta is attributed to the part of the chapter that changed.

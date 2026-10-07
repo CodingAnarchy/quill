@@ -131,6 +131,10 @@ impl App {
     /// the continuous view (a multi-chapter window) records only the active
     /// chapter, resuming at its top. Best-effort — a failed write just means the
     /// next open starts at the top.
+    ///
+    /// Skipped when the position equals the one last written (or read at launch)
+    /// for this project: a save or autosave that leaves the cursor where it was —
+    /// the usual case for an idle autosave — costs a comparison, not a file write.
     pub fn persist_position(&self) {
         let cursor = match &self.manuscript {
             Some(_) => 0,
@@ -140,7 +144,15 @@ impl App {
             chapter_file: self.project.active_file().to_string(),
             cursor,
         };
-        let _ = lastpos::write(&self.project.root, &pos);
+        let root = &self.project.root;
+        if let Some((last_root, last)) = self.last_position.borrow().as_ref() {
+            if last_root == root && *last == pos {
+                return;
+            }
+        }
+        if lastpos::write(root, &pos).is_ok() {
+            *self.last_position.borrow_mut() = Some((root.clone(), pos));
+        }
     }
 
     /// At launch, resume the last editing position a clean exit recorded (#588):
@@ -153,6 +165,8 @@ impl App {
         let Some(pos) = lastpos::read(&self.project.root) else {
             return;
         };
+        // What's on disk now: a later save that lands back here needn't rewrite it.
+        *self.last_position.borrow_mut() = Some((self.project.root.clone(), pos.clone()));
         let Some(index) = self.project.index_of_file(&pos.chapter_file) else {
             return; // that chapter is gone — start at the top
         };

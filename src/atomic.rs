@@ -41,12 +41,47 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// `fill` the open temp [`File`] (which is `Write + Seek`, as a zip writer
 /// wants) to write directly. The parent directory must already exist.
 ///
-/// This is the single implementation of the staging / fsync / rename sequence;
 /// [`write`] is a thin `&[u8]` front for it.
 pub fn write_with<F>(path: &Path, fill: F) -> io::Result<()>
 where
     F: FnOnce(&mut File) -> io::Result<()>,
 {
+    stage_and_swap(path, Durability::Synced, fill)
+}
+
+/// Atomically replace a **best-effort hint** file — one whose loss costs only a
+/// convenience, never the author's words: the temp + rename still means a reader
+/// sees either the old record or the new one (never a torn one, barring a power
+/// cut), but neither the temp file nor the directory is `fsync`ed.
+///
+/// Those two `fsync`s are the bulk of an [`write`]'s cost — on macOS each is an
+/// `F_FULLFSYNC`, several milliseconds — and a hint written on every save (the
+/// resume position, #588) would pay them every time for a record that is
+/// rewritten moments later anyway. After a power loss the file may be missing,
+/// stale, or empty; a hint's reader must treat all three as "no record" (as
+/// [`crate::lastpos::read`] does). **Never** use this for manuscript content, the
+/// manifest, annotations, or any other source of truth — those go through
+/// [`write`].
+pub fn write_hint(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    stage_and_swap(path, Durability::Hint, |f| f.write_all(bytes))
+}
+
+/// Whether [`stage_and_swap`] flushes the temp file and the directory to disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Durability {
+    /// `fsync` the temp before the rename and the directory after it.
+    Synced,
+    /// Rename only — atomic against a crash of this process, not a power loss.
+    Hint,
+}
+
+/// The single staging / (optional) fsync / rename sequence behind [`write`],
+/// [`write_with`], and [`write_hint`].
+fn stage_and_swap<F>(path: &Path, durability: Durability, fill: F) -> io::Result<()>
+where
+    F: FnOnce(&mut File) -> io::Result<()>,
+{
+    let synced = durability == Durability::Synced;
     let path = &resolve_symlink(path)?;
     let tmp = temp_path(path);
 
@@ -56,13 +91,15 @@ where
     let staged = (|| {
         let mut f = File::create(&tmp)?;
         fill(&mut f)?;
-        f.sync_all()?;
+        if synced {
+            f.sync_all()?;
+        }
         // Test-only seam (#265): simulate a crash *after* the temp is fully
         // written but *before* the rename — the case that distinguishes an
         // atomic save (target untouched) from a truncate-then-write (target
         // already destroyed). Production builds compile this out entirely.
-        // Both entry points reach it here, so a `write` and a `write_with`
-        // each count as exactly one armed step of the fail-point countdown.
+        // Every entry point reaches it here, so a `write`, a `write_with`, and a
+        // `write_hint` each count as exactly one armed step of the countdown.
         #[cfg(test)]
         if fail_point::should_fail_before_rename() {
             return Err(io::Error::other("injected pre-rename failure"));
@@ -77,8 +114,10 @@ where
     // Best-effort: fsync the directory so the rename itself is durable across a
     // power loss. Not every platform lets you open a directory as a file, so a
     // failure here is ignored — the bytes are already safely on disk.
-    if let Ok(dir) = File::open(parent(path)) {
-        let _ = dir.sync_all();
+    if synced {
+        if let Ok(dir) = File::open(parent(path)) {
+            let _ = dir.sync_all();
+        }
     }
     Ok(())
 }
