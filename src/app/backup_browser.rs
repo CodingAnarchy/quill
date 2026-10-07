@@ -100,7 +100,9 @@ impl App {
             return; // save failed — message already set
         }
         self.leave_continuous();
-        self.clear_recovery();
+        // Settled before the swap, so a queued sidecar write can't land in (or
+        // its clear remove from) the restored project.
+        self.settle_recovery_cleared();
 
         let root = self.project.root.clone();
         match restore_over(&root, &src) {

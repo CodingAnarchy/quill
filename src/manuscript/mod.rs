@@ -548,8 +548,8 @@ impl Manuscript {
     // --- Recovery ----------------------------------------------------------
 
     /// The manifest indices of the window's dirty chapters, in window order —
-    /// the cheap half of [`dirty_segments`](Self::dirty_segments) (no text
-    /// copied), which the recovery capture uses as its change key.
+    /// the cheap half of [`dirty_spans`](Self::dirty_spans) (no line spans
+    /// computed), which the recovery capture uses as its change key.
     pub fn dirty_chapters(&self) -> Vec<usize> {
         self.segments
             .iter()
@@ -558,35 +558,48 @@ impl Manuscript {
             .collect()
     }
 
-    /// Each dirty segment's `(manifest index, prose body)`, snapshotting the
-    /// in-memory buffer — not the on-disk files (#566). The body is normalized
-    /// the same way [`save`](Self::save) computes it, with front matter left out
-    /// (recovery captures prose only, re-attaching front matter on save), so a
-    /// recovered body compares cleanly against the chapter's on-disk prose.
+    /// Each dirty segment's `(manifest index, start line, end line)` in the
+    /// window buffer — the span whose text the recovery snapshot holds. The recovery capture hands these spans plus an O(1) clone of the
+    /// buffer's rope to its background writer, which slices and normalizes the
+    /// text off the UI thread.
     ///
-    /// Runs on the idle cadence, so it does only buffer slicing over the loaded
-    /// window — no file reads, no work proportional to the novel.
-    pub fn dirty_segments(&self) -> Vec<(usize, String)> {
+    /// The last segment runs through EOF (the buffer's trailing empty line), so
+    /// prose typed on that orphan line is captured by the recovery snapshot too —
+    /// matching `save` so recovery never misses what a save would keep (see
+    /// `save`). Runs on the idle cadence: no text copied, no file reads.
+    pub fn dirty_spans(&self) -> Vec<(usize, usize, usize)> {
         let mut out = Vec::new();
         let mut start = 0;
         let last = self.segments.len().saturating_sub(1);
         for (i, s) in self.segments.iter().enumerate() {
-            // The last segment runs through EOF (the buffer's trailing empty
-            // line), so prose typed on that orphan line is captured by the
-            // recovery snapshot too — matching `save` so recovery never misses
-            // what a save would keep (see `save`).
             let end = if i == last {
                 self.buffer.line_count()
             } else {
                 start + s.lines
             };
             if s.dirty {
-                let raw = self.buffer.line_range_text(start, end);
-                out.push((s.index, normalize_trailing_newline(&raw)));
+                out.push((s.index, start, end));
             }
             start = end;
         }
         out
+    }
+
+    /// Each dirty segment's `(manifest index, prose body)`, snapshotting the
+    /// in-memory buffer — not the on-disk files (#566). The body is normalized
+    /// the same way [`save`](Self::save) computes it, with front matter left out
+    /// (recovery captures prose only, re-attaching front matter on save), so a
+    /// recovered body compares cleanly against the chapter's on-disk prose. The
+    /// recovery writer computes the same text from [`dirty_spans`](Self::dirty_spans).
+    #[cfg(test)]
+    pub fn dirty_segments(&self) -> Vec<(usize, String)> {
+        self.dirty_spans()
+            .into_iter()
+            .map(|(index, start, end)| {
+                let raw = self.buffer.line_range_text(start, end);
+                (index, normalize_trailing_newline(&raw))
+            })
+            .collect()
     }
 
     /// Overlay recovered prose onto the loaded window (#566): for each

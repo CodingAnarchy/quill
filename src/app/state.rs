@@ -540,19 +540,24 @@ pub struct App {
     /// restore/discard choice. `Some` only while the recovery prompt is open;
     /// taken when they restore, cleared when they discard or defer.
     pub(super) pending_recovery: Option<recovery::Recovery>,
-    /// Whether a recovery sidecar is currently on disk for this session's edits,
-    /// so the idle cadence clears it exactly once when the buffer goes clean
-    /// rather than issuing a remove on every idle tick.
+    /// Whether a recovery sidecar is on disk — or on its way there through the
+    /// writer — for this session's edits, so the idle cadence clears it exactly
+    /// once when the buffer goes clean rather than issuing a remove on every
+    /// idle tick.
     pub(super) recovery_written: bool,
-    /// What the last successful recovery capture wrote: the edit buffer's content
-    /// [`revision`](crate::buffer::Buffer::revision) plus the chapter files it
-    /// attributed text to. An idle pass whose key matches skips the copy,
-    /// serialize, and fsync'd write entirely — the sidecar already holds exactly
-    /// this. `None` when nothing has been captured (or the sidecar was cleared).
+    /// What the last recovery capture handed the writer: the edit buffer's
+    /// content [`revision`](crate::buffer::Buffer::revision) plus the chapter
+    /// files it attributed text to. An idle pass whose key matches submits
+    /// nothing — the sidecar holds (or is about to hold) exactly this. `None`
+    /// when nothing has been captured, the sidecar was cleared, or the write
+    /// failed (so the next tick retries it).
     pub(super) recovery_key: Option<super::persistence::RecoveryKey>,
-    /// When the sidecar was last written, for the capture throttle
+    /// When the last capture was submitted, for the capture throttle
     /// ([`RECOVERY_MIN_INTERVAL`](super::persistence::RECOVERY_MIN_INTERVAL)).
     pub(super) recovery_captured_at: Option<std::time::Instant>,
+    /// The background thread that writes and clears the sidecar, so a durable
+    /// write on a busy disk never blocks typing.
+    pub(super) recovery_writer: recovery::writer::Writer,
     /// The project the author chose in the browser, held while the unsaved-
     /// changes confirm is open (#270); taken when they confirm the switch.
     pub(super) pending_switch: Option<PathBuf>,
