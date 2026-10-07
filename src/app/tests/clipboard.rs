@@ -13,7 +13,7 @@ use crossterm::event::Event;
 fn vim_app(tag: &str, body: &str) -> (App, TempProject) {
     let dir = make_project(tag, "Book", body);
     let mut app = open_app(&dir);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     (app, TempProject::new(dir))
 }

@@ -78,13 +78,13 @@ fn setting_a_theme_persists_and_applies_live() {
 #[test]
 fn setting_a_bool_persists_and_applies_live() {
     let (mut app, _dir) = settings_app("settings-bool");
-    assert!(!app.vim);
+    assert!(!app.flags.vim);
     app.set_setting_bool(SettingBool::Vim, true);
     assert!(config_text().contains("vim = true"), "{}", config_text());
     // Applied live via apply_config_live.
-    assert!(app.vim, "vim toggled on live");
+    assert!(app.flags.vim, "vim toggled on live");
     // And it round-trips through the loader.
-    assert!(config::EditorConfig::load().vim);
+    assert!(config::EditorConfig::load().flags.vim);
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn a_key_remap_coexists_with_scalar_editor_keys_and_round_trips() {
     assert!(toml.contains("[editor.keys]"), "{toml}");
     // Both round-trip through the one loader.
     let editor = config::EditorConfig::load();
-    assert!(editor.vim, "vim still loads");
+    assert!(editor.flags.vim, "vim still loads");
     assert_eq!(editor.keys.get("down").map(String::as_str), Some("n"));
 }
 

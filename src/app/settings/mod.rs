@@ -18,7 +18,8 @@ use crate::app::configure::validate_change;
 use crate::app::dispatch::vim_remap_actions;
 use crate::config;
 use crate::mode::{
-    Command, Mode, Palette, PaletteItem, Pending, SettingBool, SettingPicker, SettingTextKnob,
+    Command, Mode, Palette, PaletteItem, Pending, SettingBool, SettingPicker, SettingPlacement,
+    SettingTextKnob,
 };
 use crate::project::{read_existing, Project};
 use crate::theme::{Theme, COLOR_FIELDS, THEME_NAMES};
@@ -40,7 +41,13 @@ impl App {
     /// sets that knob; the menu re-opens after a change so several can be tweaked in
     /// one sitting.
     pub(crate) fn open_settings_menu(&mut self) {
-        let items = vec![
+        let bool_rows = |placement: SettingPlacement| {
+            SettingBool::SPECS
+                .iter()
+                .filter(move |spec| spec.placement == placement)
+                .map(|spec| bool_row(spec.knob, spec.knob.get(&self.flags)))
+        };
+        let mut items = vec![
             PaletteItem::new(
                 "Theme",
                 format!("Currently: {}", Self::current_theme_name()),
@@ -51,19 +58,15 @@ impl App {
                 format!("Currently: {} characters", self.focus_width),
                 Command::EditSettingText(SettingTextKnob::ColumnWidth),
             ),
-            bool_row(SettingBool::SmartTypography, self.smart_typography),
-            bool_row(SettingBool::AutoPair, self.auto_pair),
-            bool_row(SettingBool::Vim, self.vim),
-            PaletteItem::new(
-                "Autosave interval",
-                format!("Currently: {}", autosave_label(self.autosave_interval_secs)),
-                Command::EditSettingText(SettingTextKnob::AutosaveSecs),
-            ),
-            bool_row(SettingBool::Typewriter, self.typewriter),
-            bool_row(SettingBool::FocusMode, self.focus_mode),
-            bool_row(SettingBool::ParagraphIndent, self.paragraph_indent),
-            bool_row(SettingBool::AnnotationMargin, self.annotation_margin),
-            bool_row(SettingBool::DailyNudge, self.daily_nudge),
+        ];
+        items.extend(bool_rows(SettingPlacement::Typing));
+        items.push(PaletteItem::new(
+            "Autosave interval",
+            format!("Currently: {}", autosave_label(self.autosave_interval_secs)),
+            Command::EditSettingText(SettingTextKnob::AutosaveSecs),
+        ));
+        items.extend(bool_rows(SettingPlacement::Display));
+        items.extend([
             PaletteItem::new(
                 "Analysis stopwords",
                 format!("Currently: {}", self.stopwords_label()),
@@ -79,7 +82,7 @@ impl App {
                 "View and remap the Vim [editor.keys] bindings",
                 Command::OpenSettingPicker(SettingPicker::KeyBindings),
             ),
-        ];
+        ]);
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Settings",
             items,
@@ -197,17 +200,13 @@ impl App {
     /// shared config machinery, apply it live, and re-open the menu. A bool always
     /// validates, so there's no rejection path.
     pub(crate) fn set_setting_bool(&mut self, knob: SettingBool, on: bool) {
-        let field = knob
-            .key()
-            .strip_prefix("editor.")
-            .unwrap_or_else(|| knob.key());
         // A bool always validates, so the raw `true`/`false` is the fallback the
         // validator would return anyway — no panic path needed.
         let raw = if on { "true" } else { "false" };
-        let literal = validate_change(knob.key(), raw).unwrap_or_else(|_| raw.to_string());
+        let literal = validate_change(&knob.key(), raw).unwrap_or_else(|_| raw.to_string());
         self.persist_config_setting(
             "editor",
-            field,
+            knob.field(),
             &literal,
             &format!("{} {}.", knob.label(), on_off(on)),
         );

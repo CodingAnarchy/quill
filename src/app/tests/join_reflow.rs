@@ -10,7 +10,7 @@ use std::fs;
 /// for the join/reflow tests.
 fn jr_app(name: &str, text: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.buffer = Buffer::from_text(text);
     (app, dir)
@@ -33,7 +33,7 @@ fn jr_continuous_app(name: &str, first: &str, second: &str) -> (App, TempProject
     fs::write(dir.join("two.md"), second).unwrap();
 
     let mut app = open_test_app(&dir);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.on_key(ctrl('l')); // enter continuous view
     assert!(app.manuscript.is_some(), "continuous view is active");

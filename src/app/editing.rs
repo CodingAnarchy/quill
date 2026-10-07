@@ -101,7 +101,7 @@ impl App {
         // prose-edit path runs this; prompts and titles insert verbatim.
         let mut delete = 0usize;
         let mut effective = c;
-        if self.smart_typography {
+        if self.flags.smart_typography {
             // The substitution only inspects the last ≤2 chars before the cursor.
             // Smart typography stays on inside fenced blocks too — they hold
             // "log line"-style prose (transmissions, letters) that still wants
@@ -121,7 +121,7 @@ impl App {
         // characters (`--` → em-dash, `...` → ellipsis) is never a closer, so this
         // only fires for the single-char quote/bracket glyphs. O(1): it inspects
         // only the one character immediately at the cursor, never scanning.
-        if self.auto_pair && delete == 0 && is_auto_pair_closer(effective) {
+        if self.flags.auto_pair && delete == 0 && is_auto_pair_closer(effective) {
             let at_cursor = match &self.manuscript {
                 Some(m) => m.buffer().char_after_cursor(),
                 None => self.buffer.char_after_cursor(),
@@ -144,7 +144,7 @@ impl App {
         // the opener already recorded the insertion, and the cursor ends up *before*
         // the closer, so recording the closer's end byte would leave a stale
         // edit-ring spot past the cursor that a later insert would invalidate.
-        if self.auto_pair && delete == 0 {
+        if self.flags.auto_pair && delete == 0 {
             if let Some(closer) = auto_pair_closer(effective) {
                 if let Some(m) = &mut self.manuscript {
                     m.insert_char(closer);

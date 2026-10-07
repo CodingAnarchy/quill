@@ -21,7 +21,7 @@ impl App {
     /// collapsing the selection.
     fn esc_is_idle(&self) -> bool {
         match self.mode {
-            Mode::Insert => !self.vim,
+            Mode::Insert => !self.flags.vim,
             Mode::Normal => {
                 let v = &self.vim_state;
                 v.count.is_none()
@@ -274,7 +274,7 @@ impl App {
     /// modeless Insert. Every "return to the editor" path routes through this so
     /// it lands in the right mode for the user's configuration.
     pub(super) const fn editing_mode(&self) -> Mode {
-        if self.vim {
+        if self.flags.vim {
             Mode::Normal
         } else {
             Mode::Insert
@@ -462,7 +462,7 @@ impl App {
         }
         match key.code {
             // In Vim mode, Esc leaves Insert for Normal; without it, Esc is inert.
-            KeyCode::Esc if self.vim => self.mode = Mode::Normal,
+            KeyCode::Esc if self.flags.vim => self.mode = Mode::Normal,
 
             KeyCode::Char(c) => self.edit_insert_char(c),
             KeyCode::Enter => self.edit_insert_char('\n'),

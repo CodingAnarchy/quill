@@ -144,7 +144,10 @@ fn the_overrides_still_load_after_a_save() {
     set_project_dir(None);
     set_config_dir(None);
 
-    assert!(editor.typewriter, "[quill.editor] typewriter still applies");
+    assert!(
+        editor.flags.typewriter,
+        "[quill.editor] typewriter still applies"
+    );
     assert!(warnings.is_empty(), "{warnings:?}");
     let names: Vec<&str> = snippets.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["hr", "sig"]);

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 fn vim_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     (app, dir)
 }
@@ -666,7 +666,7 @@ fn a_remapped_motion_extends_a_visual_selection() {
 #[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, _dir) = two_chapter_app("vim-off");
-    app.vim = false;
+    app.flags.vim = false;
     app.mode = Mode::Insert;
     // Letters type straight into the buffer, and Esc is inert.
     type_str(&mut app, "Z");

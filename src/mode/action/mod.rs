@@ -9,20 +9,22 @@
 //! module split into cohesive files — the palette types ([`palette`]), the
 //! [`Command`] enum and its Settings/style pickers ([`command`]), the [`Action`]
 //! registry with the export/git targets ([`registry`]), its row-per-action table
-//! ([`table`]), and the [`AiAction`] descriptor table ([`ai`]) — each re-exported
+//! ([`table`]), the [`AiAction`] descriptor table ([`ai`]), and the boolean
+//! `[editor]` knob descriptor table ([`setting`]) — each re-exported
 //! here so the public surface, and every caller, is unchanged.
 
 mod ai;
 mod command;
 mod palette;
 mod registry;
+mod setting;
 mod table;
 
 pub use ai::{AiAction, AiCost, ModelWeight, Needs};
 pub use command::{
-    Command, FontTarget, PortraitChoice, SettingBool, SettingPicker, SettingTextKnob, StylePicker,
-    StyleTextKnob,
+    Command, FontTarget, PortraitChoice, SettingPicker, SettingTextKnob, StylePicker, StyleTextKnob,
 };
 pub use palette::PaletteRow;
 pub use palette::{Palette, PaletteItem};
 pub use registry::{Action, ExportFormat, ExportScope, GitAction};
+pub use setting::{SettingBool, SettingPlacement};

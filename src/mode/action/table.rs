@@ -4,7 +4,7 @@
 //! derive from — mirroring the [`AiAction::SPECS`] descriptor table, whose AI
 //! rows it copies at compile time rather than re-encoding.
 
-use super::{Action, AiAction, ExportFormat};
+use super::{Action, AiAction, ExportFormat, SettingBool};
 
 /// One row of the registry: everything the run-action menu, workflows, and the
 /// assistant know about an [`Action`] besides how to dispatch it (that stays a
@@ -56,6 +56,23 @@ const fn ai(action: AiAction) -> ActionSpec {
     }
     // Evaluated in a const, so a missing descriptor is a compile error, not a panic.
     panic!("every AiAction has a descriptor in AiAction::SPECS");
+}
+
+/// A boolean `[editor]` knob's palette toggle row. Its name, label, and
+/// runnability are copied at compile time from the knob's `SettingBool::SPECS`
+/// descriptor, so they stay written once.
+const fn toggle(knob: SettingBool) -> ActionSpec {
+    let Some(spec) = &knob.spec().toggle else {
+        // Evaluated in a const, so a knob with no toggle is a compile error.
+        panic!("a toggle row needs a `toggle` in the knob's SettingBool::SPECS row");
+    };
+    ActionSpec {
+        action: Action::Toggle(knob),
+        name: spec.name,
+        label: spec.label,
+        shortcut: None,
+        assistant_runnable: spec.assistant_runnable,
+    }
 }
 
 /// An export target's row: every format shares the Ctrl-E export menu, and the
@@ -426,30 +443,11 @@ const GROUPS: &[(&str, &[ActionSpec])] = &[
     (
         "View",
         &[
-            row(
-                Action::ToggleTypewriter,
-                "view:typewriter",
-                "Typewriter scrolling (toggle)",
-            )
-            .runnable(),
-            row(Action::ToggleFocus, "view:focus", "Focus mode (toggle)").runnable(),
-            row(
-                Action::ToggleParagraphIndent,
-                "view:paragraph-indent",
-                "Paragraph indent (toggle)",
-            )
-            .runnable(),
-            row(
-                Action::ToggleAnnotationMargin,
-                "view:annotation-margin",
-                "Annotation margin (toggle)",
-            )
-            .runnable(),
-            row(
-                Action::ToggleDailyCue,
-                "view:daily-cue",
-                "Daily goal cue (toggle)",
-            ),
+            toggle(SettingBool::Typewriter),
+            toggle(SettingBool::FocusMode),
+            toggle(SettingBool::ParagraphIndent),
+            toggle(SettingBool::AnnotationMargin),
+            toggle(SettingBool::DailyNudge),
             row(Action::FoldAll, "view:fold-all", "Fold all sections"),
             row(Action::ExpandAll, "view:expand-all", "Expand all sections"),
             row(
@@ -520,7 +518,7 @@ pub(super) fn rows() -> impl Iterator<Item = (&'static str, &'static ActionSpec)
 #[cfg(test)]
 mod tests {
     use super::{rows, GROUPS};
-    use crate::mode::{Action, AiAction, ExportFormat};
+    use crate::mode::{Action, AiAction, ExportFormat, SettingBool};
 
     /// Lists every variant of an enum *and* matches on it exhaustively, from one
     /// token list: a variant added to the enum but not here fails to compile (the
@@ -539,8 +537,9 @@ mod tests {
     }
 
     /// Every `Action` value the registry must hold, enumerated from the enum: each
-    /// unit variant, each export format, and each AI pass (`AiAction::SPECS` is
-    /// itself checked complete in `ai.rs`).
+    /// unit variant, each export format, each AI pass (`AiAction::SPECS` is
+    /// itself checked complete in `ai.rs`), and each knob toggle its
+    /// `SettingBool::SPECS` row declares (checked complete in `setting.rs`).
     fn every_action() -> Vec<Action> {
         let units = every_variant!(
             Action {
@@ -583,11 +582,6 @@ mod tests {
                 PrevMisspelling,
                 StyleFlagSweep,
                 ToggleProximityRepeats,
-                ToggleTypewriter,
-                ToggleFocus,
-                ToggleParagraphIndent,
-                ToggleAnnotationMargin,
-                ToggleDailyCue,
                 FoldAll,
                 ExpandAll,
                 ToggleComposition,
@@ -621,7 +615,7 @@ mod tests {
                 ImportReviewComments,
                 PdfWrapCover,
             },
-            Action::Export(_) | Action::Ai(_)
+            Action::Export(_) | Action::Ai(_) | Action::Toggle(_)
         );
         let formats = every_variant!(ExportFormat {
             Markdown,
@@ -635,6 +629,12 @@ mod tests {
         let mut all = units.to_vec();
         all.extend(formats.into_iter().map(Action::Export));
         all.extend(AiAction::SPECS.iter().map(|s| Action::Ai(s.action)));
+        all.extend(
+            SettingBool::SPECS
+                .iter()
+                .filter(|s| s.toggle.is_some())
+                .map(|s| Action::Toggle(s.knob)),
+        );
         all
     }
 

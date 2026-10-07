@@ -181,7 +181,7 @@ fn click_in_left_margin_is_ignored() {
 fn click_does_not_change_the_editing_mode() {
     // In Vim Normal mode, a click positions the cursor but stays in Normal.
     let (mut app, _dir) = rendered_app("mouse-vim", "hello world\n", 20);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     let x = column_x(20);
     click(&mut app, x + 6, BODY_TOP);
@@ -216,7 +216,7 @@ fn click_accounts_for_the_first_line_paragraph_indent() {
     // With the #722 indent on, the first visual row is shifted right by four cells.
     // A click at the column of the first character must account for that shift.
     let (mut app, _dir) = rendered_app("mouse-indent", "hello world\n", 20);
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     render_to_string(&app, W, H);
     let x = column_x(20);
     // The 'h' now renders at column 4 (four-space indent). Click there.
@@ -326,7 +326,7 @@ fn a_drag_accounts_for_the_paragraph_indent() {
     // With the #722 indent on, the first row shifts right by four cells; a drag
     // still maps to the right bytes through the indent.
     let (mut app, _dir) = rendered_app("drag-indent", "hello world\n", 20);
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     render_to_string(&app, W, H);
     let x = column_x(20);
     // Press at the 'h' (rendered at column 4 with the indent), drag five chars.

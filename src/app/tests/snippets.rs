@@ -42,7 +42,7 @@ fn an_inserted_snippet_is_one_undo() {
 #[test]
 fn snippet_insertion_is_verbatim_ignoring_smart_typography() {
     let (mut app, _dir) = two_chapter_app("snippet-literal");
-    app.smart_typography = true; // would curl quotes / dash on the typing path
+    app.flags.smart_typography = true; // would curl quotes / dash on the typing path
     app.snippets = vec![snip("quote", "\"--\"")];
     app.insert_snippet(0);
     // The configured text lands exactly — straight quotes, double hyphen.

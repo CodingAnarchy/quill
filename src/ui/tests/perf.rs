@@ -89,8 +89,8 @@ fn render_stays_within_a_frame() {
     buffer.refresh_syntax();
     let mut app = App::new(buffer, project);
     app.outline_visible = true;
-    app.focus_mode = true;
-    app.typewriter = true;
+    app.flags.focus_mode = true;
+    app.flags.typewriter = true;
     // Live word-goal indicators (#1011) on: a stored chapter goal and a session
     // target, both drawn into the status bar every frame. Each reads a cached
     // count (the manifest goal, the maintained running total) — O(1), no file
@@ -100,7 +100,7 @@ fn render_stays_within_a_frame() {
     app.begin_session_target("50000");
     // The first-line paragraph indent (#722) classifies each visible logical line
     // (a bounded highlight lookup per row); on here so the render guard covers it.
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     // A spread of inline annotations (#302) across the whole chapter, plus one
     // long note spanning the middle (so rows far past its start are still
     // tinted), so the per-row annotation lookup is exercised under the budget.

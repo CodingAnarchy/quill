@@ -123,7 +123,7 @@ fn continuous_view_undo_of_a_second_chapters_edit_leaves_the_first_intact() {
 /// setup the range-edit Vim tests (#700) build on.
 fn continuous_vim_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = three_chapter_app(name); // alpha / beta / gamma
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.on_key(ctrl('l')); // enter continuous view
     assert!(app.manuscript.is_some());

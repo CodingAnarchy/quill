@@ -350,7 +350,7 @@ fn a_workflows_own_save_step_does_not_re_trigger_on_save() {
 #[test]
 fn a_bound_vim_key_runs_the_workflow() {
     let (mut app, _dir) = two_chapter_app("wf-key");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.workflows = vec![wf("quick", &["report:progress"])];
     app.triggers = Triggers {
@@ -372,7 +372,7 @@ fn a_bound_vim_key_runs_the_workflow() {
 #[test]
 fn a_bound_key_does_not_fire_mid_operator() {
     let (mut app, _dir) = two_chapter_app("wf-key-operator");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.workflows = vec![wf("quick", &["report:progress"])];
     app.triggers = Triggers {

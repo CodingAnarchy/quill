@@ -133,7 +133,7 @@ fn vim_insert_esc_drops_to_normal_without_leaving_composition_mode() {
     // In Vim Insert, Esc's job is Insert → Normal; only a further, idle Esc in
     // Normal exits composition mode.
     let (mut app, _dir) = folding_app("composition-vim");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Insert;
     app.on_key(ctrl('\\'));
     assert!(app.distraction_free);
@@ -504,7 +504,7 @@ fn ex_goto_line_into_a_folded_section_reveals_it() {
     // BUG 3 (#1010/#975): `:{N}` to a line inside a collapsed section must reveal
     // it, exactly as the Ctrl-G go-to-line prompt already did.
     let (mut app, _dir) = folding_app("fold-ex-goto");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     let one = heading_start(&app, "Scene one");
     app.folds.toggle(one); // hides "The river ran cold." on line 2 (1-based line 3)

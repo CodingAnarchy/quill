@@ -114,7 +114,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
     ) && !app.surface_pane_focused()
         && !app.assistant_pane_focused();
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
-    let focus = app.focus_mode.then(|| focus_paragraph(buffer));
+    let focus = app.flags.focus_mode.then(|| focus_paragraph(buffer));
     // Active style-flag hits (#1001), computed on idle; underlined like a
     // misspelling under the prose while a sweep is on (empty otherwise).
     let style_flags = app.style_flags.as_slice();
@@ -160,9 +160,9 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
         inserts,
         &highlights,
         &folds,
-        app.typewriter,
+        app.flags.typewriter,
         editing,
-        app.paragraph_indent,
+        app.flags.paragraph_indent,
         app.scroll_offset.get(),
         Some(&mut editor_layout),
     );
@@ -251,7 +251,7 @@ pub(super) fn render_reference_pane(
         &folds,
         false,
         false,
-        app.paragraph_indent,
+        app.flags.paragraph_indent,
         0,
         None,
     );

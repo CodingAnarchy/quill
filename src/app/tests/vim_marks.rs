@@ -6,7 +6,7 @@ use super::*;
 
 fn vim_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     (app, dir)
 }
@@ -94,7 +94,7 @@ fn the_outline_jump_pushes_the_jumplist_and_back_jump_returns() {
     // "# One\n\n" is 7 bytes; "## Later\n" heading starts at byte 7.
     fs::write(dir.join("one.md"), "# One\n\nlead\n\n## Later\n\ntail\n").unwrap();
     let mut app = open_test_app(&dir);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.on_idle(); // parse headings
 

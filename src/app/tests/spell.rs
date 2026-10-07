@@ -280,7 +280,7 @@ fn replacing_a_stale_range_declines_rather_than_corrupting() {
 #[test]
 fn vim_z_equals_opens_the_suggestions_picker() {
     let (mut app, _dir) = two_chapter_app("spell-suggest-vim");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.buffer = Buffer::from_text("The quikc brown fox");
     app.on_idle();

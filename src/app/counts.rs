@@ -271,7 +271,7 @@ impl App {
     /// is switched on and today's net is under a set daily target. O(1) — cached
     /// tally + goal only.
     pub fn nudge_showing(&self) -> bool {
-        self.daily_nudge && self.daily_target_shortfall().is_some()
+        self.flags.daily_nudge && self.daily_target_shortfall().is_some()
     }
 
     /// Seed today's tally directly (#1012), for render tests outside the `app`

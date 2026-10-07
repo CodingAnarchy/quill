@@ -564,7 +564,7 @@ fn ctrl_o_does_not_focus_the_outline_in_the_continuous_view() {
     // The real key path: Ctrl-O reveals the pane, but a second press (which would
     // focus it in the single view) is refused in the continuous view.
     let (mut app, _dir) = two_heading_chapters("outline-cont-ctrl-o");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.on_key(ctrl('l')); // enter continuous view
 

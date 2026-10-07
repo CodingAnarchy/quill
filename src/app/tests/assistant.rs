@@ -128,9 +128,12 @@ fn a_final_answer_is_shown_in_the_transcript() {
 #[test]
 fn a_tool_call_runs_the_action_and_records_it() {
     let (mut app, _dir) = assistant_app("assistant-tool");
-    let before = app.focus_mode;
+    let before = app.flags.focus_mode;
     app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "view:focus")])));
-    assert_ne!(app.focus_mode, before, "the toggle action actually ran");
+    assert_ne!(
+        app.flags.focus_mode, before,
+        "the toggle action actually ran"
+    );
     let c = conv(&app);
     assert!(
         c.entries()
@@ -581,10 +584,10 @@ fn a_finished_pass_resumes_the_batch() {
     let (mut app, _dir) = assistant_app("assistant-pass-resume");
     // A pass is in flight, with a synchronous call queued behind it.
     app.test_install_pass(call("p", "ai:continuity"), vec![call("s", "view:focus")]);
-    let before = app.focus_mode;
+    let before = app.flags.focus_mode;
     app.resume_assistant_pass("Done — Continuity. The findings are in the editor.".into());
     assert_ne!(
-        app.focus_mode, before,
+        app.flags.focus_mode, before,
         "the queued sync call ran after the pass resumed"
     );
     let c = conv(&app);
