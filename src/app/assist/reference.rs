@@ -169,12 +169,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Pick a word to place",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Pick a word to place", items);
     }
 
     /// Place the chosen candidate word/phrase at the cursor (#653), through the
@@ -206,12 +201,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Name generator — what needs a name?",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Name generator — what needs a name?", items);
     }
 
     /// After the kind is chosen, prompt for the free-text constraints (origin,
@@ -271,12 +261,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Pick a name to place",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Pick a name to place", items);
     }
 
     /// Place the chosen candidate name at the cursor (#610), through the normal

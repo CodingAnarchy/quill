@@ -162,7 +162,6 @@ pub fn data_dir() -> Option<PathBuf> {
 /// The data dir from the raw `$XDG_DATA_HOME` / `$HOME` values: XDG wins, else
 /// `$HOME/.local/share`, else nothing. Pure, so the production resolution stays
 /// unit-tested even though [`data_dir`] is hermetically stubbed in tests (#888).
-#[cfg_attr(test, allow(dead_code))]
 fn resolve_data_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
     let base = xdg
         .map(PathBuf::from)

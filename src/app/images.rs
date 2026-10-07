@@ -10,7 +10,7 @@ use crate::ai::fal::FalBackend;
 use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
 use crate::ai::scene_brief;
 use crate::ai::{self, bible, Outcome};
-use crate::mode::{Command, Mode, Palette, PaletteItem, Pending, PortraitChoice};
+use crate::mode::{Command, PaletteItem, Pending, PortraitChoice};
 
 use super::worker::BackendSpec;
 use super::App;
@@ -156,12 +156,7 @@ impl App {
                 Command::Portrait(PortraitChoice::One(i)),
             )
         }));
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Character portrait",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Character portrait", items);
     }
 
     /// Confirm the picked portrait selection (#244) before spending: stash the

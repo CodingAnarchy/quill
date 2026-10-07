@@ -21,12 +21,7 @@ use crate::vcs::local::is_dirty;
 /// was edited differently on each side. All three versions are carried so the
 /// resolution UI (#963) can show base-vs-local-vs-remote and let the author choose,
 /// and so sync itself never has to pick a side or clobber one.
-///
-/// The three version strings are the data the resolution UI (#963) renders and acts
-/// on; this ticket only detects and exposes them, so today they're read by name only
-/// from the tests — annotated so the not-yet-wired bin build stays warning-clean.
 #[derive(Debug, Clone)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct ChapterConflict {
     /// The chapter's path relative to the repo root (its file name).
     pub path: String,
@@ -35,7 +30,10 @@ pub struct ChapterConflict {
     /// The version fetched from the remote (preserved here, not written to disk).
     pub remote: String,
     /// The shared-ancestor version both sides diverged from (empty when the chapter
-    /// was added independently on both sides).
+    /// was added independently on both sides). The resolution overlay (#963) shows
+    /// only local ↔ remote today, so outside the tests (which pin the three-way
+    /// detection) nothing reads it yet — kept for a base-aware view.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub base: String,
 }
 
@@ -49,8 +47,8 @@ pub struct SyncOutcome {
     /// Paths of chapters that merged cleanly from the remote onto this machine
     /// (remote-only edits adopted). Empty on a pure fast-forward, which merges the
     /// whole tree at once rather than chapter-by-chapter. The summary already folds
-    /// the count in, so today the list itself is read only by the tests (and the
-    /// #963 UI to come) — annotated so the bin build stays warning-clean.
+    /// the count in, so the list itself is read only by the tests (which pin which
+    /// chapters merged) — annotated so the bin build stays warning-clean.
     #[cfg_attr(not(test), allow(dead_code))]
     pub merged: Vec<String>,
     /// Chapters changed on both sides — surfaced for resolution (#963), never

@@ -18,7 +18,7 @@ use crate::app::configure::validate_change;
 use crate::app::dispatch::vim_remap_actions;
 use crate::config;
 use crate::mode::{
-    Command, Mode, Palette, PaletteItem, Pending, SettingBool, SettingPicker, SettingPlacement,
+    Command, Mode, PaletteItem, Pending, SettingBool, SettingPicker, SettingPlacement,
     SettingTextKnob,
 };
 use crate::project::{read_existing, Project};
@@ -83,12 +83,7 @@ impl App {
                 Command::OpenSettingPicker(SettingPicker::KeyBindings),
             ),
         ]);
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Settings",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Settings", items);
     }
 
     /// Open the Settings sub-picker the menu row chose (#592).
@@ -116,12 +111,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Theme",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Theme", items);
     }
 
     /// Open the on/off picker for a boolean `[editor]` knob (#592).
@@ -130,12 +120,7 @@ impl App {
             PaletteItem::new("On", "", Command::SetSettingBool(knob, true)),
             PaletteItem::new("Off", "", Command::SetSettingBool(knob, false)),
         ];
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: knob.label(),
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette(knob.label(), items);
     }
 
     /// Open the theme-color editor (#1109): one row per overridable `[theme]`
@@ -157,12 +142,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Theme colors",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Theme colors", items);
     }
 
     /// Open the key-bindings editor (#1109): one row per remappable Vim action,
@@ -188,12 +168,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Key bindings",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Key bindings", items);
     }
 
     /// Set a boolean `[editor]` knob (#592): splice `true` / `false` through the

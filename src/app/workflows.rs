@@ -82,12 +82,7 @@ impl App {
             };
             PaletteItem::new(wf.name.clone(), desc, Command::RunWorkflow(i))
         }));
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Workflows",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Workflows", items);
     }
 
     /// The vocabulary an AI workflow draft (#232) may choose steps from: every

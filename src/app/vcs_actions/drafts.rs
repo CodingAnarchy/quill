@@ -22,9 +22,8 @@ use std::collections::BTreeMap;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::bible_review::unified_diff;
 use crate::mode::{ChapterConflictItem, ConflictReview, DraftsMenu, Mode, Pending};
-use crate::vcs::MergeOutcome;
+use crate::vcs::{ChapterConflict, MergeOutcome};
 
 use super::super::*;
 
@@ -279,16 +278,11 @@ impl App {
         &mut self,
         into: String,
         from: String,
-        conflicts: &[crate::vcs::ChapterConflict],
+        conflicts: &[ChapterConflict],
     ) {
         let items = conflicts
             .iter()
-            .map(|c| ChapterConflictItem {
-                path: c.path.clone(),
-                diff: unified_diff(&c.local, &c.remote),
-                local: c.local.clone(),
-                remote: c.remote.clone(),
-            })
+            .map(ChapterConflictItem::from)
             .collect::<Vec<_>>();
         let count = items.len();
         self.pending_draft_merge = Some((into, from));

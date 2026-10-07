@@ -39,12 +39,9 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Switch book",
-            items,
-            selected: active,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.mode = Mode::Palette(Box::new(
+            Palette::new("Switch book", items).with_selected(active),
+        ));
     }
 
     /// Make book `index` the active one (#329): flush the outgoing book's edits,
@@ -258,12 +255,7 @@ impl App {
             "append a new book to the series".to_string(),
             Command::AddBook,
         ));
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Manage books",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Manage books", items);
     }
 
     /// Confirm removing book `index` before touching any files (#648): its chapters

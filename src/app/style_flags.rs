@@ -92,18 +92,17 @@ impl App {
                 Command::PickStyleFlag(cat),
             )
         }));
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Style flags \u{2014} pick a category to sweep",
-            items,
-            selected: self.style_flag_category.map_or(0, |c| {
-                // Land the selection on the active category, past the "(off)" row.
-                FlagCategory::ALL
-                    .iter()
-                    .position(|&x| x == c)
-                    .map_or(0, |i| i + 1)
-            }),
-            collapsed: std::collections::HashSet::default(),
-        }));
+        // Land the selection on the active category, past the "(off)" row.
+        let selected = self.style_flag_category.map_or(0, |c| {
+            FlagCategory::ALL
+                .iter()
+                .position(|&x| x == c)
+                .map_or(0, |i| i + 1)
+        });
+        self.mode = Mode::Palette(Box::new(
+            Palette::new("Style flags \u{2014} pick a category to sweep", items)
+                .with_selected(selected),
+        ));
     }
 
     /// Turn on the sweep for `category` (#1001): mark it active, compute its flags,

@@ -18,6 +18,13 @@ mod routing;
 pub use routing::AiStart;
 
 impl App {
+    /// Open a flat palette titled `title` over `items`, on its first row with no
+    /// group collapsed — the common case; a palette needing a different starting
+    /// row or collapse state builds its [`Palette`] with the `with_*` builders.
+    pub(crate) fn open_palette(&mut self, title: &'static str, items: Vec<PaletteItem>) {
+        self.mode = Mode::Palette(Box::new(Palette::new(title, items)));
+    }
+
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
@@ -37,12 +44,7 @@ impl App {
                 Some(PaletteItem::new(label, desc, Command::Ai(s.action)))
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "AI",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("AI", items);
     }
 
     /// Open the unified run-action menu (#225): every *applicable* registry
@@ -75,12 +77,9 @@ impl App {
             })
             .collect();
         let collapsed = self.palette_collapsed_for("Run action", &items);
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Run action",
-            items,
-            selected: 0,
-            collapsed,
-        }));
+        self.mode = Mode::Palette(Box::new(
+            Palette::new("Run action", items).with_collapsed(collapsed),
+        ));
     }
 
     /// The collapse state a grouped palette opens with (#943): the author's
@@ -410,12 +409,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Insert snippet",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Insert snippet", items);
     }
 
     /// Insert the author-defined snippet's literal text at the cursor (#411),

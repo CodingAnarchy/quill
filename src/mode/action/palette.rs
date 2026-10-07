@@ -4,6 +4,8 @@
 //! `action.rs` to keep each file under the ~1,000-line convention; re-exported
 //! from the module root, so callers are unaffected. Pure move.
 
+use std::collections::HashSet;
+
 use super::Command;
 
 /// State for an open [`Mode::Palette`](crate::mode::Mode::Palette): the entries, the
@@ -17,7 +19,7 @@ pub struct Palette {
     pub(crate) selected: usize,
     /// Collapsed group headings — their items are hidden until expanded. Empty for
     /// a flat palette (every item ungrouped), which then renders exactly as before.
-    pub(crate) collapsed: std::collections::HashSet<&'static str>,
+    pub(crate) collapsed: HashSet<&'static str>,
 }
 
 /// One palette entry: a label, a one-line description, the command it runs, an
@@ -76,6 +78,29 @@ impl PaletteItem {
 }
 
 impl Palette {
+    /// A palette titled `title` over `items`, opening on the first row with every
+    /// group expanded — the shape nearly every palette opens with.
+    pub(crate) fn new(title: &'static str, items: Vec<PaletteItem>) -> Self {
+        Self {
+            title,
+            items,
+            selected: 0,
+            collapsed: HashSet::default(),
+        }
+    }
+
+    /// Open on visible row `selected` instead of the first (e.g. the active book).
+    pub(crate) const fn with_selected(mut self, selected: usize) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    /// Open with these group headings already collapsed (#943).
+    pub(crate) fn with_collapsed(mut self, collapsed: HashSet<&'static str>) -> Self {
+        self.collapsed = collapsed;
+        self
+    }
+
     /// The rows to show: a header before each group (an item whose group differs
     /// from the one above), then that group's items unless it's collapsed.
     /// Ungrouped items render flat with no header, so a palette with no groups

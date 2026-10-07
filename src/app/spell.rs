@@ -7,7 +7,7 @@
 //! the fields these touch stay defined in `mod.rs`.
 
 use crate::annotation::Remapper;
-use crate::mode::{Command, Mode, Palette, PaletteItem};
+use crate::mode::{Command, PaletteItem};
 
 use super::App;
 
@@ -199,12 +199,7 @@ impl App {
                 )
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Spelling suggestions \u{2014} pick a correction",
-            items,
-            selected: 0,
-            collapsed: std::collections::HashSet::default(),
-        }));
+        self.open_palette("Spelling suggestions \u{2014} pick a correction", items);
     }
 
     /// Replace the flagged word in byte range `[start, end)` with `replacement`

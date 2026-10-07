@@ -116,12 +116,9 @@ impl App {
         // sits under a collapsed group so the everyday whole-book formats stay up
         // top; the labels carry the chapter/part name, the (static) headers don't.
         let collapsed = self.append_sample_export_items(&mut items);
-        self.mode = Mode::Palette(Box::new(Palette {
-            title: "Export",
-            items,
-            selected: 0,
-            collapsed,
-        }));
+        self.mode = Mode::Palette(Box::new(
+            Palette::new("Export", items).with_collapsed(collapsed),
+        ));
     }
 
     /// Append the per-chapter / per-part / range sample-export entries (#584) to the
