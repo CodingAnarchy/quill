@@ -227,7 +227,13 @@ impl App {
     /// confirm.
     pub(crate) fn run_ai_action(&mut self, action: AiAction, force: bool) {
         match action {
-            AiAction::Ask => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
+            // The actions that take a free-text argument (#390) prompt for it.
+            AiAction::Ask
+            | AiAction::Brainstorm
+            | AiAction::DraftCharacters
+            | AiAction::DraftSetting
+            | AiAction::Accuracy
+            | AiAction::Relationship => self.prompt_ai_arg(action),
             AiAction::Characters => self.analyze_characters(force),
             AiAction::Continuity => self.analyze_continuity(force),
             AiAction::Setting => self.analyze_setting(force),
@@ -236,15 +242,6 @@ impl App {
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
-            AiAction::Brainstorm => {
-                self.open_prompt(Pending::Brainstorm, "Premise or idea: ", "", None);
-            }
-            AiAction::DraftCharacters => {
-                self.open_prompt(Pending::DraftCharacters, "Concept / premise: ", "", None);
-            }
-            AiAction::DraftSetting => {
-                self.open_prompt(Pending::DraftSetting, "Concept / premise: ", "", None);
-            }
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
             AiAction::Marketing => self.analyze_marketing(),
@@ -269,35 +266,64 @@ impl App {
             // the whole manuscript's rhythm and reports located observations, so it
             // runs directly.
             AiAction::Pacing => self.analyze_pacing(),
-            // Author-invoked accuracy (#973): prompt for the named concern first,
-            // then run. On the confirmed / cost-gated re-entry the concern is already
-            // captured, so spawn the pass instead of re-prompting.
-            AiAction::Accuracy => {
-                if self.accuracy_concern.is_some() {
-                    self.analyze_accuracy();
-                } else {
-                    self.open_prompt(
-                        Pending::AccuracyConcern,
-                        "Accuracy concern (e.g. 1850s London): ",
-                        "",
-                        None,
-                    );
-                }
+        }
+    }
+
+    /// Ask the author for an AI action's free-text argument (#390) — or, on the
+    /// cost-gated re-entry of an action whose argument was already captured (the
+    /// confirm runs [`run_ai_action`](Self::run_ai_action) again), run it with that
+    /// argument instead of re-prompting.
+    fn prompt_ai_arg(&mut self, action: AiAction) {
+        if let Some(text) = self.take_ai_arg(action) {
+            self.run_ai_arg(action, &text);
+        } else if let Some(arg) = action.arg() {
+            self.open_prompt(Pending::AiArg(action), arg.label, "", None);
+        }
+    }
+
+    /// The author submitted `action`'s argument prompt with `text` (trimmed). A
+    /// blank entry cancels where the action can't run without one. A
+    /// manuscript-costed pass (accuracy #973, relationship #1046) captures the
+    /// argument and goes through the normal cost gate, whose confirmed path
+    /// re-enters `run_ai_action` with the argument set; the rest run now.
+    pub(crate) fn submit_ai_arg(&mut self, action: AiAction, text: &str) {
+        let Some(arg) = action.arg() else {
+            return;
+        };
+        match arg.blank {
+            Some(blank) if text.is_empty() => self.message = Some(blank.into()),
+            _ if action.cost() == AiCost::Manuscript => {
+                self.pending_ai_arg = Some((action, text.to_string()));
+                self.start_ai_action(action, false);
             }
-            // Author-invoked relationship trajectory (#1046): prompt for the character
-            // pair first, then run. On the confirmed / cost-gated re-entry the pair is
-            // already captured, so spawn the pass instead of re-prompting.
-            AiAction::Relationship => {
-                if self.relationship_pair.is_some() {
-                    self.analyze_relationship();
-                } else {
-                    self.open_prompt(
-                        Pending::RelationshipPair,
-                        "Character pair (e.g. Alice / Bob): ",
-                        "",
-                        None,
-                    );
-                }
+            _ => self.run_ai_arg(action, text),
+        }
+    }
+
+    /// Run a text-argument AI action with its argument, ungated — the one dispatch
+    /// the prompt (after its cost gate) and the assistant (#390, which supplies the
+    /// argument itself) share. Every one of these returns notes, ideas, bible
+    /// entries, or findings — never manuscript prose.
+    pub(crate) fn run_ai_arg(&mut self, action: AiAction, text: &str) {
+        match action {
+            AiAction::Ask => self.ask_ai(text),
+            AiAction::Brainstorm => self.brainstorm(text),
+            AiAction::DraftCharacters => self.draft_characters(text),
+            AiAction::DraftSetting => self.draft_setting(text),
+            AiAction::Accuracy => self.analyze_accuracy(text),
+            AiAction::Relationship => self.analyze_relationship(text),
+            _ => {}
+        }
+    }
+
+    /// Take the argument captured for `action`'s cost-gated run, if any — only
+    /// `action`'s own, so another action's leftover never leaks into this one.
+    fn take_ai_arg(&mut self, action: AiAction) -> Option<String> {
+        match self.pending_ai_arg.take() {
+            Some((captured, text)) if captured == action => Some(text),
+            other => {
+                self.pending_ai_arg = other;
+                None
             }
         }
     }

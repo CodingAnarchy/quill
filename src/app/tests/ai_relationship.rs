@@ -182,7 +182,7 @@ fn the_action_prompts_for_a_pair() {
     app.run_ai_action(AiAction::Relationship, false);
     match &app.mode {
         Mode::Prompt(s) => {
-            assert!(matches!(s.pending, Pending::RelationshipPair));
+            assert!(matches!(s.pending, Pending::AiArg(AiAction::Relationship)));
             assert!(
                 s.label.contains("Character pair"),
                 "prompt asks for the chosen pair: {}",
@@ -202,7 +202,7 @@ fn submitting_a_pair_runs_the_pass_and_captures_it() {
     type_str(&mut app, "Alice / Bob");
     app.on_key(key(KeyCode::Enter)); // submit → captures the pair, dispatches
     assert!(
-        app.relationship_pair.is_none(),
+        app.pending_ai_arg.is_none(),
         "the pair is taken by the run, not left pending"
     );
     assert!(!matches!(app.mode, Mode::Prompt(_)), "the prompt closes");
@@ -214,7 +214,7 @@ fn a_blank_pair_cancels() {
     enable_ai(&mut app);
     app.run_ai_action(AiAction::Relationship, false);
     app.on_key(key(KeyCode::Enter)); // empty pair
-    assert!(app.relationship_pair.is_none());
+    assert!(app.pending_ai_arg.is_none());
     assert!(!app.ai_task.is_busy(), "nothing runs without a pair");
     assert!(
         app.message

@@ -160,7 +160,7 @@ fn the_action_prompts_for_a_concern() {
     app.run_ai_action(AiAction::Accuracy, false);
     match &app.mode {
         Mode::Prompt(s) => {
-            assert!(matches!(s.pending, Pending::AccuracyConcern));
+            assert!(matches!(s.pending, Pending::AiArg(AiAction::Accuracy)));
             assert!(
                 s.label.contains("Accuracy concern"),
                 "prompt asks for the named concern: {}",
@@ -183,7 +183,7 @@ fn submitting_a_concern_runs_the_pass_and_captures_it() {
                                      // the request kicked off on the worker (no live call — the key is a dummy, so it
                                      // resolves to a request in flight rather than a not-ready refusal).
     assert!(
-        app.accuracy_concern.is_none(),
+        app.pending_ai_arg.is_none(),
         "the concern is taken by the run, not left pending"
     );
     assert!(!matches!(app.mode, Mode::Prompt(_)), "the prompt closes");
@@ -195,7 +195,7 @@ fn a_blank_concern_cancels() {
     enable_ai(&mut app);
     app.run_ai_action(AiAction::Accuracy, false);
     app.on_key(key(KeyCode::Enter)); // empty concern
-    assert!(app.accuracy_concern.is_none());
+    assert!(app.pending_ai_arg.is_none());
     assert!(!app.ai_task.is_busy(), "nothing runs without a concern");
     assert!(
         app.message

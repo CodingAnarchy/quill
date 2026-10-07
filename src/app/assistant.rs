@@ -777,22 +777,9 @@ impl App {
     fn fire_text_action(&mut self, action: Action, text: &str) -> Step {
         self.message = None;
         match action {
-            Action::Ai(AiAction::Ask) => self.ask_ai(text),
-            Action::Ai(AiAction::Brainstorm) => self.brainstorm(text),
-            Action::Ai(AiAction::DraftCharacters) => self.draft_characters(text),
-            Action::Ai(AiAction::DraftSetting) => self.draft_setting(text),
-            // Author-invoked accuracy (#973): the model supplies the concern; capture
-            // it and run the read-only findings pass (no prose produced).
-            Action::Ai(AiAction::Accuracy) => {
-                self.accuracy_concern = Some(text.to_string());
-                self.analyze_accuracy();
-            }
-            // Author-invoked relationship trajectory (#1046): the model supplies the
-            // character pair; capture it and run the read-only findings pass (no prose).
-            Action::Ai(AiAction::Relationship) => {
-                self.relationship_pair = Some(text.to_string());
-                self.analyze_relationship();
-            }
+            // The model supplies the argument, so run straight past the prompt (and
+            // its cost gate) on the shared dispatch.
+            Action::Ai(a) if a.arg().is_some() => self.run_ai_arg(a, text),
             _ => return Step::Sync(format!("{} can't take an argument here.", action.label())),
         }
         if self.ai_task.is_busy() {
