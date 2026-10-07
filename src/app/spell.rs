@@ -11,11 +11,33 @@ use crate::mode::{Command, Mode, Palette, PaletteItem};
 
 use super::App;
 
+/// The inputs a full spell judgment depends on (#357): the edit buffer's content
+/// [`revision`](crate::buffer::Buffer::revision) (process-unique, so it also names
+/// which buffer), the project dictionary's generation, and the TODO marker. The
+/// bundled word list is fixed, so when these match, a re-judge would produce the
+/// same flags.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct SpellKey {
+    rev: u64,
+    dictionary: u64,
+    marker: String,
+}
+
 impl App {
-    /// Recompute the misspelled-word flags for the active buffer (#357), off the
-    /// keystroke path. The configured TODO marker is never flagged.
+    /// Bring the misspelled-word flags for the active buffer up to date (#357), off
+    /// the keystroke path. The configured TODO marker is never flagged.
+    ///
+    /// Skipped when nothing the judgment depends on has changed since the last full
+    /// pass ([`SpellKey`]) — an idle pass after a cursor move or a mouse hover costs
+    /// a few compares, not a whole-window copy and scan. Flags that were only
+    /// remapped through an edit burst don't count as judged: the edit moved the
+    /// revision, so the next call re-judges.
     pub(crate) fn refresh_spell_flags(&mut self) {
-        let marker = self.project.manifest.todo_marker().to_ascii_lowercase();
+        let key = self.spell_key();
+        if self.spell_judged.as_ref() == Some(&key) {
+            return;
+        }
+        let marker = key.marker.to_ascii_lowercase();
         // Refill the persistent scratch in place rather than allocating a fresh
         // whole-document `String` every idle tick (#780). Take it out so the
         // buffer read and the write target don't alias `self`, then put it back.
@@ -27,7 +49,17 @@ impl App {
             w.eq_ignore_ascii_case(&marker) || self.project.is_accepted(w)
         });
         self.spell_scratch = scratch;
-        self.spell_rev = self.edit_buffer().revision();
+        self.spell_rev = key.rev;
+        self.spell_judged = Some(key);
+    }
+
+    /// The current [`SpellKey`]: what a spell judgment run now would depend on.
+    fn spell_key(&self) -> SpellKey {
+        SpellKey {
+            rev: self.edit_buffer().revision(),
+            dictionary: self.project.dictionary_generation(),
+            marker: self.project.manifest.todo_marker().to_string(),
+        }
     }
 
     /// Carry the spell flags through a burst of edits (the deltas `mapper`

@@ -18,6 +18,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::annotation::{Annotation, AnnotationFile};
 use crate::atomic;
@@ -121,6 +122,10 @@ pub struct Project {
     /// invented names, places, coined terms — lowercased for case-insensitive
     /// matching. Loaded from `dictionary.txt` at the project root at open.
     dictionary: HashSet<String>,
+    /// A process-unique id for the dictionary's current contents, re-issued
+    /// whenever the set changes (open, reload, accept) — the cheap key the idle
+    /// spell pass uses to tell that an accepted word could change its flags.
+    dictionary_gen: u64,
     /// Inline author annotations (#302): notes anchored to chapter byte ranges,
     /// keyed by chapter file name. Loaded from `annotations.toml` at the project
     /// root at open; kept out of the chapter `.md` files so exports stay clean.
@@ -253,6 +258,7 @@ impl Project {
             books,
             active_book,
             dictionary,
+            dictionary_gen: next_dictionary_gen(),
             annotations,
             lock,
             read_only,
@@ -386,6 +392,7 @@ impl Project {
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),
+            dictionary_gen: next_dictionary_gen(),
             annotations: Vec::new(),
             lock,
             read_only: false,
@@ -607,6 +614,13 @@ impl Project {
         self.dictionary.contains(&word.to_lowercase())
     }
 
+    /// The dictionary's content generation: process-unique, re-issued whenever the
+    /// accepted-word set changes (and fresh for every opened project), so two equal
+    /// reads mean [`is_accepted`](Self::is_accepted) answers identically.
+    pub const fn dictionary_generation(&self) -> u64 {
+        self.dictionary_gen
+    }
+
     /// The path to the project's custom dictionary file (#935), whether or not it
     /// exists yet — the seam the in-app view/edit path opens in a pane so the author
     /// can read and hand-edit the accepted-word list directly.
@@ -621,6 +635,7 @@ impl Project {
     /// dictionary was actually touched (e.g. its edit pane closed), never per tick.
     pub fn reload_dictionary(&mut self) {
         self.dictionary = load_dictionary(&self.root);
+        self.dictionary_gen = next_dictionary_gen();
     }
 
     /// Accept `word` into the project's custom dictionary (#358): add it to the
@@ -647,6 +662,7 @@ impl Project {
         existing.push('\n');
         atomic::write(&path, existing.as_bytes())?;
         self.dictionary.insert(key);
+        self.dictionary_gen = next_dictionary_gen();
         Ok(true)
     }
 
@@ -764,6 +780,7 @@ impl Project {
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),
+            dictionary_gen: next_dictionary_gen(),
             annotations: Vec::new(),
             // An in-memory scratch project owns nothing on disk, so it holds no
             // instance lock and is writable (never read-only).
@@ -772,6 +789,13 @@ impl Project {
             busy_holder: None,
         }
     }
+}
+
+/// A fresh, never-before-issued [`Project::dictionary_generation`]: process-wide,
+/// so a switched-to project never shares a generation with the one it replaced.
+fn next_dictionary_gen() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Read the project's custom dictionary (#358) from `dictionary.txt` at `root`

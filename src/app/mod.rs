@@ -2,6 +2,7 @@
 //! editor-mode types live in [`crate::mode`].
 
 use crate::theme;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -172,10 +173,14 @@ impl App {
             spell_flags: Vec::new(),
             spell_rev: 0,
             spell_scratch: String::new(),
+            spell_judged: None,
             style_flag_category: None,
             style_flags: Vec::new(),
+            style_flags_key: None,
             proximity_repeats_on: false,
             proximity_repeats: Vec::new(),
+            proximity_key: None,
+            word_lists: RefCell::default(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
@@ -258,6 +263,7 @@ impl App {
             pending_recheck: None,
             pending_recheck_all: None,
             verify_baselines: std::collections::BTreeMap::new(),
+            verify_digests: RefCell::default(),
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,
@@ -269,6 +275,7 @@ impl App {
             pass_queue_run: None,
             pass_progress: Arc::new(Mutex::new(None)),
             batch_task: Task::idle(),
+            batch_record: None,
             batch_apply_book: std::cell::Cell::new(None),
             pending_recovery: None,
             recovery_written: false,
@@ -492,7 +499,9 @@ impl App {
         // A pause in typing ends the undo group, so one undo reverses the whole
         // burst (a word or phrase), not a single keystroke.
         self.edit_buffer_mut().seal_undo_group();
-        // Re-judge every word (the per-batch pass only remaps the flags).
+        // Re-judge every word (the per-batch pass only remaps the flags). This and
+        // the two revision passes below each skip their scan when nothing they
+        // read changed since the last one — a pause after a cursor move is free.
         self.refresh_spell_flags();
         self.refresh_style_flags();
         self.refresh_proximity_repeats();
@@ -531,6 +540,10 @@ impl App {
     /// still mid-burst). Called from the shared edit chokepoint
     /// ([`record_edit_location`](Self::record_edit_location)), never per draw.
     pub(crate) fn invalidate_revision_highlights(&mut self) {
+        // The caches no longer describe the text: the next refresh must rescan,
+        // even if its other inputs are unchanged.
+        self.style_flags_key = None;
+        self.proximity_key = None;
         if !self.style_flags.is_empty() {
             self.style_flags.clear();
         }

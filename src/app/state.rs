@@ -6,6 +6,7 @@
 //! sibling `app/` submodule, all of which spell the type `crate::app::App` (the
 //! re-export in `mod.rs` keeps that path resolving exactly as before).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -24,8 +25,8 @@ use super::panes::Split;
 use super::task::Task;
 use super::vcs_actions::VcMsg;
 use super::{
-    assist, backup, batch_update, corkboard, findings_store, models, pass_queue, qa_store,
-    series_bible, sprint, workflows, FoldState, GalleyState,
+    assist, backup, batch_update, corkboard, findings_store, models, pass_queue, proximity_repeats,
+    qa_store, reports, series_bible, spell, sprint, style_flags, workflows, FoldState, GalleyState,
 };
 
 pub struct App {
@@ -77,6 +78,12 @@ pub struct App {
     /// (#780), so `refresh_spell_flags` doesn't allocate a fresh whole-document
     /// `String` every idle tick — it refills this in place instead.
     pub(super) spell_scratch: String,
+    /// What the last full spell judgment ran against (#357): the buffer revision,
+    /// the dictionary generation, and the TODO marker. The idle pass skips the
+    /// whole-window copy and scan when all three still match. A remap through edit
+    /// deltas moves `spell_rev` but never this — remapped flags are not a fresh
+    /// judgment, so the next quiet pass after an edit still re-judges.
+    pub(super) spell_judged: Option<spell::SpellKey>,
     /// The style-flag category the author is sweeping (#1001), or `None` when the
     /// sweep is off. When set, its occurrences in the active buffer are underlined
     /// and `]r` / `[r` step between them; toggling it off clears the marks.
@@ -86,6 +93,10 @@ pub struct App {
     /// keystroke path or per draw) and underlined by the editor. Empty when no sweep
     /// is active.
     pub(crate) style_flags: Vec<(usize, usize)>,
+    /// The inputs `style_flags` were last computed from (buffer revision, category,
+    /// run-on threshold, word lists), so an idle pass with nothing changed — a
+    /// cursor move, a mouse hover — skips the rescan. `None` forces a recompute.
+    pub(super) style_flags_key: Option<style_flags::StyleKey>,
     /// Whether the near-proximity word-repeat marking is on (#1002): a deliberate
     /// revision-pass aid, off by default so it's never always-on noise. When on, the
     /// visible window's content words echoed within a short span dim-mark in place,
@@ -95,6 +106,15 @@ pub struct App {
     /// (#1002), recomputed on the idle tick (never the keystroke path or per draw)
     /// and dim-marked by the editor. Empty when the marking is off.
     pub(crate) proximity_repeats: Vec<(usize, usize)>,
+    /// The inputs `proximity_repeats` were last computed from (buffer revision and
+    /// word lists); an idle pass that matches skips the rescan. `None` forces one.
+    pub(super) proximity_key: Option<proximity_repeats::ProximityKey>,
+    /// The effective analysis word lists (#119), cached against the manifest's
+    /// `[analysis]` section they were built from, so the idle style / proximity
+    /// passes don't rebuild the stopword and filter-word sets every time. Compared
+    /// by value on each use, so any change to the section (settings edit, config
+    /// reload, project switch) rebuilds it.
+    pub(super) word_lists: RefCell<Option<reports::WordListsCache>>,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.
@@ -452,6 +472,11 @@ pub struct App {
     /// (subdirs are optional) — keying on the file alone would let one book's
     /// baseline clobber another's and compare a finding against the wrong book.
     pub(super) verify_baselines: std::collections::BTreeMap<(usize, String), String>,
+    /// Memoized chapter digests for "verify on idle" (#1053), keyed by `(book,
+    /// file)` and stamped with where the text came from (the live buffer's revision,
+    /// or the file's size and mtime), so an idle pass re-reads and re-digests only
+    /// a chapter that actually changed.
+    pub(super) verify_digests: RefCell<HashMap<(usize, String), assist::DigestMemo>>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests, merge)` — `merge` is `Some(preserve)` for one
@@ -505,6 +530,11 @@ pub struct App {
     /// submit/reconcile never blocks — nor is blocked by — an interactive AI pass.
     /// Polled each loop tick by [`App::poll_batch_update`].
     pub(super) batch_task: Task<Vec<batch_update::BatchTaskResult>>,
+    /// The durable batch record (`bible/.batch.toml`) as last read, so the idle
+    /// reconcile doesn't re-read and re-parse it every pass. Dropped whenever this
+    /// process writes the record, and re-read after a coarse interval in case
+    /// something else did.
+    pub(super) batch_record: Option<batch_update::BatchRecordCache>,
     /// The book a reconciled batch pass's bible write is being applied for (#950),
     /// so its findings are attributed to that book — the batch counterpart of the
     /// series-refresh / pass-queue `current_pass_book`. Set only while a reconciled

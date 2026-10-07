@@ -8,8 +8,10 @@
 //! `pending_recheck_all` + `apply_recheck_all` path the worker delivers into, with
 //! a mock response, so a resolved finding clears and an unchanged one is untouched.
 
-use super::*;
 use std::fs;
+use std::time::{Duration, SystemTime};
+
+use super::*;
 
 /// A continuity UI finding on `chapter`, tagged to the continuity pass so the
 /// idle verification can re-run it. Mirrors `apply_continuity`'s summary shape so a
@@ -340,5 +342,56 @@ fn a_baseline_is_keyed_by_book_so_a_series_shared_filename_does_not_collide() {
     assert!(
         !targets.contains(&f2),
         "book 2's finding is unchanged against its own baseline: {targets:?}"
+    );
+}
+
+#[test]
+fn a_saved_edit_to_the_active_chapter_is_re_verified() {
+    // The active chapter's text comes from the live buffer. Once the author saves
+    // (the edit has settled), its finding is due a re-check, even though nothing
+    // on disk moved under a non-active chapter.
+    let (mut app, _dir) = verify_app("verify-active-saved");
+    assert!(
+        app.verify_on_idle_targets().is_empty(),
+        "nothing changed yet"
+    );
+    type_str(&mut app, "revising ");
+    app.on_key(ctrl('s'));
+    assert!(!app.edit_dirty(), "the edit is saved");
+
+    assert_eq!(
+        app.verify_on_idle_targets(),
+        vec![ui_finding("One", "the locket changes color")],
+        "the saved active chapter's finding is marked for re-verify"
+    );
+}
+
+#[test]
+fn a_settled_chapter_file_is_re_verified_when_it_changes() {
+    // A chapter file last written long ago has its digest memoized against its size
+    // and mtime; a later rewrite must still be seen, including one of the same
+    // length (only the mtime moves).
+    let (app, dir) = verify_app("verify-settled-file");
+    let path = dir.join("two.md");
+    let set_age = |secs: u64| {
+        let when = SystemTime::now() - Duration::from_secs(secs);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    };
+    set_age(3600);
+    assert!(app.verify_on_idle_targets().is_empty(), "unchanged");
+    assert!(app.verify_on_idle_targets().is_empty(), "still unchanged");
+
+    // Same byte length as "second chapter\n", so only the mtime tells them apart.
+    fs::write(&path, "second chapteR\n").unwrap();
+    set_age(1800);
+    assert_eq!(
+        app.verify_on_idle_targets(),
+        vec![ui_finding("Two", "sunset happens twice")],
+        "the rewritten chapter's finding is marked for re-verify"
     );
 }

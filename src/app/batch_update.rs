@@ -22,6 +22,8 @@
 //! mirrors the durable pass queue (#923).
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::sequenced::plural;
 use super::*;
@@ -41,6 +43,19 @@ const TRACKERS: [AiAction; 5] = [
     AiAction::Plot,
     AiAction::Theme,
 ];
+
+/// How long the idle reconcile trusts its in-memory copy of the durable record
+/// before re-reading it. Every write this process makes drops the copy at once;
+/// this only bounds how long a change made some other way (another instance, a
+/// hand edit) goes unnoticed. Batches take minutes to hours, so it costs nothing.
+const RECORD_RELOAD: Duration = Duration::from_secs(30);
+
+/// The durable batch record as last read from `root`, and when.
+pub(super) struct BatchRecordCache {
+    root: PathBuf,
+    record: BatchUpdate,
+    loaded: Instant,
+}
 
 /// A single background-batch job's spec, assembled on the UI thread and handed to
 /// the worker: which tracker pass over which book, the request to run, and the
@@ -234,14 +249,13 @@ impl App {
         if !self.ai.background_batch_update || self.batch_task.is_busy() {
             return;
         }
-        let record = BatchUpdate::load(&self.project.root);
-        if record.is_empty() {
+        if self.cached_batch_record().is_empty() {
             return;
         }
         let Some(key) = self.ai.resolved_key() else {
             return; // no key to reach the batch API — leave them queued
         };
-        let batches = record.batches;
+        let batches = self.cached_batch_record().batches.clone();
         self.batch_task.spawn(move || {
             let backend = ClaudeBackend::new(key);
             batches
@@ -255,6 +269,27 @@ impl App {
                 })
                 .collect()
         });
+    }
+
+    /// The durable batch record for the idle reconcile, read from disk only when
+    /// there's no fresh in-memory copy for this project (none yet, this process
+    /// wrote it since, or it's older than [`RECORD_RELOAD`]) — so an idle pass with
+    /// nothing in flight is a few compares, not a file read and a TOML parse.
+    fn cached_batch_record(&mut self) -> &BatchUpdate {
+        let root = &self.project.root;
+        let fresh = self
+            .batch_record
+            .as_ref()
+            .is_some_and(|c| &c.root == root && c.loaded.elapsed() < RECORD_RELOAD);
+        if !fresh {
+            self.batch_record = None;
+        }
+        let cache = self.batch_record.get_or_insert_with(|| BatchRecordCache {
+            root: root.clone(),
+            record: BatchUpdate::load(root),
+            loaded: Instant::now(),
+        });
+        &cache.record
     }
 
     /// Poll the background-batch worker (#950), non-blocking, once per loop tick.
@@ -279,6 +314,9 @@ impl App {
         let mut failed: Vec<String> = Vec::new();
         let mut stale = 0usize;
         let root = self.project.root.clone();
+        // Every arm below may rewrite the durable record; the idle reconcile must
+        // re-read it rather than resubmit batches this pass just applied or dropped.
+        self.batch_record = None;
         for result in results {
             match result {
                 BatchTaskResult::Submitted(Ok(batch)) => {
@@ -421,6 +459,17 @@ impl App {
     /// are exercised network-free (#531).
     pub(crate) fn apply_batch_results_for_test(&mut self, results: Vec<BatchTaskResult>) {
         self.apply_batch_results(results);
+    }
+
+    /// The in-flight batch ids the idle reconcile would poll right now (test seam),
+    /// read through its in-memory copy of the record — so a test can assert that a
+    /// write this process made is seen, network-free.
+    pub(crate) fn reconcile_batch_ids_for_test(&mut self) -> Vec<String> {
+        self.cached_batch_record()
+            .batches
+            .iter()
+            .map(|b| b.batch_id.clone())
+            .collect()
     }
 
     /// The batch-discounted aggregate estimate the queue action would confirm (test

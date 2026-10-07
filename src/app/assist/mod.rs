@@ -36,6 +36,7 @@ mod workflow;
 mod writers;
 
 pub use ask::QaEntry;
+pub(in crate::app) use verify_idle::DigestMemo;
 
 /// A one-line status message for one or more failed writes (#153).
 pub(super) fn write_failure_message(failures: &[String]) -> String {

@@ -5,7 +5,15 @@
 use super::*;
 
 use crate::frontmatter::Band;
+use crate::project::Analysis;
 use crate::text::count_matches;
+
+/// The cached effective word lists (#119) and the `[analysis]` section they were
+/// built from — see [`App::analysis_word_lists`].
+pub(super) struct WordListsCache {
+    source: Option<Analysis>,
+    lists: Arc<analysis::WordLists>,
+}
 
 impl App {
     /// Open the progress report overlay (Ctrl-R, and the run-action menu #225).
@@ -363,12 +371,28 @@ impl App {
     /// sets adjusted by the project's `[analysis]` overrides. Shared by the analysis
     /// report and the style-flag sweep (#1001) so a flag matches exactly what the
     /// report counts.
-    pub(crate) fn analysis_word_lists(&self) -> analysis::WordLists {
+    ///
+    /// Cached: the sets are rebuilt only when the manifest's `[analysis]` section
+    /// differs from the one they were built from (compared by value, so a settings
+    /// edit, config reload, or project switch is picked up wherever it happened).
+    /// A rebuild is a new allocation, so callers can key their own caches on the
+    /// `Arc`'s identity.
+    pub(crate) fn analysis_word_lists(&self) -> Arc<analysis::WordLists> {
+        let source = &self.project.manifest.analysis;
+        let mut cache = self.word_lists.borrow_mut();
+        if let Some(c) = cache.as_ref().filter(|c| &c.source == source) {
+            return Arc::clone(&c.lists);
+        }
         let mut lists = analysis::WordLists::new();
-        if let Some(a) = &self.project.manifest.analysis {
+        if let Some(a) = source {
             lists.override_stopwords(&a.stopwords_add, &a.stopwords_remove);
             lists.override_filter_words(&a.filter_words_add, &a.filter_words_remove);
         }
+        let lists = Arc::new(lists);
+        *cache = Some(WordListsCache {
+            source: source.clone(),
+            lists: Arc::clone(&lists),
+        });
         lists
     }
 

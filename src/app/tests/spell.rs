@@ -357,3 +357,57 @@ fn the_settled_pass_keeps_spell_flags_on_their_words_while_typing() {
         "recomputed after the undo"
     );
 }
+
+#[test]
+fn a_quiet_pass_after_typing_re_judges_the_remapped_flags() {
+    // While typing the flags are only remapped, so a word typed mid-burst isn't
+    // judged yet. The quiet pass that follows must re-judge it, even though the
+    // remap kept the flags aligned with the current text.
+    let (mut app, _dir) = two_chapter_app("spell-quiet-rejudge");
+    app.buffer = Buffer::from_text("The fox\n");
+    app.on_idle();
+    assert!(app.spell_flags.is_empty());
+
+    for c in "quikc ".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+        app.on_input_settled();
+    }
+    assert!(app.spell_flags.is_empty(), "remapped, not yet re-judged");
+
+    app.on_quiet();
+    assert_eq!(app.spell_flags.len(), 1, "{:?}", app.spell_flags);
+    let (s, e) = app.spell_flags[0];
+    assert_eq!(&app.buffer.text()[s..e], "quikc");
+}
+
+#[test]
+fn a_cursor_only_quiet_pass_keeps_the_judged_flags() {
+    // Nothing the spell judgment reads changed, so the quiet pass leaves the flags
+    // alone rather than re-scanning the window. (A marker value stands in for the
+    // judged flags, so a rescan would visibly replace it.)
+    let (mut app, _dir) = two_chapter_app("spell-quiet-skip");
+    app.buffer = Buffer::from_text("The quikc fox\n");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 1);
+    let marker = vec![(0, 3)];
+    app.spell_flags.clone_from(&marker);
+
+    app.on_key(key(KeyCode::Right));
+    app.on_quiet();
+    assert_eq!(app.spell_flags, marker, "no rescan for a cursor move");
+}
+
+#[test]
+fn a_word_accepted_elsewhere_clears_on_the_next_quiet_pass() {
+    // The dictionary can grow outside the accept-at-cursor action (e.g. the
+    // add-these-names path, #303). The buffer is unchanged, but the next quiet pass
+    // must still re-judge against the new dictionary.
+    let (mut app, _dir) = two_chapter_app("spell-quiet-dictionary");
+    app.buffer = Buffer::from_text("Vashti walked on");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 1, "the invented name is flagged");
+
+    assert!(app.project.accept_word("Vashti").unwrap());
+    app.on_quiet();
+    assert!(app.spell_flags.is_empty(), "{:?}", app.spell_flags);
+}
