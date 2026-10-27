@@ -215,7 +215,7 @@ impl App {
     /// so the reloaded buffer is always a real chapter — never an orphan pointing at
     /// a now-deleted file. Returns the error so callers can report it; on failure the
     /// current project and buffer are left in place, exactly as before.
-    fn reload_project_after_vcs(&mut self) -> Result<(), String> {
+    pub(in crate::app) fn reload_project_after_vcs(&mut self) -> Result<(), String> {
         let prev_active = self.project.active_file().to_string();
         let mut project = Project::open(&self.project.root).map_err(|e| e.to_string())?;
         // Stay on the same chapter when the op left it in place; otherwise `open`

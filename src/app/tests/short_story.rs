@@ -3,13 +3,12 @@
 //! and the length category beside the word count.
 
 use super::*;
-use crate::config;
 use crate::mode::{Action, ListFilter, MetaField, Mode};
 use crate::project::{Project, ProjectTemplate};
 use crate::ui::render_to_string;
 
 /// A short story created from the template with `body` as its prose.
-fn story_app(name: &str, body: &str) -> (App, TempProject) {
+pub(super) fn story_app(name: &str, body: &str) -> (App, TempProject) {
     let dir = app_scratch_dir(name);
     let project = Project::create_with_template(&dir, ProjectTemplate::short_story()).unwrap();
     fs::write(project.active_path(), body).unwrap();
@@ -245,135 +244,4 @@ fn the_focused_outline_moves_story_scenes() {
         .as_deref()
         .unwrap_or("")
         .contains("no heading levels"));
-}
-
-// --- #1243: convert a one-chapter novel into a short story ---------------
-
-/// A novel project from a hand-written manifest plus `files` (name, contents).
-fn novel_app(name: &str, manifest: &str, files: &[(&str, &str)]) -> (App, TempProject) {
-    let dir = app_scratch_dir(name);
-    fs::write(Project::manifest_path(&dir), manifest).unwrap();
-    for (file, body) in files {
-        fs::write(dir.join(file), body).unwrap();
-    }
-    let app = open_test_app(&dir);
-    (app, TempProject::new(dir))
-}
-
-const ONE_CHAPTER: &str =
-    "title = \"Tide\"\n\n[[chapters]]\ntitle = \"Chapter 1\"\nfile = \"chapter-1.md\"\n";
-
-#[test]
-fn a_one_chapter_novel_converts_to_a_short_story_with_a_backup() {
-    let data = app_scratch_dir("story-convert-data");
-    config::set_data_dir(Some(data.clone()));
-    let (mut app, dir) = novel_app(
-        "story-convert",
-        ONE_CHAPTER,
-        &[("chapter-1.md", "The bell rang.\n")],
-    );
-    app.run_action(Action::ConvertToShortStory, false);
-    assert!(matches!(app.mode, Mode::Prompt(_)), "a confirm comes first");
-    app.on_key(key(KeyCode::Char('y')));
-
-    assert!(app.project.manifest.is_short_story());
-    assert_eq!(app.project.active_title(), Some("Tide"));
-    assert_eq!(
-        fs::read_to_string(dir.join("chapter-1.md")).unwrap(),
-        "The bell rang.\n",
-        "the prose is unchanged"
-    );
-    let reopened = Project::open(&dir).unwrap();
-    assert!(reopened.manifest.is_short_story());
-    // A restore point was archived before anything changed.
-    let backups: Vec<_> = fs::read_dir(data.join("backups"))
-        .unwrap()
-        .flat_map(|d| fs::read_dir(d.unwrap().path()).unwrap())
-        .map(|f| f.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert!(
-        backups.iter().any(|f| f.starts_with("pre-short-story-")),
-        "{backups:?}"
-    );
-    assert!(app
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("Restore point"));
-    config::set_data_dir(None);
-    fs::remove_dir_all(&data).ok();
-}
-
-#[test]
-fn declining_the_conversion_leaves_the_novel_alone() {
-    let (mut app, _dir) = novel_app(
-        "story-convert-no",
-        ONE_CHAPTER,
-        &[("chapter-1.md", "The bell rang.\n")],
-    );
-    app.run_action(Action::ConvertToShortStory, false);
-    app.on_key(key(KeyCode::Char('n')));
-    assert!(!app.project.manifest.is_short_story());
-}
-
-#[test]
-fn a_novel_with_several_chapters_or_parts_cannot_convert_and_says_why() {
-    let (mut app, _dir) = two_chapter_app("story-convert-two");
-    app.run_action(Action::ConvertToShortStory, false);
-    assert!(!matches!(app.mode, Mode::Prompt(_)));
-    assert!(!app.project.manifest.is_short_story());
-    let msg = app.message.clone().unwrap_or_default();
-    assert!(msg.contains("has 2"), "{msg}");
-
-    let (mut app, _dir) = novel_app(
-        "story-convert-parts",
-        "title = \"Tide\"\n\n[[parts]]\nname = \"One\"\nchapters = [1, 1]\n\n\
-         [[chapters]]\ntitle = \"C\"\nfile = \"c.md\"\n",
-        &[("c.md", "x\n")],
-    );
-    app.run_action(Action::ConvertToShortStory, false);
-    assert!(!app.project.manifest.is_short_story());
-    assert!(app.message.as_deref().unwrap_or("").contains("parts"));
-}
-
-#[test]
-fn front_matter_sections_stay_around_the_converted_story() {
-    let data = app_scratch_dir("story-convert-sections-data");
-    config::set_data_dir(Some(data.clone()));
-    let (mut app, _dir) = novel_app(
-        "story-convert-sections",
-        "title = \"Tide\"\n\n[[chapters]]\ntitle = \"For M\"\nfile = \"ded.md\"\n\n\
-         [[chapters]]\ntitle = \"Chapter 1\"\nfile = \"c.md\"\n",
-        &[
-            ("ded.md", "---\nrole: dedication\n---\nFor M.\n"),
-            ("c.md", "The bell rang.\n"),
-        ],
-    );
-    app.run_action(Action::ConvertToShortStory, false);
-    app.on_key(key(KeyCode::Char('y')));
-    assert!(app.project.manifest.is_short_story());
-    assert_eq!(app.project.manifest.chapters[0].title, "For M", "kept");
-    assert_eq!(app.project.manifest.chapters[1].title, "Tide");
-    assert!(app
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("front and back matter"));
-    config::set_data_dir(None);
-    fs::remove_dir_all(&data).ok();
-}
-
-#[test]
-fn a_versioned_project_records_a_milestone_before_converting() {
-    let (mut app, dir) = novel_app(
-        "story-convert-vcs",
-        ONE_CHAPTER,
-        &[("chapter-1.md", "The bell rang.\n")],
-    );
-    crate::vcs::init(&dir).unwrap();
-    app.run_action(Action::ConvertToShortStory, false);
-    app.on_key(key(KeyCode::Char('y')));
-    assert!(app.project.manifest.is_short_story());
-    let tags = crate::vcs::list_tags(&dir).unwrap();
-    assert!(tags.iter().any(|t| t.name.starts_with("pre-short-story-")));
 }

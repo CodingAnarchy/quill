@@ -209,6 +209,9 @@ pub struct App {
     /// author had already toggled on with Ctrl-O alone. `true` only while the
     /// browser is the reason the pane is visible.
     pub(crate) browser_opened_outline: bool,
+    /// Whether this session already checked the one-time "grow into a novel"
+    /// offer for a story past novella length (#1242), so the idle tick checks once.
+    pub(crate) novella_checked: bool,
     /// Whether the project is under version control (#54). Cached so the status
     /// bar needn't stat the filesystem every frame; set at open and after the
     /// author initializes a repository.

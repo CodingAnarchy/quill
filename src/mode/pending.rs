@@ -55,6 +55,8 @@ pub enum Pending {
     Merge { at: usize },
     /// y/N: convert this one-chapter novel into a short story (#1243).
     ConfirmToShortStory,
+    /// y/N: grow this short story into a novel, a chapter per scene (#1242).
+    ConfirmToNovel,
     /// Text input: title for the new tail chapter when splitting the active
     /// chapter at the cursor (#585); the chapter being split is at `at`.
     SplitChapter { at: usize },
@@ -327,6 +329,7 @@ impl Pending {
                 | Self::Delete { .. }
                 | Self::Merge { .. }
                 | Self::ConfirmToShortStory
+                | Self::ConfirmToNovel
                 | Self::ClearAnnotations
                 | Self::ConfirmAi { .. }
                 | Self::ConfirmRefreshBibles { .. }

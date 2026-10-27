@@ -34,7 +34,7 @@ const NOVELETTE_WORDS: usize = 7_500;
 
 /// Word count at which a work reaches novella length (SFWA's category) — past it,
 /// a short story has outgrown the form (#1242 offers to grow it into a novel).
-const NOVELLA_WORDS: usize = 17_500;
+pub const NOVELLA_WORDS: usize = 17_500;
 
 /// Below this, a piece is flash fiction.
 const FLASH_WORDS: usize = 1_000;

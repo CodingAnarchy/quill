@@ -76,6 +76,9 @@ pub enum Action {
     /// Turn a one-chapter novel into a short story (#1243), after a y/N confirm
     /// and a restore point.
     ConvertToShortStory,
+    /// Grow a short story into a novel, one chapter per scene (#1242), after a
+    /// y/N confirm and a restore point.
+    GrowIntoNovel,
     /// Set the book's title, subtitle, author, and series — the manifest fields
     /// also reachable from the chapter browser's single-letter keys (#571).
     BookDetails,
