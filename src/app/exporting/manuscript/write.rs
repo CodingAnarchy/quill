@@ -247,7 +247,14 @@ impl App {
             .unwrap_or(path)
             .display();
         self.message = Some(match result {
-            Ok(()) => format!("Exported to {shown}"),
+            Ok(()) => match self.missing_stories() {
+                0 => format!("Exported to {shown}"),
+                // A collection exports without stories it can't read (#1245).
+                n => format!(
+                    "Exported to {shown} — {n} missing {} left out (Ctrl-G to locate)",
+                    if n == 1 { "story" } else { "stories" }
+                ),
+            },
             Err(e) => format!("Export failed: {e}"),
         });
     }

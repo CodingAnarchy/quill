@@ -80,6 +80,20 @@ The other formats keep their usual look but treat the story as one piece: the
 Markdown, EPUB, and PDF exports don't repeat the title as a chapter heading, and
 the PDF has no one-line Contents page.
 
+## Collections
+
+A collection (see the user guide) exports as one book in every format: the
+collection's own front matter (an introduction, say), then each linked story in
+the collection's order, then its back matter. Each story starts on a new page under
+its title, with its credit line ("First published in …") set beneath the title
+when you've given it one, and the table of contents (Word, EPUB, PDF) lists every
+story. The stories are read from their own projects at export time, so an edit
+made in a story is in the next export with nothing to refresh. The Word export
+uses the novel manuscript layout (title page, contents, each story on a new page),
+which is what a publisher expects for a collection; the short story submission
+layout is for sending one story out. A story whose folder is missing is left out,
+and the export message says how many were.
+
 ## The design system
 
 Two per-project tables shape the designed exports — the EPUB and the print PDF.

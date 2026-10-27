@@ -2,8 +2,10 @@
 //! stories with their words and totals, opening one edits the story's own
 //! project, and adding, writing, crediting, and unlinking go through prompts.
 
+use std::io::{Cursor, Read};
+
 use super::*;
-use crate::mode::{Command, Mode, StoryCommand};
+use crate::mode::{Command, ExportFormat, ExportScope, Mode, StoryCommand};
 use crate::project::{Form, Project, ProjectTemplate, TEMPLATES};
 
 /// A collection at `<root>/collected` with one linked story at `<root>/bell`.
@@ -131,4 +133,117 @@ fn the_stories_action_is_only_for_collections() {
     assert!(app
         .action_status(crate::mode::Action::CollectionStories)
         .is_some());
+}
+
+// --- #1245: a collection exports as one volume ---------------------------
+
+/// [`collection_app`] plus a second story with a scene break, a credit line on
+/// the first story, and an introduction.
+fn full_collection_app(name: &str) -> (App, TempProject) {
+    let (app, root) = collection_app(name);
+    drop(app);
+    let tide = root.join("tide");
+    let mut story = Project::create_with_template(&tide, ProjectTemplate::short_story()).unwrap();
+    story.manifest.title = "Tide".into();
+    story.manifest.sync_story_title();
+    story.save_manifest().unwrap();
+    fs::write(story.active_path(), "The sea rose.\n\n* * *\n\nIt fell.\n").unwrap();
+    drop(story);
+    let mut collected = Project::open(root.join("collected")).unwrap();
+    collected.add_story(&tide).unwrap();
+    collected
+        .set_story_credit(0, "First published in Lightspeed, 2027")
+        .unwrap();
+    drop(collected);
+    fs::write(
+        root.join("collected/introduction.md"),
+        "---\nrole: introduction\n---\nThese stories are about the sea.\n",
+    )
+    .unwrap();
+    (open_test_app(&root.join("collected")), root)
+}
+
+/// The text of the one export file with extension `ext`.
+fn exported(root: &Path, ext: &str) -> Vec<u8> {
+    let dir = root.join("collected/export");
+    let path = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == ext))
+        .unwrap_or_else(|| panic!("no .{ext} in {}", dir.display()));
+    fs::read(path).unwrap()
+}
+
+#[test]
+fn a_collection_exports_its_pages_and_stories_in_order() {
+    let (mut app, root) = full_collection_app("coll-export-md");
+    app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
+    let md = String::from_utf8(exported(&root, "md")).unwrap();
+    let intro = md.find("These stories are about the sea.").unwrap();
+    let bell = md.find("## The Drowned Bell").unwrap();
+    let credit = md.find("First published in Lightspeed, 2027").unwrap();
+    let bell_text = md.find("It rang at low tide.").unwrap();
+    let tide = md.find("## Tide").unwrap();
+    assert!(
+        intro < bell && bell < credit && credit < bell_text && bell_text < tide,
+        "{md}"
+    );
+    assert!(md.contains("* * *"), "scene breaks pass through: {md}");
+}
+
+#[test]
+fn an_edit_to_a_story_shows_in_the_next_export() {
+    let (mut app, root) = full_collection_app("coll-export-fresh");
+    app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
+    fs::write(root.join("tide/story.md"), "The sea rose higher.\n").unwrap();
+    app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
+    let md = String::from_utf8(exported(&root, "md")).unwrap();
+    assert!(md.contains("The sea rose higher."), "{md}");
+}
+
+#[test]
+fn the_word_and_epub_exports_list_every_story() {
+    let (mut app, root) = full_collection_app("coll-export-docx");
+    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+    let docx = exported(&root, "docx");
+    let mut zip = zip::ZipArchive::new(Cursor::new(docx)).unwrap();
+    let mut xml = String::new();
+    zip.by_name("word/document.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(xml.contains("TOC \\o"), "a table of contents");
+    assert!(xml.contains("The Drowned Bell") && xml.contains("Tide"));
+
+    app.run_export(ExportFormat::Epub, ExportScope::ActiveBook);
+    let epub = exported(&root, "epub");
+    let mut zip = zip::ZipArchive::new(Cursor::new(epub)).unwrap();
+    let nav_name = zip
+        .file_names()
+        .find(|n| n.contains("nav"))
+        .unwrap()
+        .to_string();
+    let mut nav = String::new();
+    zip.by_name(&nav_name)
+        .unwrap()
+        .read_to_string(&mut nav)
+        .unwrap();
+    assert!(
+        nav.contains("The Drowned Bell") && nav.contains("Tide"),
+        "{nav}"
+    );
+}
+
+#[test]
+fn a_missing_story_is_left_out_and_named_in_the_message() {
+    let (mut app, root) = full_collection_app("coll-export-missing");
+    fs::rename(root.join("tide"), root.join("gone")).unwrap();
+    app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
+    let md = String::from_utf8(exported(&root, "md")).unwrap();
+    assert!(!md.contains("The sea rose."));
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("1 missing story"));
 }

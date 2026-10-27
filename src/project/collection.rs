@@ -17,7 +17,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
-use crate::frontmatter::{self, FrontMatter, Status};
+use crate::frontmatter::{self, Epigraph, FrontMatter, Status};
 
 use super::{sanitize_dir_name, Manifest, Project, ProjectTemplate, MANIFEST_NAME};
 
@@ -47,6 +47,16 @@ pub struct StoryInfo {
     pub title: String,
     pub words: usize,
     pub status: Option<Status>,
+}
+
+/// One linked story's text for a collection export (#1245): its title, its own
+/// epigraph, the collection's credit line for it, and its prose (front matter
+/// stripped), read from the story project at export time.
+pub struct StoryText {
+    pub title: String,
+    pub epigraph: Option<Epigraph>,
+    pub credit: Option<String>,
+    pub body: String,
 }
 
 impl StoryLink {
@@ -182,6 +192,27 @@ impl Project {
             self.save_manifest()?;
         }
         Ok(())
+    }
+
+    /// Linked story `index`'s title, epigraph, credit, and prose, read from its
+    /// project now so an export always has the latest text (#1245). Errors when
+    /// the story can't be read (its folder is missing, say).
+    pub fn story_text(&self, index: usize) -> io::Result<StoryText> {
+        let link = self
+            .manifest
+            .stories
+            .get(index)
+            .ok_or_else(|| invalid("no such story".into()))?;
+        let dir = self.root.join(&link.path);
+        let (manifest, file) = story_manifest(&dir)?;
+        let text = fs::read_to_string(dir.join(file))?;
+        let (front, body) = frontmatter::split(&text);
+        Ok(StoryText {
+            title: manifest.title,
+            epigraph: front.map(FrontMatter::from_raw).and_then(|f| f.epigraph()),
+            credit: link.credit.clone(),
+            body: body.to_string(),
+        })
     }
 
     /// The index of the link already pointing at `dir`, if any.
