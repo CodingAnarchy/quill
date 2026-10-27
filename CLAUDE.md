@@ -5,7 +5,10 @@ Quill is a terminal editor optimized for writing novels (Rust, `ratatui` +
 `tree-sitter-md`). See `README.md` for the product roadmap and `docs/` for the
 feature specs. Storage model: one chapter per file; a buffer holds one chapter
 (single-chapter view) or at most ~3 chapters (continuous view), never the whole
-novel.
+novel. A project's `form` (`src/project/form.rs`) is a novel (the default), a
+short story (one body chapter whose title mirrors the project title, structured by
+the scenes in `src/scenes.rs`), or a collection that links short story projects by
+relative path (`src/project/collection.rs`) rather than copying them.
 
 Chapter files may begin with a `---`-fenced YAML front matter block. Quill
 splits it off when loading (`src/frontmatter.rs`), keeps it out of the prose
