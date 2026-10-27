@@ -7,7 +7,7 @@ use super::super::super::*;
 
 use crate::config::AuthorConfig;
 use crate::export::{self, Chapter, Document, Part};
-use crate::frontmatter::Band;
+use crate::frontmatter::{Band, Epigraph};
 use crate::project::{front_chapter_count, part_at_body_position};
 
 impl App {
@@ -63,6 +63,18 @@ impl App {
                     }
                 }
             }
+        }
+
+        // A collection's body is its linked stories, read fresh from each story
+        // (#1245); its own chapters are the pages around them.
+        if span.is_none() && self.project.is_collection() {
+            for part in body_parts.drain(..) {
+                front.extend(part.chapters);
+            }
+            body_parts.push(Part {
+                name: None,
+                chapters: self.collection_stories(),
+            });
         }
 
         // The generated front-matter options (#820) are `[style]`-driven; resolve
@@ -145,6 +157,48 @@ impl App {
             lang: self.project.manifest.language.clone(),
             rights: pubmeta.rights,
         }
+    }
+
+    /// A collection's stories as export chapters, in the collection's order
+    /// (#1245): each story's title, its prose read from the story project now, and
+    /// its credit line set under the title (as an epigraph, or as the first line
+    /// when the story has its own epigraph). A story that can't be read (its
+    /// folder is missing) is left out — [`missing_stories`](Self::missing_stories)
+    /// counts them for the export message.
+    fn collection_stories(&self) -> Vec<Chapter> {
+        (0..self.project.manifest.stories.len())
+            .filter_map(|i| self.project.story_text(i).ok())
+            .map(|story| {
+                let body = export::strip_repeated_title(&story.body, &story.title);
+                let (epigraph, body) = match (story.epigraph, story.credit) {
+                    (Some(e), Some(credit)) => (Some(e), format!("{credit}\n\n{body}")),
+                    (None, Some(credit)) => (
+                        Some(Epigraph {
+                            text: credit,
+                            attribution: None,
+                        }),
+                        body,
+                    ),
+                    (epigraph, None) => (epigraph, body),
+                };
+                Chapter {
+                    title: story.title,
+                    epigraph,
+                    body,
+                    role: None,
+                }
+            })
+            .collect()
+    }
+
+    /// How many of a collection's stories can't be read for an export (#1245).
+    pub(super) fn missing_stories(&self) -> usize {
+        if !self.project.is_collection() {
+            return 0;
+        }
+        (0..self.project.manifest.stories.len())
+            .filter(|&i| self.project.story_text(i).is_err())
+            .count()
     }
 
     /// Build one chapter for export: its title, epigraph, and prose (front matter

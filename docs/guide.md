@@ -225,7 +225,8 @@ there is the story itself: it shows in the collection, and in the story when it'
 opened on its own. Ctrl-B returns to the collection. Links are stored relative to
 the collection (`path = "../the-drowned-bell"`), so moving the folders together
 keeps them working. If a story's folder goes missing, the list marks it and
-offers to locate it again.
+offers to locate it again. Exporting a collection (Ctrl-E) compiles every story
+into one book; see docs/export.md.
 
 A story that lives outside the collection's folder isn't in the collection's
 version-control repository: version control, sync, and backups treat each story
