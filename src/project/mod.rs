@@ -40,7 +40,8 @@ mod words;
 use annotations::load_annotations;
 #[cfg(test)]
 pub use annotations::write_count as annotation_writes;
-pub use form::{length_category, Form};
+pub use convert::GrownChapter;
+pub use form::{length_category, Form, NOVELLA_WORDS};
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 pub use io::read_existing;
 use io::{cache_chapter, record_read};

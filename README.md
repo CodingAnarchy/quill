@@ -46,8 +46,9 @@ keystrokes that stay out of the way.
   project (the "Short story" template, or `quill --short PATH`): one piece of
   prose with no chapter list or chapter commands, its scenes in the outline pane,
   and its length category (flash fiction, short story, novelette) beside the word
-  count. Scenes split at scene breaks, and a one-chapter novel converts into a
-  short story in one step.
+  count. Scenes split at scene breaks; a one-chapter novel converts into a short
+  story, and a story that outgrows the form grows into a novel, one chapter per
+  scene.
 - **Two editing views** — chapter-at-a-time (default) or a continuous
   manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
   to the right files, while never holding more than ~3 chapters in memory. As you

@@ -194,6 +194,16 @@ title becomes the story's title, and any front or back matter (a dedication, an
 afterword) stays before and after the story. A book with several chapters or with
 parts can't convert, and the command says why.
 
+Going the other way, "Grow into a novel" (Ctrl-K) turns a short story into a
+novel with one chapter per scene, after a confirmation that names how many
+chapters it will make and the same kind of restore point. A headed scene's
+chapter takes the heading as its title, an untitled one is "Chapter N", the scene
+breaks are dropped (a chapter boundary replaces them), and each scene's synopsis
+and status become its chapter's summary and status (done becomes final, draft
+stays draft). Notes anchored in a scene move to its chapter. The first time a
+story passes 17,500 words, Quill mentions the conversion once in the status bar;
+it never interrupts your typing and doesn't ask again for that project.
+
 In `book.toml` a short story carries `form = "short-story"` and a single chapter
 entry (its file is `story.md`). Everything else works as it does for a chapter:
 saving, front matter, spell check, notes, version control, goals, and AI passes.

@@ -117,6 +117,7 @@ mod similar;
 mod snippets;
 mod spell;
 mod sprint;
+mod story_conversion;
 mod style_flags;
 mod typed_passes;
 mod typography;

@@ -204,6 +204,10 @@ impl App {
             Action::ConvertToShortStory if self.project.manifest.is_short_story() => {
                 Some("this is already a short story".into())
             }
+            // Only a short story has scenes to grow into chapters (#1242).
+            Action::GrowIntoNovel if !self.project.manifest.is_short_story() => {
+                Some("only a short story grows into a novel".into())
+            }
             // The first chapter has nothing above it to merge into.
             Action::MergeChapter if self.project.active_index() == 0 => {
                 Some("no chapter above to merge into".into())
@@ -310,6 +314,7 @@ impl App {
             Action::SeriesTree => self.open_tree(),
             Action::RenameProject => self.prompt_rename_project(),
             Action::ConvertToShortStory => self.start_convert_to_short_story(),
+            Action::GrowIntoNovel => self.start_grow_into_novel(),
             Action::BookDetails => self.start_book_details(),
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),

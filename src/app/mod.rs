@@ -208,6 +208,7 @@ impl App {
             last_activity: std::time::Instant::now(),
             outline_visible: false,
             browser_opened_outline: false,
+            novella_checked: false,
             under_vc,
             vc_changes: 0,
             vc_status_dirty: false,
@@ -517,6 +518,9 @@ impl App {
         // opt-in is on; bounded to the open findings' changed chapters (content-digest
         // keyed), never a whole-manuscript sweep, and off the keystroke path.
         self.verify_findings_on_idle();
+        // Offer, once per project, to grow a short story past novella length into
+        // a novel (#1242) — a status line, never a prompt that interrupts typing.
+        self.offer_novel_growth();
     }
 
     /// Drop the revision-pass highlight caches on an edit (#1035), so the
