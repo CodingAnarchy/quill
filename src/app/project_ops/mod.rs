@@ -292,5 +292,6 @@ impl App {
 fn set_manifest_title(root: &Path, title: &str) -> std::io::Result<()> {
     let mut project = Project::open(root)?;
     project.manifest.title = title.to_string();
+    project.manifest.sync_story_title();
     project.save_manifest()
 }

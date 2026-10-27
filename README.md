@@ -42,6 +42,11 @@ keystrokes that stay out of the way.
 - **Project as a folder of chapters** — a `book.toml` manifest plus one
   Markdown file per chapter; create, rename, reorder, and delete chapters from
   the chapter browser (Ctrl-G) without touching the filesystem.
+- **Short stories** — anything shorter than a novella can be a short story
+  project (the "Short story" template, or `quill --short PATH`): one piece of
+  prose with no chapter list or chapter commands, its scenes in the outline pane,
+  and its length category (flash fiction, short story, novelette) beside the word
+  count.
 - **Two editing views** — chapter-at-a-time (default) or a continuous
   manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
   to the right files, while never holding more than ~3 chapters in memory. As you

@@ -65,6 +65,18 @@ impl App {
         if self.on_key_list_command::<NavList>(key) {
             return;
         }
+        // A short story has no chapter structure to edit (#1239): adding,
+        // renaming, splitting, merging, duplicating, or reordering its one story
+        // chapter would turn it back into a novel behind the author's back.
+        if self.project.manifest.is_short_story()
+            && matches!(
+                key.code,
+                KeyCode::Char('a' | 'r' | 'x' | 'M' | 'c' | 'K' | 'J' | '#')
+            )
+        {
+            self.message = Some("A short story has no chapters to restructure.".into());
+            return;
+        }
         match key.code {
             // Go to a chapter directly by number or title (#588): a prompt that
             // jumps without scrolling the list.

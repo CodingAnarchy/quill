@@ -112,6 +112,7 @@ mod research_notebook;
 mod resume;
 mod review_import;
 mod session_recap;
+mod short_story;
 mod similar;
 mod snippets;
 mod spell;

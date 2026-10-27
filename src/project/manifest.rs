@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 
-use super::Goals;
+use super::{Form, Goals};
 
 /// The current on-disk `book.toml` format version (#1097). Bumped only for a
 /// *breaking* format change — one that an older Quill couldn't read correctly, so
@@ -260,6 +260,10 @@ pub struct Manifest {
     /// This is bumped only for a change an older reader would misread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format_version: Option<u32>,
+    /// What kind of work this is (#1239): a novel (the default, never written) or
+    /// a short story. A scalar key, so it precedes the tables.
+    #[serde(default, skip_serializing_if = "Form::is_novel")]
+    pub form: Form,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
@@ -376,6 +380,41 @@ impl Manifest {
     /// front-to-body mapping the parts logic relies on.
     pub fn front_chapter_count(&self) -> usize {
         front_chapter_count(&self.chapters)
+    }
+
+    /// Whether this project is a short story (#1239): the short-story form with
+    /// exactly one body chapter. A short story an older Quill grew a second
+    /// chapter onto reads as a novel, so nothing hides chapters it really has.
+    pub fn is_short_story(&self) -> bool {
+        self.form == Form::ShortStory && self.body_chapter_count() == 1
+    }
+
+    /// How many chapters are body chapters — neither front nor back matter.
+    pub fn body_chapter_count(&self) -> usize {
+        self.chapters
+            .iter()
+            .filter(|c| Band::of(c.role) == Band::Body)
+            .count()
+    }
+
+    /// The index of a short story's one body chapter (#1239), or `None` for a novel.
+    pub fn story_chapter(&self) -> Option<usize> {
+        if !self.is_short_story() {
+            return None;
+        }
+        self.chapters
+            .iter()
+            .position(|c| Band::of(c.role) == Band::Body)
+    }
+
+    /// Keep a short story's chapter title equal to the project title (#1239): the
+    /// story has no separate chapter title to drift. A no-op for a novel.
+    pub fn sync_story_title(&mut self) {
+        if let Some(i) = self.story_chapter() {
+            if self.chapters[i].title != self.title {
+                self.chapters[i].title.clone_from(&self.title);
+            }
+        }
     }
 
     /// The configured TODO marker, defaulting to `xxx`.

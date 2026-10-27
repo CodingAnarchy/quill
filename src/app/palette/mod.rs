@@ -188,6 +188,17 @@ impl App {
             Action::SplitChapter | Action::MergeChapter if self.manuscript.is_some() => {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
+            // A short story is one piece with no chapter structure (#1239): splitting,
+            // merging, the cross-chapter corkboard, and series books don't apply.
+            Action::SplitChapter
+            | Action::MergeChapter
+            | Action::ManuscriptCorkboard
+            | Action::ManageBooks
+            | Action::SeriesTree
+                if self.project.manifest.is_short_story() =>
+            {
+                Some("a short story has no chapters".into())
+            }
             // The first chapter has nothing above it to merge into.
             Action::MergeChapter if self.project.active_index() == 0 => {
                 Some("no chapter above to merge into".into())

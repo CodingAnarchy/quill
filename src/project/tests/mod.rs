@@ -13,6 +13,7 @@ mod manifest;
 mod overrides;
 mod parts;
 mod perf;
+mod short_story;
 
 /// A fresh scratch directory for a hermetic project test, namespaced under
 /// `proj`. Shared by every submodule so each test builds its project in

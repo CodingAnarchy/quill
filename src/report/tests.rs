@@ -5,12 +5,13 @@
 //! digit grouping, and the deadline projection.
 
 use super::*;
-use crate::project::{Goals, Manifest};
+use crate::project::{Form, Goals, Manifest};
 use ratatui::style::Color;
 
 fn manifest() -> Manifest {
     Manifest {
         format_version: None,
+        form: Form::default(),
         title: "Red State Earth".into(),
         subtitle: None,
         author: None,

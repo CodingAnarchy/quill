@@ -163,6 +163,24 @@ your home directory, and Quill says so (set `[projects] home` to choose where
 books live). Passing an explicit path — `quill path/to/book` — always opens or
 creates that project directly, with no chooser.
 
+SHORT STORIES
+
+Anything shorter than a novella (flash fiction, a short story, a novelette) can be
+a short story project instead of a novel. Pick the "Short story" structure when
+creating a project, or run `quill --short path/to/story` from the command line. A
+short story is one piece of prose: there is no chapter list, no parts, and no
+chapter commands (add, rename, split, merge, reorder). The outline pane (Ctrl-O)
+shows the story's scenes under a SCENES label, and Ctrl-G focuses that scene
+outline rather than a chapter browser. The story's title is its project title, so
+renaming the book (Book details) renames the story. The status bar names the
+story's length category beside its word count: flash fiction under 1,000 words,
+short story under 7,500, novelette under 17,500, and "novella length" past that.
+The continuous view doesn't apply, since the story is already one piece.
+
+In `book.toml` a short story carries `form = "short-story"` and a single chapter
+entry (its file is `story.md`). Everything else works as it does for a chapter:
+saving, front matter, spell check, notes, version control, goals, and AI passes.
+
 If you always return to the same book, set open_last = true under [projects] and a
 bare `quill` reopens your most-recently-opened project directly instead of showing
 the chooser. It only affects a no-path launch from outside a project; an explicit

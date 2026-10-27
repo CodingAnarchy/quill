@@ -9,6 +9,8 @@
 //! part carries the titles of its (empty) chapter stubs; [`super::Project::create_with_template`]
 //! walks them through the existing `add_chapter`/manifest path.
 
+use super::Form;
+
 /// One structure template offered when creating a project. `parts` is empty for
 /// the "Empty" template (the historic single-blank-chapter default) and
 /// otherwise names each part alongside the titles of its empty chapter stubs.
@@ -20,6 +22,9 @@ pub struct ProjectTemplate {
     /// The named parts to scaffold, each with its chapter-stub titles. Empty for
     /// the "Empty" template, which falls back to a single blank starter chapter.
     pub parts: &'static [TemplatePart],
+    /// The project's form (#1239). A short story scaffolds its one story chapter
+    /// instead of parts or a "Chapter 1".
+    pub form: Form,
 }
 
 /// A named part in a template, plus the titles of the empty chapter stubs it
@@ -40,6 +45,7 @@ pub const TEMPLATES: &[ProjectTemplate] = &[
         name: "Empty",
         desc: "One blank chapter — start from scratch",
         parts: &[],
+        form: Form::Novel,
     },
     ProjectTemplate {
         name: "Three-act",
@@ -58,6 +64,13 @@ pub const TEMPLATES: &[ProjectTemplate] = &[
                 chapters: &["Climax", "Falling Action", "Resolution"],
             },
         ],
+        form: Form::Novel,
+    },
+    ProjectTemplate {
+        name: "Short story",
+        desc: "One piece of prose, structured by scenes — no chapters",
+        parts: &[],
+        form: Form::ShortStory,
     },
 ];
 
@@ -72,5 +85,13 @@ impl ProjectTemplate {
     /// default (a single blank chapter, no parts).
     pub const fn is_empty(&self) -> bool {
         self.parts.is_empty()
+    }
+
+    /// The "Short story" template (#1239), for `quill --short`.
+    pub fn short_story() -> &'static Self {
+        TEMPLATES
+            .iter()
+            .find(|t| t.form == Form::ShortStory)
+            .unwrap_or(&TEMPLATES[0])
     }
 }

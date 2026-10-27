@@ -89,6 +89,8 @@ impl App {
     /// Apply a book/series metadata edit to the manifest and persist it.
     fn set_book_meta(&mut self, f: impl FnOnce(&mut Manifest)) {
         f(&mut self.project.manifest);
+        // A short story's chapter title is its title (#1239): keep them one.
+        self.project.manifest.sync_story_title();
         if let Err(e) = self.project.save_manifest() {
             self.message = Some(format!("Save failed: {e}"));
         }
