@@ -18,6 +18,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::mode::{Mode, QuickSwitch, QuickTarget};
 use crate::syntax::{Heading, Syntax};
 
+use super::story::scene_entries;
 use super::App;
 
 /// The scene headings of a chapter body, extracted **without** a full tree-sitter
@@ -163,7 +164,15 @@ impl App {
             // prose, #165) `edit_buffer()` is that pane, not the chapter, so fall back
             // to the on-disk read for the active chapter too. Focusing away from a
             // chapter flushes it, so disk is current.
-            let headings = if ch == active && self.focus_shows_active_chapter() {
+            // A short story's targets are its scenes, split by breaks too (#1240).
+            let headings = if self.project.manifest.story_chapter() == Some(ch) {
+                if ch == active && self.focus_shows_active_chapter() {
+                    self.outline_entries().into_owned()
+                } else {
+                    let body = self.project.chapter_body(ch);
+                    scene_entries(&body, &Syntax::new(&body))
+                }
+            } else if ch == active && self.focus_shows_active_chapter() {
                 self.edit_buffer().syntax().headings().to_vec()
             } else {
                 // Extract the off-buffer chapter's headings without the full parse on

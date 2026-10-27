@@ -380,10 +380,12 @@ mod tests {
             SceneMeta {
                 synopsis: "The arrival: rain".into(),
                 status: SceneStatus::Done,
+                anchor: String::new(),
             },
             SceneMeta {
                 synopsis: "The meeting".into(),
                 status: SceneStatus::Stub,
+                anchor: String::new(),
             },
         ]);
         let read = fm.scenes();
@@ -409,10 +411,12 @@ mod tests {
             SceneMeta {
                 synopsis: "One".into(),
                 status: SceneStatus::Draft,
+                anchor: String::new(),
             },
             SceneMeta {
                 synopsis: "Two".into(),
                 status: SceneStatus::Draft,
+                anchor: String::new(),
             },
         ]);
         fm.set_status(Status::Final); // a key written after the block
@@ -421,6 +425,7 @@ mod tests {
             SceneMeta {
                 synopsis: "Only one now".into(),
                 status: SceneStatus::Done,
+                anchor: String::new(),
             },
             SceneMeta::default(),
         ]);
@@ -437,6 +442,7 @@ mod tests {
         fm.set_scenes(&[SceneMeta {
             synopsis: "A".into(),
             status: SceneStatus::Draft,
+            anchor: String::new(),
         }]);
         // All-blank entries clear the block back out.
         fm.set_scenes(&[SceneMeta::default(), SceneMeta::default()]);
@@ -519,6 +525,7 @@ mod tests {
         fm.set_scenes(&[SceneMeta {
             synopsis: "fresh".into(),
             status: SceneStatus::Done,
+            anchor: String::new(),
         }]);
         let read = fm.scenes();
         assert_eq!(read.len(), 1);

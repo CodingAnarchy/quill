@@ -9,6 +9,7 @@
 //! does, and a list longer than the pane still shows the Nav selection, the
 //! active chapter, and the totals line.
 
+use std::borrow::Cow;
 use std::ops::ControlFlow;
 use std::path::Path;
 
@@ -419,11 +420,13 @@ impl Pane for NavPane<'_> {
         // `app.buffer` holds that file, not the active chapter — so its headings must
         // not be nested under a chapter row. Treat the outline as empty then, leaving
         // the chapter list flat rather than mis-nesting the bible's sections.
-        let headings = if app.focus_shows_active_chapter() {
-            app.buffer.syntax().headings()
+        // A short story lists its scenes here rather than its headings (#1240).
+        let entries = if app.focus_shows_active_chapter() {
+            app.outline_entries()
         } else {
-            &[]
+            Cow::Borrowed(&[][..])
         };
+        let headings: &[Heading] = &entries;
         let current_heading = current_section(headings, app.buffer.cursor_byte());
         // When the outline is focused (#657), draw its selection cursor reversed.
         let outline_selected = match &app.mode {
