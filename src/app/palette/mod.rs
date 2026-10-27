@@ -199,6 +199,11 @@ impl App {
             {
                 Some("a short story has no chapters".into())
             }
+            // Already a short story: there's nothing to convert (#1243). A novel that
+            // can't convert still lists it, and running it says why.
+            Action::ConvertToShortStory if self.project.manifest.is_short_story() => {
+                Some("this is already a short story".into())
+            }
             // The first chapter has nothing above it to merge into.
             Action::MergeChapter if self.project.active_index() == 0 => {
                 Some("no chapter above to merge into".into())
@@ -304,6 +309,7 @@ impl App {
             Action::ManageBooks => self.open_manage_books(),
             Action::SeriesTree => self.open_tree(),
             Action::RenameProject => self.prompt_rename_project(),
+            Action::ConvertToShortStory => self.start_convert_to_short_story(),
             Action::BookDetails => self.start_book_details(),
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),

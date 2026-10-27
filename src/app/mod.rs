@@ -78,6 +78,7 @@ mod workflows;
 
 mod chapters;
 mod configure;
+mod conversion; // converting between a novel and a short story, with a restore point (#1243)
 mod cooccurrence;
 mod counts;
 mod launch;

@@ -186,6 +186,14 @@ prose and its break with it, so the story always has exactly one break between
 scenes and none at the start or end. A scene's synopsis and status stay with that
 scene when you reorder scenes, or add or delete one by typing a break.
 
+A novel with a single body chapter and no parts can become a short story: run
+"Convert to a short story" from Ctrl-K. Quill asks first, then records a restore
+point (a milestone when the project uses version control, otherwise a zip in the
+project's backups folder) and converts it; the prose doesn't change, the chapter's
+title becomes the story's title, and any front or back matter (a dedication, an
+afterword) stays before and after the story. A book with several chapters or with
+parts can't convert, and the command says why.
+
 In `book.toml` a short story carries `form = "short-story"` and a single chapter
 entry (its file is `story.md`). Everything else works as it does for a chapter:
 saving, front matter, spell check, notes, version control, goals, and AI passes.

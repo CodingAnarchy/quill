@@ -25,6 +25,7 @@ use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
 
 mod annotations;
+mod convert;
 pub mod extra_keys;
 mod form;
 mod goals;
