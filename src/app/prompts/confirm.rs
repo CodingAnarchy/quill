@@ -111,6 +111,7 @@ impl App {
             Pending::ConfirmRemoveBook { index } if yes => self.remove_book(index),
             Pending::ConfirmPortraits if yes => self.generate_portraits(),
             Pending::ConfirmScene if yes => self.generate_scene(),
+            Pending::ConfirmToShortStory if yes => self.convert_to_short_story_confirmed(),
             _ => self.decline_confirm(pending),
         }
     }
@@ -135,6 +136,7 @@ impl App {
             Pending::ConfirmEnableAi { .. } => "AI left off.",
             Pending::ConfirmRestoreBackup => "Restore cancelled.",
             Pending::ConfirmRemoveBook { .. } => "Book kept.",
+            Pending::ConfirmToShortStory => "Left as a novel.",
             _ => return,
         };
         self.message = Some(message.into());

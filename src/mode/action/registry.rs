@@ -73,6 +73,9 @@ pub enum Action {
     SeriesTree,
     /// Rename the open project's folder, matching it to the book title (#424).
     RenameProject,
+    /// Turn a one-chapter novel into a short story (#1243), after a y/N confirm
+    /// and a restore point.
+    ConvertToShortStory,
     /// Set the book's title, subtitle, author, and series — the manifest fields
     /// also reachable from the chapter browser's single-letter keys (#571).
     BookDetails,
