@@ -14,6 +14,8 @@ pub mod epub;
 pub mod pdf;
 pub mod preflight;
 pub mod scriv;
+#[cfg(test)]
+mod story_tests;
 pub mod style;
 
 pub use style::{EmbeddedFont, EmbeddedImage, ExportStyle, FontRole, FontStyle, ImageRole};
@@ -52,6 +54,38 @@ pub struct Document {
     pub parts: Vec<Part>,
     /// Back-matter sections (epilogue, appendix, …), in order.
     pub back: Vec<Chapter>,
+    /// Set for a short story (#1241): its body is one piece of prose, so no
+    /// writer gives it a chapter heading or a one-entry contents, and the Word
+    /// manuscript takes the short story submission layout.
+    pub story: Option<StoryMeta>,
+}
+
+/// What a short story's submission manuscript carries beyond the prose (#1241):
+/// the author's contact block and the story's word count.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StoryMeta {
+    /// The contact block, top-left of page one: name, address lines, email, phone.
+    pub contact: Vec<String>,
+    /// The story's exact word count, rounded for the manuscript by
+    /// [`approximate_words`].
+    pub words: usize,
+}
+
+/// The word count a submission manuscript states (#1241): "about 3,500 words",
+/// rounded to the nearest hundred — or to the nearest ten under 1,000, where a
+/// hundred is too coarse for flash fiction.
+pub fn approximate_words(words: usize) -> String {
+    let step = if words < 1_000 { 10 } else { 100 };
+    let rounded = ((words + step / 2) / step * step).max(step);
+    let digits = rounded.to_string();
+    let mut grouped = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    format!("about {grouped} words")
 }
 
 /// Book-level publishing metadata (#583): the fields a published book carries
@@ -170,6 +204,13 @@ impl Document {
     pub fn series_list_lines(&self) -> Vec<String> {
         series_list_lines(&self.series_books, &self.title)
     }
+
+    /// Whether `chapter` is a short story's body (#1241) — the prose that goes
+    /// under the book's own title, with no chapter heading of its own. A front or
+    /// back matter section of a story keeps its heading.
+    pub const fn is_story_body(&self, chapter: &Chapter) -> bool {
+        self.story.is_some() && chapter.role.is_none()
+    }
 }
 
 /// Render a [`Document`] as a single Markdown document (#190): a title block,
@@ -198,7 +239,10 @@ pub fn to_markdown(doc: &Document) -> String {
                 let _ = write!(out, "## {name}\n\n");
             }
             Block::Chapter(chapter) => {
-                let _ = write!(out, "## {}\n\n", chapter.title);
+                // A short story's body is the story itself, already titled above.
+                if !doc.is_story_body(chapter) {
+                    let _ = write!(out, "## {}\n\n", chapter.title);
+                }
                 if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
@@ -614,6 +658,7 @@ mod tests {
                 )],
             }],
             back: vec![],
+            story: None,
         }
     }
 
@@ -634,6 +679,7 @@ mod tests {
                 chapters: vec![chapter("Ch", None, body)],
             }],
             back: vec![],
+            story: None,
         };
         let md = to_markdown_series(
             &[book("Book One", "alpha"), book("Book Two", "beta")],
@@ -696,6 +742,7 @@ mod tests {
                 )],
             }],
             back: vec![],
+            story: None,
         };
         // The body is emitted verbatim, so the fence (and its literal `--`) survive.
         assert!(
@@ -726,6 +773,7 @@ mod tests {
                 )],
             }],
             back: vec![],
+            story: None,
         };
         assert!(
             to_markdown(&d).contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
@@ -875,6 +923,7 @@ mod tests {
                 chapters: vec![chapter("One", None, "Scene one.\n\n---\n\nScene two.")],
             }],
             back: vec![],
+            story: None,
         };
         assert!(
             to_markdown(&d).contains("Scene one.\n\n---\n\nScene two."),
@@ -897,6 +946,7 @@ mod tests {
             front: vec![],
             parts: vec![],
             back: vec![],
+            story: None,
         };
         let md = to_markdown(&d);
         assert!(

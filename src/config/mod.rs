@@ -51,8 +51,8 @@ pub use load::{forget_parsed, global_config_warning, load_section, LoadSession};
 pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
 pub use types::{
-    load_snippets, load_theme, BackupConfig, EditorConfig, EditorFlags, GeneralConfig,
-    ProjectsConfig, Snippet,
+    load_snippets, load_theme, AuthorConfig, BackupConfig, EditorConfig, EditorFlags,
+    GeneralConfig, ProjectsConfig, Snippet,
 };
 pub use types::{theme_color_overrides, theme_name};
 

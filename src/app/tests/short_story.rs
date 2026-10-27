@@ -2,8 +2,10 @@
 //! structure commands, the title edit keeping the story's chapter title in step,
 //! and the length category beside the word count.
 
+use std::io::{Cursor, Read};
+
 use super::*;
-use crate::mode::{Action, ListFilter, MetaField, Mode};
+use crate::mode::{Action, ExportFormat, ExportScope, ListFilter, MetaField, Mode};
 use crate::project::{Project, ProjectTemplate};
 use crate::ui::render_to_string;
 
@@ -244,4 +246,30 @@ fn the_focused_outline_moves_story_scenes() {
         .as_deref()
         .unwrap_or("")
         .contains("no heading levels"));
+}
+
+// --- #1241: a short story exports in submission format ------------------
+
+#[test]
+fn exporting_a_story_to_word_uses_the_submission_layout() {
+    let (mut app, dir) = story_app("story-export", "The bell rang.\n\n* * *\n\nNobody came.\n");
+    app.apply_meta(MetaField::BookTitle, "Tide");
+    app.apply_meta(MetaField::Author, "Mara Quill");
+    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+    let export = fs::read_dir(dir.join("export"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "docx"))
+        .expect("a .docx was written");
+    let mut zip = zip::ZipArchive::new(Cursor::new(fs::read(export).unwrap())).unwrap();
+    let mut xml = String::new();
+    zip.by_name("word/document.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    // The byline stands in for an unset [author] contact block.
+    assert!(xml.contains("Mara Quill"), "{xml}");
+    assert!(xml.contains("about 10 words"), "{xml}");
+    assert!(!xml.contains("TOC \\o"), "no contents");
+    assert!(xml.contains(">END<"));
 }

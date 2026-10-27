@@ -15,6 +15,10 @@ use crate::frontmatter::Epigraph;
 /// The `word/document.xml` for one book: the title block (manuscript only), then
 /// its parts/chapters, wrapped in the document shell.
 pub(super) fn document_xml(doc: &Document, profile: Profile) -> String {
+    // A short story's manuscript takes the submission layout (#1241).
+    if let (Profile::Manuscript, Some(story)) = (profile, &doc.story) {
+        return super::story::story_document_xml(doc, story);
+    }
     let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
     let mut body = String::new();
     if profile == Profile::Manuscript {
@@ -215,7 +219,7 @@ pub(super) fn toc_page() -> String {
 /// A part or chapter title. The manuscript profile opens a fresh page under a
 /// centered bold line; the Vellum profile tags it Heading 1 so Vellum splits
 /// chapters there and applies its own styling.
-fn heading(title: &str, profile: Profile) -> String {
+pub(super) fn heading(title: &str, profile: Profile) -> String {
     match profile {
         // `outlineLvl 0` marks the title as an outline-level-1 heading so the TOC
         // field collects it, without changing the centered bold look.
@@ -234,7 +238,7 @@ fn heading(title: &str, profile: Profile) -> String {
 /// divider; a heading line (`#`…) a centered bold line; otherwise a
 /// double-spaced, first-line-indented paragraph with `*`/`**` emphasis as
 /// italic/bold runs.
-fn prose_paragraph(prose: &Prose) -> String {
+pub(super) fn prose_paragraph(prose: &Prose) -> String {
     match prose {
         Prose::SceneBreak => para(
             r#"<w:spacing w:before="120" w:after="120" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,

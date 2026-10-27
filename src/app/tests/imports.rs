@@ -485,6 +485,7 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
             ],
         }],
         back: vec![],
+        story: None,
     };
     let source = std::env::temp_dir().join(format!("quill-ms-{}.docx", std::process::id()));
     fs::write(&source, to_docx(&doc, Profile::Vellum).unwrap()).unwrap();
@@ -641,6 +642,7 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
             ],
         }],
         back: vec![],
+        story: None,
     };
     let source = books_dir("import-scriv-src").join("Salt and Iron.scriv");
     write_scriv(&doc, &source).unwrap();

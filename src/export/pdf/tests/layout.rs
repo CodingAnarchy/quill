@@ -47,6 +47,7 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
             )],
         }],
         back: vec![],
+        story: None,
     };
     let bytes = to_pdf(&d, &plain()).unwrap();
     assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
@@ -76,6 +77,7 @@ fn a_fenced_block_renders_in_the_embedded_monospace_face() {
             )],
         }],
         back: vec![],
+        story: None,
     };
     let bytes = to_pdf(&mono, &plain()).unwrap();
     assert!(
@@ -156,6 +158,7 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
             chapters: vec![ch("One", None, "Body.")],
         }],
         back: vec![],
+        story: None,
     };
     let (w, h) = trim_points("6x9").unwrap();
     let screen = count(&to_pdf(&mini, &plain()).unwrap(), "/Type /Page /Parent");

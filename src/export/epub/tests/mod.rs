@@ -65,6 +65,7 @@ fn doc() -> Document {
             )],
         }],
         back: vec![chapter("Afterword", None, "After.")],
+        story: None,
     }
 }
 

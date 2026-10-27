@@ -56,6 +56,7 @@ fn doc() -> Document {
             )],
         }],
         back: vec![ch("Afterword", None, "After it all.")],
+        story: None,
     }
 }
 /// Whether the raw PDF bytes contain `needle` (avoids lossy-UTF-8 offset issues from

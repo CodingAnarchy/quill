@@ -15,6 +15,7 @@ mod body;
 mod package;
 mod review;
 mod series;
+mod story;
 #[cfg(test)]
 mod tests;
 
@@ -41,7 +42,10 @@ pub enum Profile {
 
 /// Compile a [`Document`] to the bytes of a `.docx` file in the given [`Profile`].
 pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
-    let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
+    let header = match (profile, &doc.story) {
+        (Profile::Manuscript, Some(_)) => story::story_header(doc),
+        _ => running_header(doc.author.as_deref(), Some(&doc.title), profile),
+    };
     build_docx(document_xml(doc, profile), profile, header)
 }
 

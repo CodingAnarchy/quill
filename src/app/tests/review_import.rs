@@ -36,6 +36,7 @@ fn review_docx(body: &str, notes: Vec<ReviewNote>) -> Vec<u8> {
             }],
         }],
         back: vec![],
+        story: None,
     };
     let chapter_notes: Vec<ChapterNotes> = vec![notes];
     to_docx_review(&doc, &chapter_notes).unwrap()

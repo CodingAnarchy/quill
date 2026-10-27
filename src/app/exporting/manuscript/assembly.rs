@@ -5,6 +5,7 @@
 
 use super::super::super::*;
 
+use crate::config::AuthorConfig;
 use crate::export::{self, Chapter, Document, Part};
 use crate::frontmatter::Band;
 use crate::project::{front_chapter_count, part_at_body_position};
@@ -82,7 +83,19 @@ impl App {
             front,
             parts: body_parts,
             back,
+            story: self.story_meta(active),
         }
+    }
+
+    /// A short story's submission details (#1241), or `None` for a novel: the
+    /// `[author]` contact block (falling back to the byline) and the story's word
+    /// count, its live buffer's when it's the open chapter.
+    fn story_meta(&self, active: usize) -> Option<export::StoryMeta> {
+        let story = self.project.manifest.story_chapter()?;
+        Some(export::StoryMeta {
+            contact: AuthorConfig::load().contact_lines(self.project.manifest.author.as_deref()),
+            words: self.chapter_word_count_with_active(story, active),
+        })
     }
 
     /// The series book list for the generated "also in this series" page (#820):
@@ -241,6 +254,7 @@ impl App {
             front,
             parts: body_parts,
             back,
+            story: None,
         }
     }
 }
