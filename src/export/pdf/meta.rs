@@ -93,6 +93,7 @@ impl Pdf {
             doc_title: String::new(),
             doc_author: String::new(),
             body_start: usize::MAX,
+            story: false,
         }
     }
 

@@ -248,6 +248,21 @@ home = "~/Writing"
 open_last = true
 ```
 
+## `[author]` — contact details for submissions
+
+Your contact details, written once in the home config, go at the top of every
+short story's Word manuscript (see [`docs/export.md`](export.md#short-stories)).
+Every key is optional: with none set, the manuscript carries the book's `author`
+byline alone.
+
+```toml
+[author]
+name = "Mara A. Quill"          # your legal name, if it differs from the byline
+address = ["12 Harbour Row", "Portsea, PO1 2AB"]
+email = "mara@example.com"
+phone = "+44 7700 900123"
+```
+
 ## `[snippets]` — text snippets
 
 Author-defined text snippets (#411): reusable bits of text (a scene-break glyph,

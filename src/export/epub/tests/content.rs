@@ -98,6 +98,7 @@ fn smart_typography_glyphs_pass_through() {
             )],
         }],
         back: vec![],
+        story: None,
     };
     let chap = part(
         &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
@@ -130,6 +131,7 @@ fn a_fenced_block_renders_as_verbatim_preformatted_xhtml() {
             )],
         }],
         back: vec![],
+        story: None,
     };
     let chap = part(
         &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
@@ -160,6 +162,7 @@ fn scene_break_renders_the_styled_glyph_default_unchanged() {
             chapters: vec![chapter("C", None, "A.\n\n---\n\nB.")],
         }],
         back: vec![],
+        story: None,
     };
     // Default style → the plain centered `#`, exactly as before.
     let plain = part(
@@ -203,6 +206,7 @@ fn heading_alignment_and_drop_cap_render_via_css() {
             chapters: vec![chapter("One", None, "First para.\n\nSecond para.")],
         }],
         back: vec![],
+        story: None,
     };
     let style = ExportStyle {
         heading_align: Some("left".into()),

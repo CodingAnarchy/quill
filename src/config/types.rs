@@ -378,6 +378,57 @@ pub struct ProjectsConfig {
     pub open_last: Option<bool>,
 }
 
+/// The `[author]` section (#1241): the author's contact details, written once
+/// in the home config and set at the top of every short story submission
+/// manuscript. Every field is optional; with none set the manuscript still
+/// exports, carrying just the book's author name.
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AuthorConfig {
+    /// The author's legal name for the contact block, when it differs from the
+    /// byline (`author` in `book.toml`).
+    pub name: Option<String>,
+    /// The postal address, one line per entry.
+    pub address: Vec<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+impl AuthorConfig {
+    /// Load the `[author]` section from the home config file (best-effort).
+    pub fn load() -> Self {
+        load_section("author")
+    }
+
+    /// The contact block's lines, in order: the name (falling back to `byline`),
+    /// the address lines, then email and phone. Empty when nothing is known.
+    pub fn contact_lines(&self, byline: Option<&str>) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(name) = self
+            .name
+            .as_deref()
+            .or(byline)
+            .filter(|n| !n.trim().is_empty())
+        {
+            lines.push(name.trim().to_string());
+        }
+        lines.extend(
+            self.address
+                .iter()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty()),
+        );
+        lines.extend(
+            [&self.email, &self.phone]
+                .into_iter()
+                .flatten()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+        );
+        lines
+    }
+}
+
 impl ProjectsConfig {
     /// Load the `[projects]` section from the home config file. Best-effort: a
     /// missing or unreadable file yields the defaults (no projects home).

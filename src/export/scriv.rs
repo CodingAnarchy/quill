@@ -292,6 +292,7 @@ mod tests {
                 )],
             }],
             back: vec![chapter("Epilogue", None, "After.")],
+            story: None,
         }
     }
 
@@ -373,6 +374,7 @@ mod tests {
                 chapters: vec![chapter("Ch", None, prose)],
             }],
             back: vec![],
+            story: None,
         };
         let dir = std::env::temp_dir()
             .join("quill-scriv-series-test")
@@ -460,6 +462,7 @@ mod tests {
                 chapters: vec![chapter("One", None, "Body.")],
             }],
             back: vec![],
+            story: None,
         };
         let dir = std::env::temp_dir()
             .join("quill-scriv-unnamed")

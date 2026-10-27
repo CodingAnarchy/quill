@@ -60,6 +60,7 @@ pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent:
 /// [`crate::date::utc_timestamp`].
 pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(style, &doc.publishing);
+    b.story = doc.story.is_some();
     b.add_cover_page(&doc.title);
     // The half-title (#820) is the leaf ahead of the full title page, when enabled.
     if doc.half_title {
@@ -171,6 +172,9 @@ struct Builder {
     /// The landmark hrefs (#604), captured as the front matter and the first body
     /// section are added, so [`Builder::finish`] can build the `landmarks` nav.
     landmarks: Landmarks,
+    /// A short story (#1241): its body chapter carries no `<h1>` of its own — the
+    /// title page already titles it.
+    story: bool,
 }
 
 /// The `landmarks` nav targets (#604): the cover page, the title page, and the
@@ -204,6 +208,7 @@ impl Builder {
             style: style.clone(),
             publishing: publishing.clone(),
             landmarks: Landmarks::default(),
+            story: false,
         }
     }
 
@@ -370,7 +375,13 @@ impl Builder {
         // — or a role with no distinct term — keeps the generic band semantic.
         let role_type = ch.role.and_then(crate::frontmatter::Role::epub_type);
         let epub_type = role_type.unwrap_or(band_type);
-        let href = self.add("chap", &ch.title, epub_type, &chapter_body(ch, &self.style));
+        let heading = !(self.story && ch.role.is_none());
+        let href = self.add(
+            "chap",
+            &ch.title,
+            epub_type,
+            &chapter_body(ch, &self.style, heading),
+        );
         if band_type == "bodymatter" {
             self.landmarks
                 .bodymatter
@@ -640,12 +651,15 @@ fn xhtml_doc(title: &str, epub_type: &str, body: &str, lang: &str) -> String {
 /// A chapter's XHTML: an optional chapter-heading image (#472), its title as
 /// `<h1>`, the epigraph set apart, then the prose blocks (scene breaks, inner
 /// headings, and emphasis-bearing paragraphs).
-fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
+fn chapter_body(ch: &Chapter, style: &ExportStyle, heading: bool) -> String {
     let mut out = String::new();
-    if let Some(img) = style.image(ImageRole::ChapterHeading) {
-        push_img(&mut out, "chapter-image", img);
+    // A short story's body has no heading of its own (#1241).
+    if heading {
+        if let Some(img) = style.image(ImageRole::ChapterHeading) {
+            push_img(&mut out, "chapter-image", img);
+        }
+        let _ = writeln!(out, "<h1>{}</h1>", xml_escape(&ch.title));
     }
-    let _ = writeln!(out, "<h1>{}</h1>", xml_escape(&ch.title));
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }

@@ -253,6 +253,7 @@ pub fn print_page_count(
 /// [`print_page_count`] (which reads the page count off it, #819).
 fn lay_out_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Pdf {
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
+    pdf.story = doc.story.is_some();
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
     pdf.set_info(&doc.title, doc.author.as_deref().unwrap_or(""));
     pdf.cover_page();
@@ -272,7 +273,12 @@ fn lay_out_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Pdf {
     pdf.series_list_page(&doc.series_list_lines());
     // Reserve the Contents page(s) in the front matter before the body is laid out,
     // so the body lands on the right pages; fill them once the folios are known.
-    let titles = doc_toc_titles(doc);
+    // A short story has no contents to list (#1241).
+    let titles = if pdf.story {
+        Vec::new()
+    } else {
+        doc_toc_titles(doc)
+    };
     let toc = pdf.reserve_contents(&titles);
     // Everything laid out so far is front matter (roman folios); the body starts here.
     pdf.begin_body();
@@ -389,6 +395,9 @@ struct Pdf {
     /// in lowercase roman; the body from here is Arabic starting at 1. `usize::MAX`
     /// until the body begins, so every page laid out so far counts as front matter.
     body_start: usize,
+    /// A short story (#1241): its body chapter is the story itself, set under the
+    /// title page with no chapter heading of its own.
+    story: bool,
 }
 
 impl Pdf {
@@ -405,8 +414,11 @@ impl Pdf {
             HEADING_LEADING * 4.0,
             HEADING_LEADING,
         );
-        let align = self.bits.heading_align;
-        self.heading_line(&ch.title, HEADING_SIZE, HEADING_LEADING * 1.6, align);
+        // A short story's body sits under the title page's title (#1241).
+        if !(self.story && ch.role.is_none()) {
+            let align = self.bits.heading_align;
+            self.heading_line(&ch.title, HEADING_SIZE, HEADING_LEADING * 1.6, align);
+        }
         if let Some(e) = &ch.epigraph {
             self.epigraph(e);
             self.y -= BODY_LEADING;

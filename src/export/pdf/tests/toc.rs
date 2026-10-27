@@ -43,6 +43,7 @@ fn a_series_bookmarks_every_book_in_order() {
             chapters: vec![ch("Ch", None, "Prose.")],
         }],
         back: vec![],
+        story: None,
     };
     let bytes = to_pdf_series(
         &[book("Book One"), book("Book Two")],
@@ -79,6 +80,7 @@ fn a_series_reprints_each_books_copyright_not_just_the_first() {
             chapters: vec![ch("Ch", None, "Prose.")],
         }],
         back: vec![],
+        story: None,
     };
     let bare = || book("Book One", PubMeta::default());
     // Only the *second* book carries metadata, so a first-book-only reader would
@@ -296,6 +298,7 @@ fn a_long_contents_flows_onto_a_second_page() {
             chapters: many,
         }],
         back: vec![],
+        story: None,
     };
     let (w, h) = trim_points("6x9").unwrap();
     let mut pdf = Pdf::new(

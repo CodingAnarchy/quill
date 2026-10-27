@@ -62,6 +62,24 @@ IngramSpark *format*; those stores take the standard print PDF and EPUB, prepare
 with the right trim and bleed (see [Prepare for KDP / IngramSpark](#prepare-for-kdp--ingramspark)).
 
 
+## Short stories
+
+A short story project (see the user guide) exports as a story rather than a
+book. The **Word** export is in standard short story manuscript format, ready to
+submit: your contact details single-spaced at the top left of page one (from the
+`[author]` section of your config, or just your byline when that's unset), the
+word count rounded to the nearest hundred at the top right ("about 3,500 words";
+the nearest ten under 1,000), the title and byline about a third of the way down,
+and the story starting right beneath them. There's no title page, no table of
+contents, no chapter heading, and no page break before the prose. Scenes are
+separated by a centered `#`, a centered END closes the story, and the running
+header reads `Surname / Short title / page`. A dedication or afterword follows the
+story on its own page.
+
+The other formats keep their usual look but treat the story as one piece: the
+Markdown, EPUB, and PDF exports don't repeat the title as a chapter heading, and
+the PDF has no one-line Contents page.
+
 ## The design system
 
 Two per-project tables shape the designed exports — the EPUB and the print PDF.
