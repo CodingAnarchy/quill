@@ -25,6 +25,7 @@ use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
 
 mod annotations;
+mod collection;
 mod convert;
 pub mod extra_keys;
 mod form;
@@ -40,6 +41,7 @@ mod words;
 use annotations::load_annotations;
 #[cfg(test)]
 pub use annotations::write_count as annotation_writes;
+pub use collection::{StoryLink, STORIES_DIR};
 pub use convert::GrownChapter;
 pub use form::{length_category, Form, NOVELLA_WORDS};
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
@@ -321,6 +323,10 @@ impl Project {
                 record_read(&mut project.damaged_chapters, &entry.file, outcome);
             }
         }
+        // A collection caches each linked story's details once, here (#1244).
+        if project.is_collection() {
+            project.refresh_stories();
+        }
         Ok(project)
     }
 
@@ -442,6 +448,8 @@ impl Project {
         };
         if template.form == Form::ShortStory {
             project.add_story_chapter()?;
+        } else if template.form == Form::Collection {
+            project.add_introduction()?;
         } else if template.is_empty() {
             project.add_default_chapter()?;
         } else {
@@ -499,6 +507,22 @@ impl Project {
         }
         self.active.clone_from(&entry.file);
         self.manifest.chapters.push(entry);
+        self.save_manifest()
+    }
+
+    /// Scaffold a collection (#1244): the collection form plus an empty
+    /// introduction, the collection's first page of its own. Stories are linked
+    /// in afterwards.
+    fn add_introduction(&mut self) -> std::io::Result<()> {
+        self.manifest.form = Form::Collection;
+        let entry = ChapterEntry::new("Introduction".into(), "introduction.md".into());
+        let path = self.root.join(&entry.file);
+        if !path.exists() {
+            atomic::write(&path, b"---\nrole: introduction\n---\n")?;
+        }
+        self.active.clone_from(&entry.file);
+        self.manifest.chapters.push(entry);
+        self.read_chapter_cache(0);
         self.save_manifest()
     }
 

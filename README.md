@@ -49,6 +49,9 @@ keystrokes that stay out of the way.
   count. Scenes split at scene breaks; a one-chapter novel converts into a short
   story, and a story that outgrows the form grows into a novel, one chapter per
   scene.
+- **Collections** — gather existing short stories into one volume by linking
+  their projects (never copying them), with a per-story credit line and the
+  collection's own introduction and afterword.
 - **Two editing views** — chapter-at-a-time (default) or a continuous
   manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
   to the right files, while never holding more than ~3 chapters in memory. As you

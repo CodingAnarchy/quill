@@ -49,6 +49,9 @@ pub enum Command {
         index: usize,
         up: bool,
     },
+    /// A collection's story list (#1244): open, reorder, unlink, credit, or
+    /// relocate a linked story, or add one.
+    Story(StoryCommand),
     /// Create the pending new project (its path stashed in `App::pending_manage`)
     /// with the structure template at this index in [`crate::project::TEMPLATES`]
     /// (#611).
@@ -253,4 +256,23 @@ pub enum PortraitChoice {
     All,
     /// The character at this index in the (sorted) bible list.
     One(usize),
+}
+
+/// What a row of a collection's story list does (#1244).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoryCommand {
+    /// Open linked story `index` — its own project, so edits land in the story.
+    Open(usize),
+    /// Move linked story `index` one place earlier (`up`) or later.
+    Move { index: usize, up: bool },
+    /// Edit linked story `index`'s collection-only credit line.
+    Credit(usize),
+    /// Unlink story `index` (confirmed); the story project is kept.
+    Remove(usize),
+    /// Point a missing story `index` at its new folder.
+    Locate(usize),
+    /// Link an existing short story project by its folder.
+    AddExisting,
+    /// Write a new short story inside the collection.
+    New,
 }

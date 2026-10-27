@@ -403,6 +403,8 @@ impl App {
             // in continuous view you just scroll across boundaries).
             KeyCode::Char('n') if self.manuscript.is_none() => self.next_chapter(),
             KeyCode::Char('p') if self.manuscript.is_none() => self.prev_chapter(),
+            // A collection's structure is its stories (#1244): Ctrl-G lists them.
+            KeyCode::Char('g') if self.project.is_collection() => self.open_stories(None),
             // A short story has no chapter list to browse (#1239): Ctrl-G focuses
             // its scene outline instead.
             KeyCode::Char('g') if self.project.manifest.is_short_story() => {

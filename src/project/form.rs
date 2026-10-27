@@ -1,5 +1,6 @@
-//! A project's form (#1239): a novel (the default, chapters and parts) or a short
-//! story — one piece of prose whose only structure is its scenes. Written to
+//! A project's form (#1239): a novel (the default, chapters and parts), a short
+//! story — one piece of prose whose only structure is its scenes — or a
+//! collection of linked short stories (#1244). Written to
 //! `book.toml` as a top-level `form = "short-story"`; absent means a novel, so
 //! every existing project is unchanged. Also holds the short-fiction length
 //! categories the status bar shows, so the thresholds live in one place.
@@ -20,6 +21,9 @@ pub enum Form {
     Novel,
     /// One continuous piece of prose shorter than a novella, structured by scenes.
     ShortStory,
+    /// A collection that links existing short story projects into one volume
+    /// (#1244); its own chapters are the collection's front and back matter.
+    Collection,
 }
 
 impl Form {

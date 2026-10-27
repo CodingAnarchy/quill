@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 
-use super::{Form, Goals};
+use super::{Form, Goals, StoryLink};
 
 /// The current on-disk `book.toml` format version (#1097). Bumped only for a
 /// *breaking* format change — one that an older Quill couldn't read correctly, so
@@ -333,6 +333,11 @@ pub struct Manifest {
     /// the report's per-part block is not rendered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<Vec<Part>>,
+    /// A collection's linked short stories, in order (#1244). Empty — and never
+    /// written — for a novel or a short story. An array of tables, so it follows
+    /// the scalar keys.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stories: Vec<StoryLink>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
 }

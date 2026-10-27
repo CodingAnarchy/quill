@@ -80,6 +80,7 @@ mod chapters_editing;
 mod chapters_filter;
 mod chapters_sections;
 mod clipboard;
+mod collection;
 mod configure;
 mod cooccurrence;
 mod corkboard;
