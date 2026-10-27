@@ -49,6 +49,11 @@ impl Epigraph {
 pub struct SceneMeta {
     pub synopsis: String,
     pub status: SceneStatus,
+    /// The scene's label when this entry was last written (#1240), written only
+    /// for a short story. A story's scenes appear and vanish as the author types
+    /// scene breaks, so its metadata is matched to scenes by this anchor first and
+    /// by position only as a fallback. Empty for a novel chapter's entries.
+    pub anchor: String,
 }
 
 impl SceneMeta {
@@ -187,6 +192,12 @@ impl FrontMatter {
             block.push_str("  status: ");
             block.push_str(scene.status.key());
             block.push('\n');
+            if !scene.anchor.is_empty() {
+                block.push_str(BLOCK_INDENT);
+                block.push_str("  anchor: ");
+                block.push_str(&quote_scalar(&scene.anchor));
+                block.push('\n');
+            }
         }
         self.replace_scenes(Some(&block));
     }
@@ -198,6 +209,8 @@ impl FrontMatter {
 fn apply_scene_field(scene: &mut SceneMeta, pair: &str) {
     if let Some(v) = pair.strip_prefix("synopsis:") {
         scene.synopsis = unquote(v.trim());
+    } else if let Some(v) = pair.strip_prefix("anchor:") {
+        scene.anchor = unquote(v.trim());
     } else if let Some(v) = pair.strip_prefix("status:") {
         if let Some(s) = SceneStatus::from_key(v) {
             scene.status = s;

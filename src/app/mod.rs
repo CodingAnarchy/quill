@@ -91,6 +91,7 @@ mod sequenced;
 mod series_bible;
 mod spell;
 pub mod sprint; // the writing-sprint state + status segment, read by the UI (#299)
+mod story; // a short story's scenes as outline / corkboard entries (#1240)
 mod style_flags; // the style-flag sweep: pick a category, step through it, underline it (#1001)
 mod tree;
 mod vim;

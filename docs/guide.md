@@ -177,6 +177,15 @@ story's length category beside its word count: flash fiction under 1,000 words,
 short story under 7,500, novelette under 17,500, and "novella length" past that.
 The continuous view doesn't apply, since the story is already one piece.
 
+A story's scenes are separated by scene breaks (a line of `* * *`, `***`, or
+`---`), and a `##` heading starts a scene too if you title them; a story with no
+breaks is one scene. The outline pane, Ctrl-G, quick switch (Ctrl-D), and the
+corkboard all list the scenes, labelling an untitled scene by its first line.
+Moving a scene on the corkboard (K / J), or in the focused outline, carries its
+prose and its break with it, so the story always has exactly one break between
+scenes and none at the start or end. A scene's synopsis and status stay with that
+scene when you reorder scenes, or add or delete one by typing a break.
+
 In `book.toml` a short story carries `form = "short-story"` and a single chapter
 entry (its file is `story.md`). Everything else works as it does for a chapter:
 saving, front matter, spell check, notes, version control, goals, and AI passes.

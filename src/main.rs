@@ -31,6 +31,7 @@ mod project;
 mod recent;
 mod recovery;
 mod report;
+mod scenes;
 mod spell;
 mod startup;
 mod syntax;

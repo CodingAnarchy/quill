@@ -27,6 +27,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use super::App;
 use crate::frontmatter::{self, FrontMatter, SceneMeta};
 use crate::mode::{Card, Corkboard, Mode, Pending};
+use crate::scenes::scene_label;
 use crate::syntax::{Heading, Syntax};
 
 /// One undoable cross-chapter scene move (#974): the source and destination
@@ -65,8 +66,11 @@ impl App {
         }
         let cards = self.corkboard_cards();
         if cards.is_empty() {
-            self.message =
-                Some("No scenes here — add a ## or ### heading to build the corkboard.".into());
+            self.message = Some(if self.editing_story() {
+                "No scenes yet — write some prose to build the corkboard.".into()
+            } else {
+                "No scenes here — add a ## or ### heading to build the corkboard.".into()
+            });
             return;
         }
         self.mode = Mode::Corkboard(Box::new(Corkboard {
@@ -109,6 +113,10 @@ impl App {
     /// the `#` chapter title is not a card (#698). Reads the already-parsed headings
     /// and a single slice per scene — no re-parse.
     pub(crate) fn corkboard_cards(&self) -> Vec<Card> {
+        // A short story's cards are its scenes, split by breaks too (#1240).
+        if self.editing_story() {
+            return self.story_cards();
+        }
         let buffer = self.edit_buffer();
         let text = buffer.text();
         let headings = buffer.syntax().headings();
@@ -256,6 +264,13 @@ impl App {
             return;
         }
         self.focus_chapter(chapter);
+        // A short story reorders by its own scene model (#1240), keeping exactly
+        // one break between scenes; it has no neighbouring chapter to cross into.
+        if !manuscript && self.editing_story() {
+            let to = self.move_story_scene(scene, dir).unwrap_or(scene);
+            self.reopen_board_for(false, chapter, to);
+            return;
+        }
         let buffer = self.edit_buffer();
         let text = buffer.text();
         let scenes = scenes(&text, buffer.syntax().headings());
@@ -578,6 +593,9 @@ impl App {
     /// heading with its sub-beats folded in, excluding the `#` chapter title. The
     /// count the metadata list is reconciled against before an edit.
     fn scene_count(&self) -> usize {
+        if self.editing_story() {
+            return self.story_scenes_now().1.len();
+        }
         let buffer = self.edit_buffer();
         scenes(&buffer.text(), buffer.syntax().headings()).len()
     }
@@ -586,12 +604,17 @@ impl App {
     /// aligns positionally with the scenes (#636 / #698): a shorter list pads with
     /// the default (blank synopsis, stub status), a longer one truncates. The one
     /// place that reads-then-normalizes before an edit.
-    fn chapter_scenes(&self, count: usize) -> Vec<SceneMeta> {
+    pub(super) fn chapter_scenes(&self, count: usize) -> Vec<SceneMeta> {
         let mut scenes = self
             .edit_buffer()
             .front_matter()
             .map(super::super::frontmatter::FrontMatter::scenes)
             .unwrap_or_default();
+        // A story's scenes come and go as breaks are typed (#1240): match its
+        // metadata by anchor rather than position.
+        if self.editing_story() {
+            return self.reconciled_story_meta(&scenes);
+        }
         scenes.resize(count, SceneMeta::default());
         scenes
     }
@@ -609,7 +632,7 @@ impl App {
     /// then persist. Used by reorder, which moves a body block and its metadata
     /// entry in one rewrite. Goes through [`crate::buffer::Buffer::replace_text`]
     /// (a structural rewrite, off the keystroke path), then writes the metadata.
-    fn rewrite_chapter(&mut self, body: &str, scenes: &[SceneMeta]) {
+    pub(super) fn rewrite_chapter(&mut self, body: &str, scenes: &[SceneMeta]) {
         self.buffer.replace_text(body);
         self.buffer.refresh_syntax(); // headings must be current before rebuilding cards
         self.buffer.front_matter_mut().set_scenes(scenes);
@@ -666,6 +689,39 @@ impl App {
             selected,
             manuscript,
         }));
+    }
+}
+
+impl App {
+    /// A short story's corkboard cards (#1240): one per scene, split by scene
+    /// breaks or `##` headings, labelled by heading or first line, with the
+    /// positional `scenes:` metadata like a chapter's.
+    fn story_cards(&self) -> Vec<Card> {
+        let (text, scenes) = self.story_scenes_now();
+        let meta = self.chapter_scenes(scenes.len());
+        scenes
+            .iter()
+            .zip(meta)
+            .map(|(s, meta)| {
+                let prose_line =
+                    first_prose_line(&text[line_end(&text, s.start).min(s.end)..s.end]);
+                Card {
+                    title: scene_label(&text, s),
+                    level: s.level,
+                    prose_line: if s.title.is_some() {
+                        prose_line
+                    } else {
+                        // An untitled card's title already is its first line.
+                        first_prose_line(&text[s.start..s.end])
+                    },
+                    synopsis: meta.synopsis,
+                    status: meta.status,
+                    start: s.start,
+                    chapter: None,
+                    chapter_title: String::new(),
+                }
+            })
+            .collect()
     }
 }
 

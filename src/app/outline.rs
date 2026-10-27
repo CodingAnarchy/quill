@@ -47,7 +47,7 @@ impl FilteredList for OutlineList {
     }
 
     fn len(app: &App) -> usize {
-        app.buffer.syntax().headings().len()
+        app.outline_entries().len()
     }
 
     fn matches(app: &App, index: usize, q: &str) -> bool {
@@ -84,10 +84,13 @@ impl App {
             self.message = Some("Focus a chapter (Ctrl-w w) to navigate its outline.".into());
             return;
         }
-        let headings = self.buffer.syntax().headings();
+        let headings = self.outline_entries();
         if headings.is_empty() {
-            self.message =
-                Some("No headings here — add a # heading to navigate the outline.".into());
+            self.message = Some(if self.editing_story() {
+                "No scenes yet — write some prose to navigate the outline.".into()
+            } else {
+                "No headings here — add a # heading to navigate the outline.".into()
+            });
             return;
         }
         // Land on the current section so focusing picks up where the cursor is.
@@ -123,7 +126,7 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        let len = self.buffer.syntax().headings().len();
+        let len = self.outline_entries().len();
         // Re-clamp against the live heading list every keystroke (#717): the list
         // can shrink between focusing the outline and now (an idle reparse after an
         // edit trims a heading), and a `selected` left past the end would make Enter
@@ -146,6 +149,21 @@ impl App {
             return;
         }
         match key.code {
+            // A story's outline lists scenes (#1240): they have no levels to
+            // promote, and moving one swaps it with its neighbouring scene.
+            KeyCode::Char('<' | '>') if self.editing_story() => {
+                self.message = Some("Scenes have no heading levels to change.".into());
+            }
+            KeyCode::Char('K' | '[' | 'J' | ']') if self.editing_story() => {
+                let dir = if matches!(key.code, KeyCode::Char('K' | '[')) {
+                    -1
+                } else {
+                    1
+                };
+                if let Some(to) = self.move_story_scene(selected, dir) {
+                    OutlineList::select(self, to);
+                }
+            }
             // Restructure the skeleton (#1008): promote/demote the heading's level,
             // or move the whole section past its sibling — one undoable gesture each.
             KeyCode::Char('<') => self.outline_reheading(selected, -1),
@@ -153,12 +171,7 @@ impl App {
             KeyCode::Char('K' | '[') => self.outline_move_section(selected, -1),
             KeyCode::Char('J' | ']') => self.outline_move_section(selected, 1),
             KeyCode::Enter if OutlineList::selected_matches(self) => {
-                let start = self
-                    .buffer
-                    .syntax()
-                    .headings()
-                    .get(selected)
-                    .map(|h| h.start);
+                let start = self.outline_entries().get(selected).map(|h| h.start);
                 // Leave a jump-back target (#825) so `` `` `` returns to where the
                 // author was reading before the outline sent them across the chapter.
                 self.push_jump();
@@ -186,9 +199,7 @@ impl App {
         if q.is_empty() {
             return true;
         }
-        self.buffer
-            .syntax()
-            .headings()
+        self.outline_entries()
             .get(index)
             .is_some_and(|h| h.title.to_lowercase().contains(q))
     }
