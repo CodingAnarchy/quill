@@ -38,6 +38,7 @@ fn manifest() -> Manifest {
             deadline: None,
         }),
         parts: None,
+        stories: Vec::new(),
         chapters: Vec::new(),
     }
 }

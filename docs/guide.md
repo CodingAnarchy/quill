@@ -208,6 +208,29 @@ In `book.toml` a short story carries `form = "short-story"` and a single chapter
 entry (its file is `story.md`). Everything else works as it does for a chapter:
 saving, front matter, spell check, notes, version control, goals, and AI passes.
 
+COLLECTIONS
+
+A collection gathers short stories you've already written into one volume
+without copying them. Create one with the "Collection" structure; it starts with
+an empty Introduction, and its own chapters are the collection's front and back
+matter (an introduction, acknowledgements, an afterword). Ctrl-G lists its
+stories in order with each one's word count and status, and the status line shows
+the total. From the list you can link an existing short story by its folder,
+write a new story inside the collection (it lands in `stories/` and opens), move a
+story up or down, set a credit line such as "First published in *Lightspeed*,
+2027", or remove a story from the collection, which never deletes the story.
+
+Opening a story from the list opens the story's own project, so an edit made
+there is the story itself: it shows in the collection, and in the story when it's
+opened on its own. Ctrl-B returns to the collection. Links are stored relative to
+the collection (`path = "../the-drowned-bell"`), so moving the folders together
+keeps them working. If a story's folder goes missing, the list marks it and
+offers to locate it again.
+
+A story that lives outside the collection's folder isn't in the collection's
+version-control repository: version control, sync, and backups treat each story
+as its own project. That's the cost of each story having one source of truth.
+
 If you always return to the same book, set open_last = true under [projects] and a
 bare `quill` reopens your most-recently-opened project directly instead of showing
 the chooser. It only affects a no-path launch from outside a project; an explicit

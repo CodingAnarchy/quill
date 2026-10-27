@@ -79,6 +79,9 @@ pub enum Action {
     /// Grow a short story into a novel, one chapter per scene (#1242), after a
     /// y/N confirm and a restore point.
     GrowIntoNovel,
+    /// A collection's story list (#1244): open, add, write, reorder, credit, and
+    /// unlink its stories.
+    CollectionStories,
     /// Set the book's title, subtitle, author, and series — the manifest fields
     /// also reachable from the chapter browser's single-letter keys (#571).
     BookDetails,

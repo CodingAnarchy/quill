@@ -94,6 +94,10 @@ impl App {
                     self.select(fallback);
                 }
             }
+            Pending::AddStoryPath => self.add_story(text),
+            Pending::NewStoryTitle => self.write_new_story(text),
+            Pending::StoryCredit { index } => self.set_story_credit(index, text),
+            Pending::LocateStory { index } => self.locate_story(index, text),
             Pending::NewChapter { at } => {
                 let sel = if text.is_empty() {
                     fallback

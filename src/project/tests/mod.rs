@@ -6,6 +6,7 @@
 use super::*;
 
 mod chapters;
+mod collection;
 mod dictionary;
 mod failed_reads;
 mod goals;

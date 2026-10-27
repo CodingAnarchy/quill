@@ -57,6 +57,17 @@ pub enum Pending {
     ConfirmToShortStory,
     /// y/N: grow this short story into a novel, a chapter per scene (#1242).
     ConfirmToNovel,
+    /// Text input: the folder of an existing short story to link into this
+    /// collection (#1244).
+    AddStoryPath,
+    /// Text input: the title of a new short story to write inside the collection.
+    NewStoryTitle,
+    /// Text input: linked story `index`'s credit line ("First published in …").
+    StoryCredit { index: usize },
+    /// Text input: the new folder of missing linked story `index`.
+    LocateStory { index: usize },
+    /// y/N: unlink story `index` from the collection (the story is kept).
+    ConfirmRemoveStory { index: usize },
     /// Text input: title for the new tail chapter when splitting the active
     /// chapter at the cursor (#585); the chapter being split is at `at`.
     SplitChapter { at: usize },
@@ -330,6 +341,7 @@ impl Pending {
                 | Self::Merge { .. }
                 | Self::ConfirmToShortStory
                 | Self::ConfirmToNovel
+                | Self::ConfirmRemoveStory { .. }
                 | Self::ClearAnnotations
                 | Self::ConfirmAi { .. }
                 | Self::ConfirmRefreshBibles { .. }

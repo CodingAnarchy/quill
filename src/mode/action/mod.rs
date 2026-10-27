@@ -22,7 +22,8 @@ mod table;
 
 pub use ai::{AiAction, AiCost, ModelWeight, Needs};
 pub use command::{
-    Command, FontTarget, PortraitChoice, SettingPicker, SettingTextKnob, StylePicker, StyleTextKnob,
+    Command, FontTarget, PortraitChoice, SettingPicker, SettingTextKnob, StoryCommand, StylePicker,
+    StyleTextKnob,
 };
 pub use palette::PaletteRow;
 pub use palette::{Palette, PaletteItem};

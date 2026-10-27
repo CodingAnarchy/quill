@@ -77,6 +77,7 @@ mod worker;
 mod workflows;
 
 mod chapters;
+mod collection; // a collection's linked short stories: list, add, write, reorder (#1244)
 mod configure;
 mod conversion; // converting between a novel and a short story, with a restore point (#1243)
 mod cooccurrence;

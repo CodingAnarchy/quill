@@ -72,6 +72,12 @@ pub const TEMPLATES: &[ProjectTemplate] = &[
         parts: &[],
         form: Form::ShortStory,
     },
+    ProjectTemplate {
+        name: "Collection",
+        desc: "Gather existing short stories into one volume",
+        parts: &[],
+        form: Form::Collection,
+    },
 ];
 
 impl ProjectTemplate {

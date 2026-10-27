@@ -204,6 +204,10 @@ impl App {
             Action::ConvertToShortStory if self.project.manifest.is_short_story() => {
                 Some("this is already a short story".into())
             }
+            // Only a collection has stories to list (#1244).
+            Action::CollectionStories if !self.project.is_collection() => {
+                Some("only a collection has stories".into())
+            }
             // Only a short story has scenes to grow into chapters (#1242).
             Action::GrowIntoNovel if !self.project.manifest.is_short_story() => {
                 Some("only a short story grows into a novel".into())
@@ -315,6 +319,7 @@ impl App {
             Action::RenameProject => self.prompt_rename_project(),
             Action::ConvertToShortStory => self.start_convert_to_short_story(),
             Action::GrowIntoNovel => self.start_grow_into_novel(),
+            Action::CollectionStories => self.open_stories(None),
             Action::BookDetails => self.start_book_details(),
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
@@ -546,6 +551,7 @@ impl App {
                     Some(Command::AddBook) => self.prompt_add_book(),
                     Some(Command::RemoveBook(i)) => self.confirm_remove_book(i),
                     Some(Command::MoveBook { index, up }) => self.move_book(index, up),
+                    Some(Command::Story(c)) => self.run_story_command(c),
                     Some(Command::NewProjectTemplate(i)) => self.create_project_with_template(i),
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     Some(Command::PickNameKind(k)) => self.prompt_namegen(k),

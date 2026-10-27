@@ -113,6 +113,7 @@ impl App {
             Pending::ConfirmScene if yes => self.generate_scene(),
             Pending::ConfirmToShortStory if yes => self.convert_to_short_story_confirmed(),
             Pending::ConfirmToNovel if yes => self.grow_into_novel_confirmed(),
+            Pending::ConfirmRemoveStory { index } if yes => self.remove_story(index),
             _ => self.decline_confirm(pending),
         }
     }
@@ -139,6 +140,7 @@ impl App {
             Pending::ConfirmRemoveBook { .. } => "Book kept.",
             Pending::ConfirmToShortStory => "Left as a novel.",
             Pending::ConfirmToNovel => "Left as a short story.",
+            Pending::ConfirmRemoveStory { .. } => "Story kept in the collection.",
             _ => return,
         };
         self.message = Some(message.into());
