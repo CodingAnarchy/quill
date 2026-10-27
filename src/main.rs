@@ -64,7 +64,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::app::App;
-use crate::project::Project;
+use crate::project::{Project, ProjectTemplate, MANIFEST_NAME};
 
 /// Whether the enhanced keyboard protocol was pushed at startup (#348), so
 /// teardown pops it only when we pushed it. Shared by the `Tui` drop guard and
@@ -102,21 +102,26 @@ enum Invocation {
     /// prompt for a series title and a first-book title, scaffold directly into
     /// the `[[books]]` shape, and open it.
     Series,
+    /// `quill --short <path>`: create a short story project there (#1239) and
+    /// open it. `None` when the path is missing, which is a usage error.
+    Short(Option<PathBuf>),
     /// `quill <path>`: open or create a project at this directory.
     Path(PathBuf),
     /// A bare `quill`: resolve a project via the startup chooser.
     NoArg,
 }
 
-/// Classify the first command-line argument into an [`Invocation`]. Pure (no
+/// Classify the command-line arguments into an [`Invocation`]. Pure (no
 /// filesystem or environment access) so the flag-vs-path decision is unit-testable
 /// and so a help/version query does zero filesystem work (#517/#516): the flag
-/// checks come first, then anything else is taken as a project path.
-fn parse_arg(arg: Option<&str>) -> Invocation {
+/// checks come first, then anything else is taken as a project path. `next` is the
+/// argument after the first, read only by `--short <path>`.
+fn parse_arg(arg: Option<&str>, next: Option<&str>) -> Invocation {
     match arg {
         Some("--help" | "-h") => Invocation::Help,
         Some("--version" | "-V") => Invocation::Version,
         Some("--series") => Invocation::Series,
+        Some("--short") => Invocation::Short(next.map(PathBuf::from)),
         Some(path) => Invocation::Path(PathBuf::from(path)),
         None => Invocation::NoArg,
     }
@@ -139,6 +144,8 @@ fn usage_text() -> String {
          Options:\n  \
          --series       Start a new multi-book series (prompts for the series\n                 \
          and first-book titles) and open it\n  \
+         --short PATH   Create a short story at PATH (one piece of prose,\n                 \
+         structured by scenes) and open it\n  \
          -h, --help     Print this help and exit\n  \
          -V, --version  Print version and exit\n\
          \n\
@@ -153,7 +160,8 @@ fn main() -> io::Result<()> {
     // flag-style argument prints and exits rather than being treated as a project
     // directory and scaffolding a junk folder named after the flag.
     let first_arg = std::env::args().nth(1);
-    let dir = match parse_arg(first_arg.as_deref()) {
+    let next_arg = std::env::args().nth(2);
+    let dir = match parse_arg(first_arg.as_deref(), next_arg.as_deref()) {
         Invocation::Help => {
             println!("{}", usage_text());
             return Ok(());
@@ -167,6 +175,14 @@ fn main() -> io::Result<()> {
         // `[[books]]` shape, and open it. A scaffold failure exits cleanly, like
         // the no-path new-project path.
         Invocation::Series => match start_new_series() {
+            Ok(dir) => dir,
+            Err(e) => {
+                eprintln!("quill: {e}");
+                std::process::exit(1);
+            }
+        },
+        // Create a short story there (#1239), then open it like any project.
+        Invocation::Short(path) => match start_short_story(path) {
             Ok(dir) => dir,
             Err(e) => {
                 eprintln!("quill: {e}");
@@ -379,6 +395,27 @@ fn start_new_series() -> io::Result<PathBuf> {
     // Scaffold directly into the `[[books]]` series shape — the on-disk result is
     // identical to a series built by converting a standalone in-app.
     Project::create_series(&root, &series_title, &first_book_title)?;
+    Ok(root)
+}
+
+/// Create a short story project at `path` for `quill --short` (#1239) and return
+/// its directory, so the usual open path loads it. A missing path or a folder
+/// that's already a project is an error: `--short` never converts an existing
+/// book behind the author's back.
+fn start_short_story(path: Option<PathBuf>) -> io::Result<PathBuf> {
+    let root = path.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--short needs a path: quill --short <PATH>",
+        )
+    })?;
+    if root.join(MANIFEST_NAME).exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} is already a Quill project", root.display()),
+        ));
+    }
+    Project::create_with_template(&root, ProjectTemplate::short_story())?;
     Ok(root)
 }
 
@@ -639,23 +676,33 @@ mod tests {
     fn parse_arg_classifies_flags_paths_and_no_arg() {
         // The help and version flags are recognized in both spellings (#517/#516)
         // and never treated as a path, so neither scaffolds a junk folder.
-        assert_eq!(parse_arg(Some("--help")), Invocation::Help);
-        assert_eq!(parse_arg(Some("-h")), Invocation::Help);
-        assert_eq!(parse_arg(Some("--version")), Invocation::Version);
-        assert_eq!(parse_arg(Some("-V")), Invocation::Version);
+        assert_eq!(parse_arg(Some("--help"), None), Invocation::Help);
+        assert_eq!(parse_arg(Some("-h"), None), Invocation::Help);
+        assert_eq!(parse_arg(Some("--version"), None), Invocation::Version);
+        assert_eq!(parse_arg(Some("-V"), None), Invocation::Version);
         // The new-series flag (#1135) is recognized and never treated as a path,
         // so it starts the series flow rather than scaffolding a `--series` folder.
-        assert_eq!(parse_arg(Some("--series")), Invocation::Series);
+        assert_eq!(parse_arg(Some("--series"), None), Invocation::Series);
+        // `--short` takes the story's path (#1239); a missing path is kept as
+        // `None` so main can report it rather than scaffold a `--short` folder.
+        assert_eq!(
+            parse_arg(Some("--short"), Some("/tmp/story")),
+            Invocation::Short(Some(PathBuf::from("/tmp/story")))
+        );
+        assert_eq!(parse_arg(Some("--short"), None), Invocation::Short(None));
         // Anything else is a project path; a bare launch is the no-arg case.
         assert_eq!(
-            parse_arg(Some("/tmp/book")),
+            parse_arg(Some("/tmp/book"), None),
             Invocation::Path(PathBuf::from("/tmp/book"))
         );
-        assert_eq!(parse_arg(None), Invocation::NoArg);
+        assert_eq!(parse_arg(None, None), Invocation::NoArg);
         // Near-misses are paths, not flags — `-v` and a bare `help` aren't the flag.
-        assert_eq!(parse_arg(Some("-v")), Invocation::Path(PathBuf::from("-v")));
         assert_eq!(
-            parse_arg(Some("help")),
+            parse_arg(Some("-v"), None),
+            Invocation::Path(PathBuf::from("-v"))
+        );
+        assert_eq!(
+            parse_arg(Some("help"), None),
             Invocation::Path(PathBuf::from("help"))
         );
     }
@@ -675,6 +722,7 @@ mod tests {
         assert!(usage.contains("--version"));
         // The new-series flag is documented (#1135).
         assert!(usage.contains("--series"), "documents --series: {usage}");
+        assert!(usage.contains("--short"), "documents --short: {usage}");
         assert!(
             usage.contains("projects home"),
             "explains the no-path behavior: {usage}"

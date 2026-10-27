@@ -262,6 +262,18 @@ fn band_header(band: Band) -> Line<'static> {
     ))
 }
 
+/// A short story's label row (#1239): "SCENES" and the story's word count,
+/// standing where a novel's chapter list would.
+fn story_line(words: usize, selected: bool) -> Line<'static> {
+    let mut style = Style::default()
+        .fg(theme::current().dim)
+        .add_modifier(Modifier::BOLD);
+    if selected {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    Line::from(Span::styled(format!("SCENES  {words}w"), style))
+}
+
 /// One row of the pane's scrolling list, before any styling — cheap to produce,
 /// so the pane can walk every row to place the scroll and only style the ones on
 /// screen.
@@ -277,6 +289,9 @@ enum Row {
     BandBlank,
     /// Chapter `index`, with its 1-based body number when the list is grouped.
     Chapter { index: usize, number: Option<usize> },
+    /// A short story's one body chapter (#1239), shown as a "SCENES" label over
+    /// its outline rather than as a chapter row — a story has no chapter list.
+    Story { index: usize },
     /// Heading `index` of the active chapter's nested outline.
     Heading(usize),
     /// The focused outline's filter line (#822).
@@ -299,6 +314,8 @@ struct RowModel<'a> {
     nav_query: Option<String>,
     /// Whether the list is grouped into bands (the project has sections, #181).
     grouped: bool,
+    /// A short story's chapter index (#1239), drawn as [`Row::Story`].
+    story: Option<usize>,
 }
 
 impl RowModel<'_> {
@@ -327,15 +344,23 @@ impl RowModel<'_> {
             // The band header is emitted lazily, just before the first matching
             // chapter of a band, so a filter that hides a whole band hides its
             // header too.
+            let is_story = Some(index) == self.story;
             if shown_band != Some(band) {
                 if shown_band.is_some() {
                     visit(Row::Gap)?;
                 }
-                visit(Row::Band(band))?;
-                visit(Row::BandBlank)?;
+                // A story's own row is its label, so it takes no band header.
+                if !is_story {
+                    visit(Row::Band(band))?;
+                    visit(Row::BandBlank)?;
+                }
                 shown_band = Some(band);
             }
-            visit(Row::Chapter { index, number })?;
+            visit(if is_story {
+                Row::Story { index }
+            } else {
+                Row::Chapter { index, number }
+            })?;
             if index == self.active {
                 for (i, h) in self.headings.iter().enumerate() {
                     // When the focused outline is filtered (#822), show only
@@ -442,6 +467,7 @@ impl Pane for NavPane<'_> {
             outline_typing: matches!(&app.mode, Mode::Outline { filter, .. } if filter.typing),
             nav_query: filtering.then(|| app.nav_query()),
             grouped,
+            story: app.project.manifest.story_chapter(),
         };
 
         // First pass: count the rows and find where the ones that must stay on
@@ -468,6 +494,15 @@ impl Pane for NavPane<'_> {
                     }
                     if Some(index) == nav_selected {
                         selected_row = Some((lead, total));
+                    }
+                }
+                Row::Story { index } => {
+                    if index == active {
+                        chapter_row = Some((total, total));
+                        block_end = total;
+                    }
+                    if Some(index) == nav_selected {
+                        selected_row = Some((total, total));
                     }
                 }
                 // Only the active chapter nests rows under it.
@@ -534,6 +569,10 @@ impl Pane for NavPane<'_> {
                             nav_selected == Some(index),
                         )
                     }
+                    Row::Story { index } => story_line(
+                        app.chapter_word_count_with_active(index, active),
+                        nav_selected == Some(index),
+                    ),
                     Row::Heading(i) => heading_line(
                         &headings[i],
                         Some(i) == current_heading,

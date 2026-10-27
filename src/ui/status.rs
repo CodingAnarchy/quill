@@ -5,6 +5,8 @@
 //! keep the render glue under the ~1,000-line convention; `StatusBar::render`
 //! (in `mod.rs`) assembles these into the drawn line.
 
+use std::ptr;
+
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -18,6 +20,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::App;
 use crate::buffer::count_words;
 use crate::mode::{Mode, PromptState, Search, SearchStage};
+use crate::project::length_category;
 use crate::theme::Theme;
 use crate::wrap::{row_starts_first_indent, visual_pos};
 
@@ -375,9 +378,19 @@ pub(super) fn editor_status_bar(app: &App, active: usize) -> (String, String) {
                     buffer.line_count()
                 );
             }
+            let words = buffer.word_count();
+            // A short story names its length category beside the count (#1239) —
+            // only for the story itself, not a reference file swapped into focus.
+            let category = if app.manuscript.is_none()
+                && ptr::eq(buffer, &app.buffer)
+                && app.project.manifest.story_chapter() == Some(active)
+            {
+                format!(" · {}", length_category(words))
+            } else {
+                String::new()
+            };
             format!(
-                "{} words · ln {}/{}  ",
-                buffer.word_count(),
+                "{words} words{category} · ln {}/{}  ",
                 buffer.cursor.line + 1,
                 buffer.line_count()
             )

@@ -14,6 +14,9 @@ impl App {
     pub(super) fn toggle_continuous(&mut self) {
         if self.manuscript.is_some() {
             self.leave_continuous();
+        } else if self.project.manifest.is_short_story() {
+            // A short story is already one continuous piece (#1239).
+            self.message = Some("A short story is already one continuous piece.".into());
         } else {
             self.enter_continuous();
         }

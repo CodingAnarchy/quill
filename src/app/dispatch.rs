@@ -403,6 +403,12 @@ impl App {
             // in continuous view you just scroll across boundaries).
             KeyCode::Char('n') if self.manuscript.is_none() => self.next_chapter(),
             KeyCode::Char('p') if self.manuscript.is_none() => self.prev_chapter(),
+            // A short story has no chapter list to browse (#1239): Ctrl-G focuses
+            // its scene outline instead.
+            KeyCode::Char('g') if self.project.manifest.is_short_story() => {
+                self.outline_visible = true;
+                self.focus_outline();
+            }
             // Focus the chapter pane to browse. Chapter structure is edited in
             // the single-chapter view, so leave continuous first.
             KeyCode::Char('g') => {

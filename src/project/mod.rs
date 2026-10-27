@@ -26,6 +26,7 @@ use crate::frontmatter::{Band, FrontMatter, Role, Status};
 
 mod annotations;
 pub mod extra_keys;
+mod form;
 mod goals;
 mod io;
 mod lock;
@@ -38,6 +39,7 @@ mod words;
 use annotations::load_annotations;
 #[cfg(test)]
 pub use annotations::write_count as annotation_writes;
+pub use form::{length_category, Form};
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 pub use io::read_existing;
 use io::{cache_chapter, record_read};
@@ -230,6 +232,9 @@ impl Project {
         // seam a future breaking format change hangs its translation on, so the
         // format can evolve without a hard break at load.
         manifest.migrate();
+        // A short story's chapter title mirrors its title (#1239); heal a hand edit
+        // in memory so every view agrees (the next save writes it back).
+        manifest.sync_story_title();
 
         // Repair any hand-broken part ranges (inverted or zero-based) to the
         // `Part` invariant before any mapping code reads them — an inverted range
@@ -433,7 +438,9 @@ impl Project {
             busy_holder: None,
             damaged_chapters: HashSet::new(),
         };
-        if template.is_empty() {
+        if template.form == Form::ShortStory {
+            project.add_story_chapter()?;
+        } else if template.is_empty() {
             project.add_default_chapter()?;
         } else {
             project.scaffold_template(template)?;
@@ -479,6 +486,20 @@ impl Project {
 
     /// Append a starter chapter (creating its file if absent) and persist the
     /// manifest. Used by `create`, and by `open` as a safety net.
+    /// Scaffold a short story (#1239): the short-story form plus its one chapter,
+    /// titled after the project and stored in `story.md`.
+    fn add_story_chapter(&mut self) -> std::io::Result<()> {
+        self.manifest.form = Form::ShortStory;
+        let entry = ChapterEntry::new(self.manifest.title.clone(), "story.md".into());
+        let path = self.root.join(&entry.file);
+        if !path.exists() {
+            atomic::write(&path, b"")?;
+        }
+        self.active.clone_from(&entry.file);
+        self.manifest.chapters.push(entry);
+        self.save_manifest()
+    }
+
     fn add_default_chapter(&mut self) -> std::io::Result<()> {
         let n = self.manifest.chapters.len() + 1;
         let entry = ChapterEntry::new(format!("Chapter {n}"), format!("chapter-{n}.md"));
