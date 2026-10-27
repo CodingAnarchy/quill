@@ -5,6 +5,50 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-27
+
+Short fiction comes to Quill. A project can now be a short story (one piece of
+prose structured by its scenes) or a collection that gathers existing stories
+into one volume, and both export the way short fiction is submitted and
+published. Novels are unchanged, and every existing 1.x project opens as before;
+the new `form` and `[[stories]]` keys are only written for the new project kinds.
+
+### Added
+
+- **Short story projects** (#1239). Choose the "Short story" structure or run
+  `quill --short PATH`. A story has no chapter list, parts, or chapter commands;
+  the outline pane shows its scenes, Ctrl-G focuses them, and the status bar
+  names its length category (flash fiction, short story, novelette, novella
+  length) beside the word count. Renaming the book renames the story.
+- **Scenes split by scene breaks** (#1240). In a short story, a scene break
+  (`* * *`, `***`, `---`) starts a new scene, and a `##` heading does too if you
+  title scenes. The corkboard, outline, and quick switch list the scenes
+  (untitled ones by their first line); moving a scene keeps exactly one break
+  between scenes; a scene's synopsis and status stay with it when scenes are
+  reordered, added, or removed.
+- **Standard short story submission format** (#1241). A short story's Word export
+  puts your contact details and the rounded word count on page one, the title and
+  byline a third of the way down, and the story right beneath, with `#` scene
+  breaks, a closing END, and a `Surname / Title / page` header. Contact details
+  come from a new `[author]` config section. The Markdown, EPUB, and PDF exports
+  don't repeat a story's title as a chapter heading or add a one-line contents.
+- **Convert a one-chapter novel into a short story** (#1243), and **grow a short
+  story into a novel** (#1242) with one chapter per scene, carrying each scene's
+  synopsis and status and every annotation to its new chapter. Both ask first and
+  record a restore point (a milestone under version control, otherwise a backup
+  zip). A story passing 17,500 words mentions the conversion once in the status
+  bar.
+- **Collections** (#1244). A collection links existing short story projects
+  instead of copying them, so a story has one source of truth. Ctrl-G lists its
+  stories with word counts and status; from there you can open a story (its own
+  project), link an existing one, write a new one inside the collection, reorder,
+  set a credit line such as "First published in …", relocate a story whose folder
+  moved, or unlink one without deleting it.
+- **Collection exports** (#1245). Every export format compiles a collection into
+  one book: its introduction, each story on a new page under its title and credit
+  line, and its back matter, with every story in the contents. Stories are read
+  at export time, so the latest edits are always included.
+
 ## [1.2.1] - 2026-10-06
 
 A performance and reliability release. Typing, drawing, saving, and startup are
@@ -698,6 +742,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.3.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.3.0
 [1.2.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.0
 [1.1.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.1.0
