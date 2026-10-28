@@ -81,6 +81,17 @@ public final class ProjectStore {
         return message
     }
 
+    /// Open `chapter` for editing. Each save refreshes the chapter list, so
+    /// its word counts stay current.
+    public func editor(for chapter: ChapterInfo) throws -> ChapterEditor {
+        guard let project else {
+            throw QuillError.Io(message: "No project is open.")
+        }
+        return try ChapterEditor(project: project, chapter: chapter) { [weak self] in
+            self?.refresh()
+        }
+    }
+
     /// A chapter's prose, with its front matter hidden.
     public func text(of chapter: ChapterInfo) throws -> String {
         guard let project else { return "" }

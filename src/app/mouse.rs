@@ -11,7 +11,7 @@
 //! it draws; the click handler just looks a row up and walks its bytes. The map is
 //! rebuilt every frame, so it always reflects exactly what's on screen.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -59,9 +59,9 @@ pub struct EditorLayout {
     pub rows: Vec<VisualRow>,
     /// Emphasis-marker conceal ranges (absolute bytes) used for this frame, so the
     /// click's column→byte walk drops the same hidden characters the render did.
-    /// Shares the `Rc` the parse caches (#869): recording it is a refcount bump, not
+    /// Shares the `Arc` the parse caches (#869): recording it is a refcount bump, not
     /// a clone of the ranges.
-    pub conceal: Rc<[(usize, usize)]>,
+    pub conceal: Arc<[(usize, usize)]>,
     /// The last logical line of the buffer, so a click below the last row can land
     /// at document end.
     pub last_line: usize,

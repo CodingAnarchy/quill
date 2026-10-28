@@ -20,7 +20,7 @@
 //! identical to a fresh whole-document parse (the property tests assert it).
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use ropey::str_utils::byte_to_line_idx;
 use ropey::Rope;
@@ -81,7 +81,7 @@ pub struct Heading {
 
 /// A memoized cursor-revealed conceal list: the enclosing spans it reveals (the
 /// key) and the conceal ranges left once their markers are dropped.
-type Revealed = (Vec<(usize, usize)>, Rc<[(usize, usize)]>);
+type Revealed = (Vec<(usize, usize)>, Arc<[(usize, usize)]>);
 
 /// The live parse of a single document (one chapter file).
 pub struct Syntax {
@@ -110,8 +110,8 @@ pub struct Syntax {
     /// Every marker's conceal range (all delimiters hidden), start-sorted — the
     /// full list [`conceal_ranges`](Self::conceal_ranges) returns when nothing is
     /// revealed. Built once per parse/reparse (markers change only then) and shared
-    /// via `Rc` so per-frame rendering neither rebuilds nor clones it (#869).
-    conceal_all: Rc<[(usize, usize)]>,
+    /// via `Arc` so per-frame rendering neither rebuilds nor clones it (#869).
+    conceal_all: Arc<[(usize, usize)]>,
     /// Headings in document order — the in-chapter outline (#11).
     headings: Vec<Heading>,
     /// The buffer line each scene break (`---`, `* * *`, …) sits on, in document
@@ -122,7 +122,7 @@ pub struct Syntax {
     scene_breaks: Vec<usize>,
     /// The last cursor-revealed conceal list, keyed by the spans it reveals. A
     /// cursor resting on an emphasis span asks for the same filtered list every
-    /// frame; this hands back the shared `Rc` instead of rebuilding it per frame.
+    /// frame; this hands back the shared `Arc` instead of rebuilding it per frame.
     /// Cleared on every parse/reparse (the markers it was built from change).
     revealed: RefCell<Option<Revealed>>,
 }
@@ -137,7 +137,7 @@ impl Syntax {
             highlight_reach: Vec::new(),
             markers: Vec::new(),
             marker_reach: Vec::new(),
-            conceal_all: Rc::from([]),
+            conceal_all: Arc::from([]),
             headings: Vec::new(),
             scene_breaks: Vec::new(),
             revealed: RefCell::new(None),
@@ -223,7 +223,7 @@ impl Syntax {
     /// delimiter's enclosing span — so the markers reappear for editing only on
     /// the span the cursor is in. Pass `None` to conceal every delimiter.
     ///
-    /// Returns a shared `Rc` so the renderer neither rebuilds the list per frame
+    /// Returns a shared `Arc` so the renderer neither rebuilds the list per frame
     /// nor clones it into the click-inversion layout (#869). The common cases —
     /// `None`, or a cursor not inside any emphasis span — hand back the cached
     /// full list (a refcount bump, no allocation); only a cursor actually sitting
@@ -235,9 +235,9 @@ impl Syntax {
     /// opening delimiter, a block's first fence line, a break's own line), so a
     /// span holding `b` has a marker starting at or before `b`; and the running
     /// `marker_reach` skips every earlier marker whose span ends before `b`.
-    pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Rc<[(usize, usize)]> {
+    pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Arc<[(usize, usize)]> {
         let Some(b) = reveal_at else {
-            return Rc::clone(&self.conceal_all);
+            return Arc::clone(&self.conceal_all);
         };
         let upper = self.markers.partition_point(|m| m.delim_start <= b);
         let lower = self.marker_reach[..upper].partition_point(|&r| r < b);
@@ -251,20 +251,20 @@ impl Syntax {
         // Not within any span: the filtered result is byte-for-byte the full
         // list, so reuse the cache.
         if spans.is_empty() {
-            return Rc::clone(&self.conceal_all);
+            return Arc::clone(&self.conceal_all);
         }
         if let Some((key, list)) = self.revealed.borrow().as_ref() {
             if *key == spans {
-                return Rc::clone(list);
+                return Arc::clone(list);
             }
         }
-        let list: Rc<[(usize, usize)]> = self
+        let list: Arc<[(usize, usize)]> = self
             .markers
             .iter()
             .filter(|m| !spans.contains(&(m.span_start, m.span_end)))
             .map(|m| (m.delim_start, m.delim_end))
             .collect();
-        self.revealed.replace(Some((spans, Rc::clone(&list))));
+        self.revealed.replace(Some((spans, Arc::clone(&list))));
         list
     }
 
@@ -298,7 +298,7 @@ fn running_max(values: impl Iterator<Item = usize>) -> Vec<usize> {
 
 /// The full conceal list (every marker's delimiter range) as a shared slice, in
 /// the markers' start-sorted order. Cached on [`Syntax`] per parse/reparse (#869).
-fn conceal_all_from(markers: &[Marker]) -> Rc<[(usize, usize)]> {
+fn conceal_all_from(markers: &[Marker]) -> Arc<[(usize, usize)]> {
     markers
         .iter()
         .map(|m| (m.delim_start, m.delim_end))

@@ -10,7 +10,7 @@
 //! focus-mode paragraph and first-line-indent geometry. This module keeps the two
 //! pane entry points and the shared `render_body` core that drives them.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::*;
 use crate::app::mouse::EditorLayout;
@@ -464,7 +464,7 @@ fn render_body(
     // entry per drawn visual row.
     if let Some(map) = layout.as_deref_mut() {
         map.column = column;
-        map.conceal = Rc::clone(&hl.conceal);
+        map.conceal = Arc::clone(&hl.conceal);
         map.last_line = total.saturating_sub(1);
         map.rows.clear();
     }

@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use tree_sitter::{Node, Parser, Range, Tree};
 use tree_sitter_md::{INLINE_LANGUAGE, LANGUAGE};
@@ -46,7 +46,7 @@ pub(super) struct Segments {
     block: Parser,
     inline: Parser,
     /// Every piece of the last parsed text, keyed by its exact bytes.
-    cache: HashMap<Box<[u8]>, Rc<Parsed>>,
+    cache: HashMap<Box<[u8]>, Arc<Parsed>>,
     /// How many pieces went through tree-sitter — lets tests assert a keystroke
     /// reparses one block, not the document.
     #[cfg(any(test, feature = "test-support"))]
@@ -84,7 +84,7 @@ impl Segments {
     /// offset, in document order. Pieces whose text was in the previous parse
     /// come from the cache; only new text goes through tree-sitter. The cache is
     /// replaced by exactly this parse's pieces, so it never outgrows the document.
-    pub(super) fn parse(&mut self, text: &str) -> Vec<(usize, Rc<Parsed>)> {
+    pub(super) fn parse(&mut self, text: &str) -> Vec<(usize, Arc<Parsed>)> {
         let cuts = cut_points(text);
         let mut old = mem::take(&mut self.cache);
         let mut out = Vec::new();
@@ -130,21 +130,21 @@ impl Segments {
     fn lookup_or_parse(
         &mut self,
         piece: &str,
-        old: &mut HashMap<Box<[u8]>, Rc<Parsed>>,
-    ) -> Rc<Parsed> {
+        old: &mut HashMap<Box<[u8]>, Arc<Parsed>>,
+    ) -> Arc<Parsed> {
         let key = piece.as_bytes();
         if let Some(parsed) = self.cache.get(key) {
-            return Rc::clone(parsed);
+            return Arc::clone(parsed);
         }
         if let Some((key, parsed)) = old.remove_entry(key) {
-            self.cache.insert(key, Rc::clone(&parsed));
+            self.cache.insert(key, Arc::clone(&parsed));
             return parsed;
         }
         // Cached even when open-ended: the document's last piece is (its final
         // block runs to the end of the text) and is reused like any other. A
         // trial piece that ends up merged is simply dropped on the next parse.
-        let parsed = Rc::new(self.parse_piece(piece));
-        self.cache.insert(key.into(), Rc::clone(&parsed));
+        let parsed = Arc::new(self.parse_piece(piece));
+        self.cache.insert(key.into(), Arc::clone(&parsed));
         parsed
     }
 

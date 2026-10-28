@@ -278,7 +278,7 @@ fn conceal_list_is_computed_once_per_parse_and_shared() {
 
     let again = s.conceal_ranges(None);
     assert!(
-        Rc::ptr_eq(&full, &again),
+        Arc::ptr_eq(&full, &again),
         "the full list is cached, not rebuilt"
     );
 
@@ -286,7 +286,7 @@ fn conceal_list_is_computed_once_per_parse_and_shared() {
     // same cached list is returned rather than a fresh filtered copy.
     let outside = s.conceal_ranges(Some(text.len()));
     assert!(
-        Rc::ptr_eq(&full, &outside),
+        Arc::ptr_eq(&full, &outside),
         "no reveal reuses the cached list"
     );
 
@@ -296,7 +296,7 @@ fn conceal_list_is_computed_once_per_parse_and_shared() {
     assert!(inside.len() < full_len, "the ital markers are revealed");
     assert!(!inside.is_empty(), "the bold markers stay concealed");
     assert!(
-        !Rc::ptr_eq(&full, &inside),
+        !Arc::ptr_eq(&full, &inside),
         "a reveal builds a filtered list"
     );
 }
