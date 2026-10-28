@@ -62,7 +62,10 @@ import Testing
         let editor = try store.editor(for: store.chapters[1])
         editor.saveDelay = .milliseconds(20)
         editor.apply(range: NSRange(location: 0, length: 4), replacement: "Gale")
-        try await Task.sleep(for: .milliseconds(200))
+        // Other suites can hold the main actor for a while; wait up to 5s.
+        for _ in 0..<250 where editor.dirty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(!editor.dirty)
         let saved = try String(contentsOf: dir.appendingPathComponent("storm.md"), encoding: .utf8)
         #expect(saved == "Gale. Then rain.\n")
