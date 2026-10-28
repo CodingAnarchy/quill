@@ -95,7 +95,9 @@ builds the app for the simulator and, unsigned, for a device.
 ## Getting a novel onto the phone
 
 The phone reaches the author's novel through the same git remote the desktop
-pushes to. HTTPS only: iOS has no ssh-agent.
+pushes to. HTTPS only: iOS has no ssh-agent. To keep the novel off hosted
+services, `docs/self-hosting.md` sets up a private Forgejo server reachable
+only by your own devices.
 
 1. On the host (GitHub, say), create a personal access token that can read and
    write the novel's repository. On GitHub that's a fine-grained token with
