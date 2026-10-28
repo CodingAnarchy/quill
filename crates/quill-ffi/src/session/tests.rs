@@ -157,9 +157,11 @@ fn a_keystroke_is_fast_in_a_long_chapter() {
 
     let dir = scratch_dir("ffi-session", "perf");
     let paragraph = "She walked the *long* road home, past the **dark** water and the gulls. ";
-    let body: String = (0..800)
-        .map(|i| format!("{}\n\n", paragraph.repeat(1 + i % 2)))
-        .collect();
+    let mut body = String::new();
+    for i in 0..800 {
+        body.push_str(&paragraph.repeat(1 + i % 2));
+        body.push_str("\n\n");
+    }
     let session = project(&dir, &body).edit_chapter(0).unwrap();
     assert!(session.word_count() > 10_000, "{}", session.word_count());
 
