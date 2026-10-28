@@ -8,11 +8,12 @@
 //! for the resolution UI to resolve and [`finalize_sync`] to land.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::Path;
 
 use super::super::local::signature;
 use super::merge::{adopt, blob_text, collect_blobs, index_from_tree, stage_blob};
-use super::{classify, credentials, current_branch, DIRTY_PULL, NO_REMOTE};
+use super::{classify, credentials, current_branch, DIRTY_PULL, NO_REMOTE, PHONE_DRAFT_PREFIX};
 use crate::vcs::local::is_dirty;
 
 /// One chapter changed on both machines since the shared ancestor — a per-chapter
@@ -82,6 +83,12 @@ pub struct SyncOutcome {
 /// Like [`pull`](super::pull), sync refuses up front when the working tree is dirty
 /// (#639), so an uncommitted edit can never be overwritten by the merge checkout.
 pub fn sync(root: &Path) -> Result<SyncOutcome, String> {
+    sync_fetched(root).map(|(outcome, _)| outcome)
+}
+
+/// [`sync`], also returning the remote commit it fetched, which the phone's
+/// draft diversion (#1233) resets to after parking its own work on a draft.
+pub(super) fn sync_fetched(root: &Path) -> Result<(SyncOutcome, git2::Oid), String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
 
     // Same guard as pull: the merge/fast-forward checkout force-writes the tree, so
@@ -113,25 +120,78 @@ pub fn sync(root: &Path) -> Result<SyncOutcome, String> {
         .merge_analysis(&[&fetched])
         .map_err(|e| e.to_string())?;
 
-    if analysis.is_up_to_date() {
-        return Ok(SyncOutcome {
+    let mut outcome = if analysis.is_up_to_date() {
+        SyncOutcome {
             summary: "Already in sync with the remote.".to_string(),
             merged: Vec::new(),
             conflicts: Vec::new(),
             reload: false,
-        });
-    }
-    if analysis.is_fast_forward() {
+        }
+    } else if analysis.is_fast_forward() {
         fast_forward(&repo, &branch, &fetched)?;
-        return Ok(SyncOutcome {
+        SyncOutcome {
             summary: "Pulled the remote's changes — you were behind.".to_string(),
             merged: Vec::new(),
             conflicts: Vec::new(),
             reload: true,
-        });
+        }
+    } else {
+        sync_diverged(&repo, &branch, &fetched)?
+    };
+    // After FETCH_HEAD has been read: this second fetch replaces it.
+    let adopted = adopt_phone_drafts(&repo, &mut remote);
+    if !adopted.is_empty() {
+        let names: Vec<String> = adopted
+            .iter()
+            .map(|d| format!("\u{201c}{d}\u{201d}"))
+            .collect();
+        let _ = write!(
+            outcome.summary,
+            " The phone parked edits that conflicted on {} {} — merge from Drafts.",
+            if adopted.len() == 1 {
+                "draft"
+            } else {
+                "drafts"
+            },
+            names.join(", ")
+        );
     }
+    Ok((outcome, fetched.id()))
+}
 
-    sync_diverged(&repo, &branch, &fetched)
+/// Bring the drafts the phone parked its conflicting work on (#1233) into this
+/// copy's drafts list: fetch `origin`'s `phone/*` branches and create a local
+/// draft for each one not already here, so the desktop can merge it with the
+/// conflict resolver (#963). Best-effort, since a failure here mustn't fail
+/// the sync that already landed. An existing local draft is never moved.
+/// Returns the drafts it created.
+fn adopt_phone_drafts(repo: &git2::Repository, remote: &mut git2::Remote) -> Vec<String> {
+    let mut cbs = git2::RemoteCallbacks::new();
+    cbs.credentials(credentials);
+    let mut opts = git2::FetchOptions::new();
+    opts.remote_callbacks(cbs);
+    let spec =
+        format!("+refs/heads/{PHONE_DRAFT_PREFIX}*:refs/remotes/origin/{PHONE_DRAFT_PREFIX}*");
+    let mut adopted = Vec::new();
+    if remote.fetch(&[&spec], Some(&mut opts), None).is_err() {
+        return adopted;
+    }
+    let Ok(refs) = repo.references_glob(&format!("refs/remotes/origin/{PHONE_DRAFT_PREFIX}*"))
+    else {
+        return adopted;
+    };
+    for reference in refs.flatten() {
+        let (Some(full), Ok(commit)) = (reference.name(), reference.peel_to_commit()) else {
+            continue;
+        };
+        let name = full.trim_start_matches("refs/remotes/origin/");
+        if repo.find_branch(name, git2::BranchType::Local).is_err()
+            && repo.branch(name, &commit, false).is_ok()
+        {
+            adopted.push(name.to_string());
+        }
+    }
+    adopted
 }
 
 /// Advance the branch ref and working tree to the fetched commit — the shared

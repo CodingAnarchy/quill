@@ -22,6 +22,7 @@
 //! `super::remote::…` (and the flat `crate::vcs::…` surface) see one facade.
 
 mod clone;
+mod divert;
 mod error;
 pub(in crate::vcs) mod merge;
 mod sync;
@@ -32,6 +33,7 @@ use std::path::Path;
 use super::local::{is_dirty, signature};
 
 pub use clone::{clone, folder_name};
+pub use divert::{sync_or_divert, DeviceSync, PHONE_DRAFT_PREFIX};
 pub use error::{RemoteError, RemoteErrorKind};
 pub use sync::{finalize_sync, sync, ChapterConflict};
 pub use token::set_token;
@@ -70,6 +72,13 @@ pub fn remote_url(root: &Path) -> Option<String> {
 pub fn push(root: &Path) -> Result<String, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
     let branch = current_branch(&repo)?;
+    push_branch(&repo, &branch)?;
+    Ok(branch)
+}
+
+/// Push the local branch `branch` to the branch of the same name on `origin`,
+/// never forcing. Shared by [`push`] and the phone's draft diversion (#1233).
+fn push_branch(repo: &git2::Repository, branch: &str) -> Result<(), String> {
     let mut remote = repo
         .find_remote("origin")
         .map_err(|_| NO_REMOTE.to_string())?;
@@ -99,7 +108,7 @@ pub fn push(root: &Path) -> Result<String, String> {
     if rejected.borrow_mut().take().is_some() {
         return Err(RemoteError::rejected().message());
     }
-    Ok(branch)
+    Ok(())
 }
 
 /// Pull `origin`'s changes for the current branch (#134), resolving a diverged

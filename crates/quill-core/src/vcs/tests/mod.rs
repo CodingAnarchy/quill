@@ -10,6 +10,7 @@
 //! and its hand-resolved finalization (#963), and [`drafts`] branch-as-draft (#965).
 
 mod clone;
+mod divert;
 mod drafts;
 mod history;
 mod remote;

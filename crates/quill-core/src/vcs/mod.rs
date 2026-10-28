@@ -26,7 +26,7 @@ pub use local::{
 };
 pub use remote::{
     clone, finalize_sync, folder_name, pull, push, remote_url, set_remote, set_token, sync,
-    ChapterConflict, RemoteError, RemoteErrorKind,
+    sync_or_divert, ChapterConflict, DeviceSync, RemoteError, RemoteErrorKind, PHONE_DRAFT_PREFIX,
 };
 
 // `diff_file` is the commit-to-commit diff primitive the UI doesn't wire yet —

@@ -13,7 +13,7 @@ public final class ProjectStore {
     public private(set) var url: URL?
     /// The `origin` the project pulls from, if it has one.
     public private(set) var remote: String?
-    /// True while a pull is running.
+    /// True while a pull or sync is running.
     public private(set) var pulling = false
 
     private var project: QuillProject?
@@ -79,6 +79,19 @@ public final class ProjectStore {
         let message = try await Task.detached { try project.pull() }.value
         refresh()
         return message
+    }
+
+    /// Sync with the remote (#1233): commit this phone's saved edits with
+    /// `commitMessage`, merge the remote's, and push, or park conflicting work
+    /// on a `phone/<date>` draft. Returns `nil` when a sync is already running.
+    /// The caller saves the open chapter and supplies the token first.
+    public func sync(commitMessage: String) async throws -> SyncReport? {
+        guard let project, !pulling else { return nil }
+        pulling = true
+        defer { pulling = false }
+        let report = try await Task.detached { try project.sync(commitMessage: commitMessage) }.value
+        refresh()
+        return report
     }
 
     /// Open `chapter` for editing. Each save refreshes the chapter list, so
