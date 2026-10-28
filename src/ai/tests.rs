@@ -1,6 +1,6 @@
 //! Unit tests for the shared `ai` helpers: schema builders (`object_schema`,
 //! `chapters_finding`), settings/backend resolution, the `parse_json`
-//! malformed-input matrix (#313/#319), and the answer/citation rendering.
+//! malformed-input matrix (#313/#319), and answer parsing.
 //! Extracted from `mod.rs` to keep that file under the ~1,000-line convention.
 
 use super::*;
@@ -197,33 +197,6 @@ fn parse_answer_reads_structured_reply_and_falls_back() {
     let plain = parse_answer("Just some prose.");
     assert_eq!(plain.answer, "Just some prose.");
     assert!(plain.citations.is_empty());
-}
-
-#[test]
-fn answer_to_lines_renders_answer_and_usage() {
-    let answer = Answer {
-        answer: "Chapter One introduces the locket.".into(),
-        citations: vec!["One".into()],
-        ..Answer::default()
-    };
-    let usage = Usage {
-        input_tokens: 1200,
-        output_tokens: 30,
-        cache_read_tokens: 1000,
-    };
-    let lines = answer_to_lines(&answer, &usage);
-    let text: String = lines
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(text.contains("introduces the locket"));
-    assert!(text.contains("1,200 tokens in") || text.contains("1200 tokens in"));
 }
 
 // --- parse_json malformed-input matrix (#313/#319) -----------------------

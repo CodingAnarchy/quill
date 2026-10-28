@@ -104,7 +104,7 @@ impl Dropped {
 
     /// How many elements were lost outright — everything but footnotes/endnotes,
     /// which are converted to inline markers. Zero for a clean document.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn lost(&self) -> usize {
         self.images + self.tables + self.comments
     }

@@ -54,7 +54,7 @@ impl Index {
     /// The number of indexed passages — a status/test accessor. `#[cfg(test)]`: only
     /// the hermetic tests read it; production drives the index through `refresh` /
     /// `search`, so gating it keeps the `local` build off the dead-code radar (#406).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn passage_count(&self) -> usize {
         self.passages.len()
     }

@@ -98,6 +98,10 @@ regex = "1"
 proptest = "1"
 
 [features]
+# Swaps in the hermetic stand-ins the unit tests rely on (offline HTTP, a no-op
+# keychain, the config-directory override) for any test build that links the
+# core, not only its own (#1229). Never enabled in a shipped build.
+test-support = []
 local = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
 
 # On macOS, give candle the Metal backend (GPU). Cargo unions these features into

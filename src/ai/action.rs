@@ -6,7 +6,7 @@
 //! `action.rs` to keep each file under the ~1,000-line convention; re-exported from
 //! the module root, so callers are unaffected.
 
-use crate::mode::FindingKind;
+use super::FindingKind;
 
 /// The AI actions reachable from the AI palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

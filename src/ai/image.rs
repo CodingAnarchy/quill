@@ -76,9 +76,9 @@ impl ImageSettings {
     pub fn resolved_key(&self) -> Option<String> {
         // As with the Claude key, test builds never read the env key, so the suite
         // can't authenticate or reach the image provider by accident (#528).
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let env: Option<String> = None;
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         let env = std::env::var("FAL_KEY").ok();
         // Env short-circuits the keychain; the read is memoized (once per session,
         // and only when there's no env key). `api_key`/env stay live.

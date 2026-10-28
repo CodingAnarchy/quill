@@ -30,7 +30,7 @@ pub use history::{
 
 // The commit-to-commit diff primitive the UI doesn't wire yet — reached by name
 // only from the tests, so re-exported (and forwarded by `super`) only under test.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use history::diff_file;
 
 /// Editor state and scratch that should never be committed — Quill's own

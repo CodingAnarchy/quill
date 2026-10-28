@@ -28,7 +28,7 @@ pub use remote::{finalize_sync, pull, push, remote_url, set_remote, sync, Chapte
 
 // `diff_file` is the commit-to-commit diff primitive the UI doesn't wire yet —
 // reached by name only from the tests, so re-export it there.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use local::diff_file;
 
 #[cfg(test)]

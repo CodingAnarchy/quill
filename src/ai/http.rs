@@ -11,9 +11,9 @@
 //! half of the hermeticity guarantee (#528). Tests drive the backends through
 //! injected results / mock backends instead of the wire.
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 use std::thread;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 use std::time::Duration;
 
 use serde_json::Value;
@@ -31,7 +31,7 @@ const MAX_ATTEMPTS: u32 = 4;
 
 /// Base backoff before the first retry; each subsequent wait doubles it
 /// (250ms → 500ms → 1s). Not applied in test builds (see [`backoff`]).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 const BASE_BACKOFF: Duration = Duration::from_millis(250);
 
 /// Retry an *idempotent single request* through bounded exponential backoff,
@@ -74,18 +74,18 @@ pub const fn transient_status<V>((status, _): &(u16, V)) -> bool {
 
 /// Wait before retry number `attempt` (1-based): `BASE_BACKOFF` doubled per prior
 /// retry. In test builds this is a no-op so the suite never sleeps (#528, #531).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn backoff(attempt: u32) {
     let factor = 1u32 << (attempt - 1);
     thread::sleep(BASE_BACKOFF * factor);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 const fn backoff(_attempt: u32) {}
 
 /// POST `body` as JSON to `url` with `headers`; returns the HTTP status and the
 /// parsed JSON response.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 pub fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(u16, Value), AiError> {
     let mut res = with_headers(
         ureq::post(url).config().http_status_as_error(false).build(),
@@ -99,7 +99,7 @@ pub fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(u16, Va
 }
 
 /// GET `url` as JSON with `headers`; returns the HTTP status and the parsed body.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 pub fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> {
     let mut res = with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
@@ -114,7 +114,7 @@ pub fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> 
 
 /// GET `url` as raw text with `headers` (e.g. JSONL batch results, not a JSON
 /// document).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 pub fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
     with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
@@ -129,7 +129,7 @@ pub fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
 
 /// Apply the auth/content headers to a request builder (generic over the body
 /// marker so it serves both POST and GET).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn with_headers<B>(
     mut req: ureq::RequestBuilder<B>,
     headers: &[Header],
@@ -141,7 +141,7 @@ fn with_headers<B>(
 }
 
 /// A transport failure (the call never completed): no HTTP status to report.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn transport(e: &ureq::Error) -> AiError {
     AiError::Network {
         status: None,
@@ -150,7 +150,7 @@ fn transport(e: &ureq::Error) -> AiError {
 }
 
 /// A body we couldn't read or parse as expected.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn malformed(e: impl std::fmt::Display) -> AiError {
     AiError::ApiMalformed(e.to_string())
 }
@@ -158,22 +158,22 @@ fn malformed(e: impl std::fmt::Display) -> AiError {
 // --- Test stubs: every outbound request is refused before it leaves the machine,
 // so the suite can never reach a live provider API (#528). ---------------------
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn post_json(_url: &str, _headers: &[Header], _body: &Value) -> Result<(u16, Value), AiError> {
     Err(offline())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn get_json(_url: &str, _headers: &[Header]) -> Result<(u16, Value), AiError> {
     Err(offline())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn get_text(_url: &str, _headers: &[Header]) -> Result<String, AiError> {
     Err(offline())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn offline() -> AiError {
     AiError::Network {
         status: None,
