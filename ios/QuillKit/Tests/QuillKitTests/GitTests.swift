@@ -53,6 +53,49 @@ func git(_ args: String..., in dir: URL) throws -> String {
         #expect(store.remote == remote.path)
     }
 
+    @Test func syncSendsAPhoneEditAndParksAConflict() async throws {
+        let root = try scratch("sync")
+        let remote = root.appendingPathComponent("remote.git")
+        let desk = root.appendingPathComponent("desk")
+        let phone = root.appendingPathComponent("phone")
+        try FileManager.default.createDirectory(at: desk, withIntermediateDirectories: true)
+        try git("init", "--bare", remote.path, in: root)
+        try writeNovel(in: desk)
+        try git("init", in: desk)
+        try git("add", ".", in: desk)
+        try git("commit", "-m", "start", in: desk)
+        try git("push", remote.path, "HEAD:refs/heads/main", in: desk)
+        try git("clone", "--branch", "main", remote.path, phone.path, in: root)
+
+        let store = ProjectStore()
+        store.open(phone)
+        let editor = try store.editor(for: store.chapters[1])
+        let wind = (editor.initialText as NSString).range(of: "Wind")
+        editor.apply(range: wind, replacement: "Gale")
+        editor.save()
+
+        let sent = try #require(try await store.sync(commitMessage: "Edits on iPhone"))
+        #expect(sent.draft == nil)
+        try git("pull", remote.path, "main", in: desk)
+        let storm = try String(contentsOf: desk.appendingPathComponent("storm.md"), encoding: .utf8)
+        #expect(storm == "Gale. Then rain.\n")
+        #expect(try git("log", "-1", "--format=%s", in: desk).contains("on iPhone"))
+
+        // Both sides change the same chapter: the phone's version is parked.
+        try "Desk's storm.\n".write(
+            to: desk.appendingPathComponent("storm.md"), atomically: true, encoding: .utf8)
+        try git("commit", "-am", "desk", in: desk)
+        try git("push", remote.path, "HEAD:refs/heads/main", in: desk)
+        let again = try store.editor(for: store.chapters[1])
+        again.apply(range: NSRange(location: 0, length: 4), replacement: "Squall")
+        again.save()
+        let parked = try #require(try await store.sync(commitMessage: "Edits on iPhone"))
+        let draft = try #require(parked.draft)
+        #expect(parked.message.contains(draft))
+        #expect(try store.text(of: store.chapters[1]) == "Desk's storm.\n")
+        #expect(try git("ls-remote", "--heads", remote.path, in: root).contains(draft))
+    }
+
     @Test func cloneRefusesANonHttpsAddressAndKeepsNoToken() async throws {
         let root = try scratch("clone-ssh")
         let tokens = MemoryTokenStore()

@@ -15,7 +15,7 @@ use std::env;
 use std::path::Path;
 
 pub use error::QuillError;
-pub use git::{clone_destination, clone_project, set_git_token};
+pub use git::{clone_destination, clone_project, set_git_token, SyncReport};
 pub use project::{BookInfo, ChapterInfo, ProjectForm, ProjectInfo, QuillProject};
 pub use session::{ChapterSession, StyleKind, StyleSpan};
 

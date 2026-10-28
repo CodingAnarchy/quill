@@ -99,7 +99,29 @@ into `Documents/Projects` only once it has checked out and proven to be a
 Quill project. A wrong token, no network, or a repository without a
 `book.toml` each leaves nothing behind and says what to fix.
 
-**Pull** (or pull down on the chapter list) brings in what the desktop pushed.
+## Sync
+
+The phone syncs when the app comes back to the foreground, when it goes to the
+background (inside a background task), and when you tap **Sync** or pull down
+on the chapter list. A sync saves the open chapter, commits the phone's edits as
+"Edits on iPhone", merges the remote's, and pushes.
+
+The phone never asks you to resolve a conflict on its small screen:
+
+- **Different chapters changed** on each side: they merge on their own, and
+  both devices end up with both edits.
+- **The same chapter changed** on both sides: the phone pushes its work to a
+  draft named for the day (`phone/2026-10-26`, then `phone/2026-10-26-2`), tells
+  you so, and takes the remote's version. The next desktop sync adds that draft
+  to the desktop's Drafts list and says so. Merging it there opens the usual
+  conflict resolver. Once the desktop pushes the merge, the phone's next sync
+  brings in the merged text.
+- **No network** (or a rejected token): the edits stay committed on the phone
+  and go out on the next sync that reaches the remote.
+
+The work is in git history at every step, on both devices. This is
+`vcs::sync_or_divert` in `quill-core`.
+
 The app also keeps Quill's own editor state (`.quill/`) out of git through
 `.git/info/exclude`, so a repository set up without Quill's `.gitignore`
 still pulls cleanly.

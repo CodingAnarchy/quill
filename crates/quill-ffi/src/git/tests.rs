@@ -72,3 +72,44 @@ fn pull_reopens_the_project_with_the_desktops_edits() {
         fs::remove_dir_all(d).ok();
     }
 }
+
+#[test]
+fn sync_sends_phone_edits_and_reports_a_diversion() {
+    let (remote, desk) = remote_with_novel("sync");
+    let phone_parent = scratch_dir("ffi-git", "sync-phone");
+    let phone = phone_parent.join("book");
+    vcs::clone(remote.to_str().unwrap(), &phone).unwrap();
+    let project = QuillProject::open(&phone.to_string_lossy()).unwrap();
+
+    // A phone edit to chapter two goes out.
+    let session = Arc::clone(&project).edit_chapter(1).unwrap();
+    session.apply_edit(0, 6, "Third");
+    session.save().unwrap();
+    let report = Arc::clone(&project).sync("Edits on iPhone").unwrap();
+    assert_eq!(report.draft, None);
+    assert!(
+        report.message.contains("sent your edits"),
+        "{}",
+        report.message
+    );
+    vcs::sync(&desk).unwrap();
+    assert_eq!(fs::read_to_string(desk.join("two.md")).unwrap(), "Third.\n");
+
+    // Both edit chapter one: the phone's work is parked on a draft.
+    fs::write(desk.join("one.md"), "Desk words.\n").unwrap();
+    vcs::commit(&desk, "desk").unwrap();
+    vcs::push(&desk).unwrap();
+    let session = Arc::clone(&project).edit_chapter(0).unwrap();
+    session.apply_edit(0, 5, "Phone");
+    session.save().unwrap();
+    let report = Arc::clone(&project).sync("Edits on iPhone").unwrap();
+    let draft = report.draft.expect("diverted");
+    assert!(report.message.contains(&draft), "{}", report.message);
+    assert!(report.reload);
+    assert_eq!(project.chapter_text(0).unwrap(), "Desk words.\n");
+    assert_eq!(project.chapters().unwrap()[0].words, 2);
+
+    for d in [&remote, &desk, &phone_parent] {
+        fs::remove_dir_all(d).ok();
+    }
+}

@@ -20,6 +20,11 @@ final class AppState {
     private(set) var prose: ProseHost?
     /// Why the selected chapter couldn't be opened, if it couldn't.
     private(set) var chapterError: String?
+    /// How the last sync went, for the chapter list's footer.
+    private(set) var syncStatus: String?
+    /// A message the author must see (work parked on a draft, a failed manual
+    /// sync), shown as an alert.
+    var notice: String?
 
     private static let lastProjectKey = "lastProject"
     private var launched = false
@@ -65,17 +70,44 @@ final class AppState {
         library.refresh()
     }
 
-    /// Pull the remote's changes into the open project, using the token saved
-    /// for its host. Returns the message to show. The open chapter is saved
-    /// first and reopened after, so it shows what the pull brought in.
-    func pull() async -> String {
+    /// Why a sync is running: the author asked, or the app came to or left
+    /// the foreground. Only an explicit sync reports failures with an alert;
+    /// the automatic ones note them in the status line, so a phone without
+    /// signal isn't nagged on every unlock.
+    enum SyncTrigger { case manual, foreground, background }
+
+    /// Sync the open project with its remote (#1233). The open chapter is
+    /// saved first and reopened after, so it shows what the sync brought in.
+    func sync(_ trigger: SyncTrigger) async {
+        guard store.remote != nil else { return }
         save()
         library.useToken(for: store.remote)
-        defer { reopenChapter() }
         do {
-            return try await store.pull()
+            guard let report = try await store.sync(commitMessage: "Edits on iPhone") else { return }
+            if report.reload { reopenChapter() }
+            syncStatus = "Synced at \(Date.now.formatted(date: .omitted, time: .shortened))"
+            if report.draft != nil || trigger == .manual {
+                notice = report.message
+            }
         } catch {
-            return describe(error)
+            syncStatus = "Not synced: \(describe(error))"
+            if trigger == .manual { notice = describe(error) }
+        }
+    }
+
+    /// Save and sync as the app leaves the foreground, inside a background
+    /// task so iOS gives the work time to finish. If time runs out first,
+    /// the edits are already committed here and go out on the next sync.
+    func saveAndSyncForBackground() {
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "Save and sync") {
+            app.endBackgroundTask(task)
+        }
+        save()
+        Task {
+            await sync(.background)
+            app.endBackgroundTask(task)
         }
     }
 

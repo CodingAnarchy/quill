@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Sync brings in drafts that the iPhone app parked its conflicting edits on
+  (`phone/<date>`): they appear in the Drafts list, the sync message names
+  them, and merging one opens the conflict resolver (#1233).
+
 ### Changed
 
 - Quill is now a Cargo workspace. The editing core (projects, chapters,

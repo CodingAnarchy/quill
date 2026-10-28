@@ -29,7 +29,6 @@ struct ChapterSidebar: View {
     @Environment(AppState.self) private var app
     @Environment(ProjectStore.self) private var store
     @Binding var selection: UInt32?
-    @State private var pullMessage: String?
 
     var body: some View {
         List(selection: $selection) {
@@ -48,8 +47,13 @@ struct ChapterSidebar: View {
                         .tag(chapter.index)
                 }
             } footer: {
-                if let info = store.info {
-                    Text(Format.words(info.words))
+                VStack(alignment: .leading, spacing: 2) {
+                    if let info = store.info {
+                        Text(Format.words(info.words))
+                    }
+                    if let status = app.syncStatus {
+                        Text(status)
+                    }
                 }
             }
         }
@@ -63,22 +67,15 @@ struct ChapterSidebar: View {
                     if store.pulling {
                         ProgressView()
                     } else {
-                        Button("Pull", systemImage: "arrow.down.circle") {
-                            Task { pullMessage = await app.pull() }
+                        Button("Sync", systemImage: "arrow.triangle.2.circlepath") {
+                            Task { await app.sync(.manual) }
                         }
                     }
                 }
             }
         }
-        .alert(
-            pullMessage ?? "", isPresented: Binding(get: { pullMessage != nil }, set: { if !$0 { pullMessage = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        }
         .refreshable {
-            if store.remote != nil {
-                pullMessage = await app.pull()
-            }
+            await app.sync(.manual)
         }
     }
 
