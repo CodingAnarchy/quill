@@ -63,6 +63,15 @@ final class AppState {
         if store.error == nil {
             UserDefaults.standard.set(folder.lastPathComponent, forKey: Self.lastProjectKey)
         }
+        // A short story opens straight into its prose (#1247).
+        if let story = store.info?.storyChapter {
+            selectedChapter = story
+        }
+    }
+
+    /// Move the cursor to the start of a story's scene (#1247).
+    func reveal(_ scene: SceneInfo) {
+        prose?.textView.reveal(NSRange(location: Int(scene.start), length: 0))
     }
 
     /// Back to the library.

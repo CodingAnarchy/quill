@@ -207,6 +207,11 @@ impl ChapterSession {
         f(&self.lock().buffer)
     }
 
+    /// Run `f` over the buffer, which it may reparse.
+    pub fn with_buffer_mut<T>(&self, f: impl FnOnce(&mut Buffer) -> T) -> T {
+        f(&mut self.lock().buffer)
+    }
+
     /// The project's TODO marker.
     pub fn todo(&self) -> String {
         self.lock().todo.clone()

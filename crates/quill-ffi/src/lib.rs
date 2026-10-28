@@ -13,6 +13,7 @@ mod lookup;
 mod markers;
 mod project;
 mod session;
+mod story;
 
 use std::env;
 use std::path::Path;
@@ -24,6 +25,7 @@ pub use lookup::{has_claude_api_key, look_up_words, set_claude_api_key, WordCand
 pub use markers::MarkerInfo;
 pub use project::{BookInfo, ChapterInfo, ProjectForm, ProjectInfo, QuillProject};
 pub use session::{ChapterSession, StyleKind, StyleSpan};
+pub use story::{story_length, SceneInfo};
 
 uniffi::setup_scaffolding!();
 

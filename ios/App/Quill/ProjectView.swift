@@ -13,14 +13,27 @@ import SwiftUI
 /// selection, undo history, and keyboard intact.
 struct ProjectView: View {
     @Environment(AppState.self) private var app
+    @Environment(ProjectStore.self) private var store
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var columns = NavigationSplitViewVisibility.all
+    /// What a compact (folded) screen shows: a novel starts on its chapter
+    /// list, a short story straight in its prose (#1247), with the scenes a
+    /// back-swipe away.
+    @State private var compactColumn = NavigationSplitViewColumn.sidebar
 
     var body: some View {
         @Bindable var app = app
-        NavigationSplitView(columnVisibility: $columns) {
-            ChapterSidebar(selection: $app.selectedChapter)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
+        let isStory = store.info?.form == .shortStory
+        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
+            Group {
+                if isStory {
+                    SceneSidebar(editor: app.prose?.editor)
+                } else {
+                    ChapterSidebar(selection: $app.selectedChapter)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
+            .toolbar { ProjectToolbar() }
         } detail: {
             if let prose = app.prose {
                 ChapterEditorView(host: prose)
@@ -37,15 +50,46 @@ struct ProjectView: View {
         .onChange(of: sizeClass) { _, size in
             if size == .regular { columns = .all }
         }
+        .task(id: store.url) {
+            compactColumn = isStory ? .detail : .sidebar
+        }
     }
 }
 
-/// The chapter list, with a book picker for a series and a Pull button.
+/// The project-wide actions, on whichever list is showing: back to the
+/// library, the bible and findings, and sync.
+struct ProjectToolbar: ToolbarContent {
+    @Environment(AppState.self) private var app
+    @Environment(ProjectStore.self) private var store
+    @State private var showingNotes = false
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("Projects", systemImage: "books.vertical") { app.closeProject() }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Bible & Findings", systemImage: "text.book.closed") { showingNotes = true }
+                .sheet(isPresented: $showingNotes) { NotesView() }
+        }
+        if store.remote != nil {
+            ToolbarItem(placement: .topBarTrailing) {
+                if store.pulling {
+                    ProgressView()
+                } else {
+                    Button("Sync", systemImage: "arrow.triangle.2.circlepath") {
+                        Task { await app.sync(.manual) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The chapter list, with a book picker for a series.
 struct ChapterSidebar: View {
     @Environment(AppState.self) private var app
     @Environment(ProjectStore.self) private var store
     @Binding var selection: UInt32?
-    @State private var showingNotes = false
 
     var body: some View {
         List(selection: $selection) {
@@ -64,41 +108,12 @@ struct ChapterSidebar: View {
                         .tag(chapter.index)
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let info = store.info {
-                        Text(Format.words(info.words))
-                    }
-                    if let status = app.syncStatus {
-                        Text(status)
-                    }
-                }
+                ProjectFooter(words: store.info?.words)
             }
         }
         .navigationTitle(store.info?.title ?? "")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Projects", systemImage: "books.vertical") { app.closeProject() }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Bible & Findings", systemImage: "text.book.closed") { showingNotes = true }
-            }
-            if store.remote != nil {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if store.pulling {
-                        ProgressView()
-                    } else {
-                        Button("Sync", systemImage: "arrow.triangle.2.circlepath") {
-                            Task { await app.sync(.manual) }
-                        }
-                    }
-                }
-            }
-        }
         .refreshable {
             await app.sync(.manual)
-        }
-        .sheet(isPresented: $showingNotes) {
-            NotesView()
         }
     }
 
@@ -109,6 +124,71 @@ struct ChapterSidebar: View {
                 selection = nil
                 store.selectBook(book)
             })
+    }
+}
+
+/// A short story's scenes (#1247): each with its heading or first line, its
+/// synopsis, and its status, live as the author types. Tapping one moves the
+/// cursor to the scene's start. There are no chapter-level actions: a story
+/// is one piece of prose.
+struct SceneSidebar: View {
+    @Environment(AppState.self) private var app
+    @Environment(ProjectStore.self) private var store
+    let editor: ChapterEditor?
+
+    var body: some View {
+        // Reading `revision` re-renders the list whenever the prose changes.
+        let _ = editor?.revision
+        let scenes = editor?.scenes() ?? []
+        List {
+            Section {
+                ForEach(scenes, id: \.index) { scene in
+                    Button {
+                        app.reveal(scene)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(scene.title)
+                                .lineLimit(2)
+                            if let synopsis = scene.synopsis {
+                                Text(synopsis)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(scene.status)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .tint(.primary)
+                }
+            } header: {
+                Text("Scenes")
+            } footer: {
+                ProjectFooter(words: editor?.wordCount, category: editor?.lengthCategory)
+            }
+        }
+        .navigationTitle(store.info?.title ?? "")
+        .refreshable {
+            await app.sync(.manual)
+        }
+    }
+}
+
+/// The word total (and a story's length category) and how the last sync went.
+struct ProjectFooter: View {
+    @Environment(AppState.self) private var app
+    var words: UInt64?
+    var category: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let words {
+                Text([Format.words(words), category].compactMap { $0 }.joined(separator: " · "))
+            }
+            if let status = app.syncStatus {
+                Text(status)
+            }
+        }
     }
 }
 
@@ -172,7 +252,8 @@ struct ChapterEditorView: View {
     }
 }
 
-/// "1,204 words", and a warning when the last save failed.
+/// "1,204 words" ("1,204 words · short story" for a story), and a warning
+/// when the last save failed.
 struct WordCountLabel: View {
     let editor: ChapterEditor
 
@@ -183,7 +264,8 @@ struct WordCountLabel: View {
                     .foregroundStyle(.red)
                     .accessibilityLabel("Not saved")
             }
-            Text(Format.words(editor.wordCount))
+            // A short story names its length category, as on the desktop.
+            Text([Format.words(editor.wordCount), editor.lengthCategory].compactMap { $0 }.joined(separator: " · "))
                 .monospacedDigit()
         }
         .font(.footnote)

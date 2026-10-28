@@ -61,6 +61,20 @@ ios/test-kit.sh --no-build # reuse the last build
 cargo test -p quill-ffi    # the Rust side of the bindings
 ```
 
+`ios/typecheck-app.sh` typechecks the whole app (views included) without Xcode.
+The macOS SDK carries UIKit for Mac Catalyst, so the app, QuillKit, and the
+bindings typecheck together as one Catalyst module. It catches Swift errors
+locally; CI still builds the real iOS app.
+
+With Xcode, the UI tests (`ios/App/QuillUITests`) drive the real app in a
+simulator: they open the sample, check the chapter list, type into a chapter,
+background and kill the app, and find the words still there after a relaunch.
+On a wide screen they check that the list stays beside the chapter. Run them
+with
+`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone 17' test`
+(use an iPhone 17 Pro Max for the wide check, rotated to landscape by the
+test).
+
 QuillKit's tests run on macOS against the real Rust core, so they cover the
 whole path from Swift through UniFFI into `quill-core` without a simulator.
 
@@ -98,6 +112,22 @@ A clone lands whole or not at all. It's staged in a hidden folder and moved
 into `Documents/Projects` only once it has checked out and proven to be a
 Quill project. A wrong token, no network, or a repository without a
 `book.toml` each leaves nothing behind and says what to fix.
+
+## Short stories
+
+A short story project (#1239) opens straight into its prose, with no chapter
+list and no chapter-level actions. Its structure is its scenes, which the core
+derives (`scenes::story_scenes`, the same rules as the desktop's) from scene
+breaks and `##` headings. The scene list shows each scene's heading or first
+line, its synopsis, and its status, updates as you type, and moves the cursor
+to a scene's start when you tap it. Unfolded, the list sits beside the story.
+Folded, or on a standard iPhone, the story comes first and the scenes are one
+back-swipe away. The word count names the length category (flash fiction,
+short story, novelette), as the desktop's status bar does.
+
+Reordering scenes, editing synopses, and changing a scene's status stay on the
+desktop for now. Collections (#1244), whose stories are separate projects, need
+their own design on the phone.
 
 ## Looking up a word
 

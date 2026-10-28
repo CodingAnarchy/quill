@@ -39,6 +39,9 @@ pub struct ProjectInfo {
     pub active_book: u32,
     /// Words across the active book's chapters.
     pub words: u64,
+    /// A short story's story chapter (#1247), the one piece of prose the
+    /// phone opens straight into; `None` for a novel or a collection.
+    pub story_chapter: Option<u32>,
     /// The short fiction length category ("flash fiction", "short story",
     /// "novelette", "novella length") of a short story's story chapter, as the
     /// desktop status bar names it; `None` for a novel or a collection.
@@ -131,6 +134,7 @@ impl QuillProject {
             books,
             active_book: to_u32(p.active_book()),
             words: words as u64,
+            story_chapter: m.story_chapter().map(to_u32),
             // Named from the story chapter alone, as the desktop status bar does
             // (a dedication or afterword doesn't change the story's length).
             length_category: m

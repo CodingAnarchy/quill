@@ -108,6 +108,13 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath ios/build/DerivedData
           CODE_SIGNING_ALLOWED=NO build
+      - name: UI tests (simulator)
+        run: |
+          # The first available iPhone simulator; CI's Xcode decides the models.
+          sim=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')
+          xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill \
+            -destination "platform=iOS Simulator,name=$sim" \
+            -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO test
       - name: Build the app (device, unsigned)
         run: >-
           xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
