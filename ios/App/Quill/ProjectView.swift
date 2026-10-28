@@ -151,6 +151,14 @@ struct ChapterEditorView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                 }
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("TODO Markers", systemImage: "flag") { app.showingMarkers = true }
+                }
+            }
+            .sheet(isPresented: Bindable(app).showingMarkers) {
+                MarkersView(current: host.editor)
+            }
             .sheet(
                 isPresented: Binding(
                     get: { app.lookup != nil }, set: { if !$0 { app.lookup = nil } })

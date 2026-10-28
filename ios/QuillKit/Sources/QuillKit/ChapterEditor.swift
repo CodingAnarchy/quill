@@ -56,6 +56,11 @@ public final class ChapterEditor {
         session.styles(start: UInt32(range.location), end: UInt32(range.location + range.length))
     }
 
+    /// The TODO markers in this chapter as it stands, saved or not (#1237).
+    public func markers() -> [MarkerInfo] {
+        session.markers()
+    }
+
     /// The core's length of the text, in UTF-16 units (for consistency checks).
     public var utf16Length: Int { Int(session.utf16Length()) }
 

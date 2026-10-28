@@ -115,6 +115,20 @@ model. Add your API key under **Settings** in the library. It's stored in the
 Keychain through the same `ai::keychain` store the desktop uses. Without a key,
 or without a network, the lookup says which is missing.
 
+## TODO markers
+
+**Marker** on the bar above the keyboard drops the project's TODO marker at
+the cursor: `xxx`, or the `todo_marker` set in `book.toml`. It's an ordinary,
+undoable edit. Markers are highlighted in the text. **Markers** (on the same bar,
+or the flag in the toolbar) lists them for the open chapter, live, or for the
+whole book. Tapping one opens that spot with the marker selected.
+
+Markers are plain text, so they sync through git, and the desktop's `xxx:`
+count includes the phone's. Both sides match them the same way (case
+insensitive, `text::match_ranges`). The book-wide list reads only the chapters
+whose cached marker count is nonzero, and each save on the phone updates that
+count.
+
 ## The story bible and findings
 
 **Bible & Findings** in the chapter list shows the project's `bible/`, read

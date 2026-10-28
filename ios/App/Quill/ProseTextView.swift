@@ -34,6 +34,10 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
     /// Asked to look up the selected word or phrase (#1235): the selection,
     /// its range, and the paragraph it sits in.
     var onLookUp: (_ selection: String, _ range: NSRange, _ line: String) -> Void = { _, _, _ in }
+    /// Asked to show the TODO markers (#1237).
+    var onShowMarkers: () -> Void = {}
+    /// The project's TODO marker, inserted by the keyboard toolbar.
+    var todoMarker = "xxx"
 
     init(editor: ChapterEditor) {
         self.editor = editor
@@ -58,6 +62,31 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
         restyle(view.textStorage, NSRange(location: 0, length: view.textStorage.length))
         view.textStorage.delegate = self
         view.delegate = self
+        view.inputAccessoryView = keyboardToolbar()
+    }
+
+    /// The bar above the keyboard: drop a TODO marker at the cursor in one tap,
+    /// open the markers list, or put the keyboard away (#1237).
+    private func keyboardToolbar() -> UIToolbar {
+        let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
+        let marker = UIBarButtonItem(
+            title: "Marker", image: UIImage(systemName: "flag"),
+            primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                self.textView.insertAtCursor("\(self.todoMarker) ")
+            })
+        marker.accessibilityLabel = "Insert a TODO marker"
+        let list = UIBarButtonItem(
+            title: "Markers", image: UIImage(systemName: "list.bullet"),
+            primaryAction: UIAction { [weak self] _ in self?.onShowMarkers() })
+        list.accessibilityLabel = "Show TODO markers"
+        let done = UIBarButtonItem(
+            image: UIImage(systemName: "keyboard.chevron.compact.down"),
+            primaryAction: UIAction { [weak self] _ in self?.textView.resignFirstResponder() })
+        done.accessibilityLabel = "Hide the keyboard"
+        bar.items = [marker, list, .flexibleSpace(), done]
+        bar.sizeToFit()
+        return bar
     }
 
     /// Add "Look Up Word" to the edit menu when a word or short phrase is
@@ -217,6 +246,11 @@ enum ProseStyle {
             return [.foregroundColor: UIColor.secondaryLabel, .paragraphStyle: centered]
         case .marker:
             return [.foregroundColor: UIColor.tertiaryLabel]
+        case .todo:
+            return [
+                .backgroundColor: UIColor.systemYellow.withAlphaComponent(0.35),
+                .foregroundColor: UIColor.label,
+            ]
         case .strong, .emphasis:
             return [:]  // a font trait, added by `addTrait` so bold italic combines
         }

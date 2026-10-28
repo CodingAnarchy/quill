@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use quill_core::annotation::{Live, Remapper};
 use quill_core::buffer::Buffer;
 use quill_core::syntax::HighlightKind;
+use quill_core::text::match_ranges;
 
 use crate::{QuillError, QuillProject};
 
@@ -24,6 +25,8 @@ pub enum StyleKind {
     /// An emphasis delimiter (`*`, `_`, `**`), which the desktop hides and the
     /// phone shows dimmed so the author can still edit it.
     Marker,
+    /// The project's TODO marker (`xxx` by default, #1237), made to stand out.
+    Todo,
 }
 
 /// A styled span, in UTF-16 code units.
@@ -48,6 +51,8 @@ struct Session {
     /// The chapter's annotations, re-anchored through each burst of edits and
     /// written back on save so each note stays on its phrase.
     annotations: Vec<Live>,
+    /// The project's TODO marker (#1237).
+    todo: String,
 }
 
 #[uniffi::export]
@@ -55,7 +60,7 @@ impl QuillProject {
     /// Open chapter `index` for editing.
     pub fn edit_chapter(self: Arc<Self>, index: u32) -> Result<Arc<ChapterSession>, QuillError> {
         let index = index as usize;
-        let (buffer, file, annotations) = {
+        let (buffer, file, annotations, todo) = {
             let guard = self.lock();
             let p = guard.get()?;
             let Some(entry) = p.manifest.chapters.get(index) else {
@@ -65,7 +70,12 @@ impl QuillProject {
             };
             let file = entry.file.clone();
             let buffer = Buffer::from_path(p.chapter_path(index))?;
-            (buffer, file.clone(), p.annotations_for(&file))
+            (
+                buffer,
+                file.clone(),
+                p.annotations_for(&file),
+                p.manifest.todo_marker().to_string(),
+            )
         };
         Ok(Arc::new(ChapterSession {
             project: self,
@@ -74,6 +84,7 @@ impl QuillProject {
                 index,
                 file,
                 annotations,
+                todo,
             }),
         }))
     }
@@ -120,7 +131,8 @@ impl ChapterSession {
     /// The styled spans overlapping the UTF-16 range `[start, end)`. Reparses
     /// first if the text changed, and only the edited blocks are reparsed.
     pub fn styles(&self, start: u32, end: u32) -> Vec<StyleSpan> {
-        let mut s = self.lock();
+        let mut guard = self.lock();
+        let s = &mut *guard;
         let b = &mut s.buffer;
         b.refresh_syntax();
         let from = b.byte_of_utf16(start as usize);
@@ -137,6 +149,14 @@ impl ChapterSession {
                 .iter()
                 .take_while(|&&(s, _)| s < to)
                 .map(|&(s, e)| span(b, s, e, StyleKind::Marker)),
+        );
+        // TODO markers in the requested range, matched the way the desktop
+        // counts them (case-insensitive), so both agree on what's a marker.
+        let slice = b.byte_slice(from, to);
+        spans.extend(
+            match_ranges(&slice, &s.todo)
+                .into_iter()
+                .map(|(ms, me)| span(b, from + ms, from + me, StyleKind::Todo)),
         );
         spans
     }
@@ -164,12 +184,15 @@ impl ChapterSession {
                 });
         }
         let words = s.buffer.word_count();
+        let todos = s.buffer.count_matches(&s.todo);
         let mut guard = self.project.lock();
         let p = guard.get_mut()?;
         if !edits.is_empty() {
             p.set_annotations([(s.file.as_str(), s.annotations.as_slice())])?;
         }
         p.set_chapter_words(s.index, words);
+        // Keep the project-wide marker list's cache current (#1237).
+        p.set_chapter_todo(s.index, todos);
         Ok(())
     }
 }
@@ -177,6 +200,27 @@ impl ChapterSession {
 impl ChapterSession {
     fn lock(&self) -> MutexGuard<'_, Session> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Run `f` over the buffer as it stands.
+    pub fn with_buffer<T>(&self, f: impl FnOnce(&Buffer) -> T) -> T {
+        f(&self.lock().buffer)
+    }
+
+    /// The project's TODO marker.
+    pub fn todo(&self) -> String {
+        self.lock().todo.clone()
+    }
+
+    /// The chapter's title.
+    pub fn title(&self) -> String {
+        let index = self.lock().index;
+        self.project
+            .lock()
+            .get()
+            .ok()
+            .and_then(|p| p.chapter_title(index).map(str::to_string))
+            .unwrap_or_default()
     }
 }
 
