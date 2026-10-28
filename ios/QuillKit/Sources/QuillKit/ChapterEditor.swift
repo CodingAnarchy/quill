@@ -1,0 +1,90 @@
+import Foundation
+import Observation
+
+/// One chapter open for editing (#1232). The text view owns the on-screen
+/// text and reports each change here as a UTF-16 range and its replacement;
+/// the Rust core applies it to its buffer, keeps the live word count, and
+/// saves the chapter, front matter and annotations included, the way the
+/// desktop does.
+///
+/// Saving is never left to chance: ``noteEdit()`` schedules a save shortly
+/// after typing pauses, and the app calls ``save()`` whenever it leaves the
+/// foreground.
+@MainActor
+@Observable
+public final class ChapterEditor {
+    public let chapter: ChapterInfo
+    /// The prose as loaded; the text view takes it from here.
+    public let initialText: String
+    public private(set) var wordCount: UInt64
+    public private(set) var dirty = false
+    /// The last save failure, for the view to show.
+    public private(set) var saveError: String?
+
+    /// How long typing must pause before an automatic save.
+    public var saveDelay: Duration = .seconds(1)
+
+    private let session: ChapterSession
+    private let onSave: @MainActor () -> Void
+    private var pendingSave: Task<Void, Never>?
+
+    /// Open `chapter` of `project` for editing. `onSave` runs after each save
+    /// (the project store refreshes its chapter list there).
+    public init(
+        project: QuillProject, chapter: ChapterInfo, onSave: @escaping @MainActor () -> Void = {}
+    ) throws {
+        session = try project.editChapter(index: chapter.index)
+        self.chapter = chapter
+        self.onSave = onSave
+        initialText = session.text()
+        wordCount = session.wordCount()
+    }
+
+    /// The text view replaced the UTF-16 `range` of the old text with
+    /// `replacement`.
+    public func apply(range: NSRange, replacement: String) {
+        session.applyEdit(
+            start: UInt32(range.location), end: UInt32(range.location + range.length),
+            replacement: replacement)
+        wordCount = session.wordCount()
+        dirty = true
+        noteEdit()
+    }
+
+    /// The styled spans overlapping `range` (UTF-16).
+    public func styles(in range: NSRange) -> [StyleSpan] {
+        session.styles(start: UInt32(range.location), end: UInt32(range.location + range.length))
+    }
+
+    /// The core's length of the text, in UTF-16 units (for consistency checks).
+    public var utf16Length: Int { Int(session.utf16Length()) }
+
+    /// Save after typing pauses.
+    public func noteEdit() {
+        pendingSave?.cancel()
+        let delay = saveDelay
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.save()
+        }
+    }
+
+    /// Save now if anything changed. Safe to call any time.
+    public func save() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard session.isDirty() else {
+            dirty = false
+            return
+        }
+        do {
+            try session.save()
+            dirty = false
+            saveError = nil
+            onSave()
+        } catch {
+            saveError = describe(error)
+        }
+    }
+}

@@ -4,7 +4,7 @@
 //! wrapping the text, dropping concealed emphasis markers, and layering syntax,
 //! search, spell, annotation, and focus styling onto every run.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -42,13 +42,13 @@ pub(super) fn fold_glyph_cells() -> u16 {
 /// kind is one field rather than a parameter added to three signatures.
 pub(super) struct SpanHighlights<'a> {
     /// Emphasis-marker ranges to hide, except on the cursor's span (#296). Held as
-    /// the `Rc` the parse caches (#869) so the layout recorder shares it for click
+    /// the `Arc` the parse caches (#869) so the layout recorder shares it for click
     /// inversion rather than cloning the ranges each frame.
     ///
     /// This and the plain-slice lists below cover the whole buffer and must each
     /// be start-sorted and pairwise disjoint: [`styled_row`] narrows them to the
     /// row with [`disjoint_within`] (checked in debug builds where they're built).
-    pub(super) conceal: Rc<[(usize, usize)]>,
+    pub(super) conceal: Arc<[(usize, usize)]>,
     /// Search/replace matches or the Visual selection, dim-highlighted (#144/#205).
     pub(super) matches: &'a [ByteRange],
     /// The current search match / live selection, highlighted brighter (#144/#205).

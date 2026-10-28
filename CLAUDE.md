@@ -229,6 +229,11 @@ What they assert:
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
   words), so flagging on idle never stutters. It runs on the idle tick, never the
   keystroke path; the one-time dictionary parse is warmed before timing.
+- `a_keystroke_is_fast_in_a_long_chapter` (`crates/quill-ffi/src/session/tests.rs`)
+  — the iPhone editor's per-keystroke work through the FFI (#1232): apply the
+  UTF-16 edit, restyle the edited paragraph, read the live count. It stays far
+  inside a frame on a 10k-word chapter (~0.1ms). Styling a paragraph must never
+  turn into styling the chapter.
 
 The corpus, every benchmark, its target, and the rationale are written up in
 [`docs/performance.md`](docs/performance.md) — the pre-release perf gate. Run

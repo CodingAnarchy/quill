@@ -104,6 +104,23 @@ The app also keeps Quill's own editor state (`.quill/`) out of git through
 `.git/info/exclude`, so a repository set up without Quill's `.gitignore`
 still pulls cleanly.
 
+## Editing
+
+The chapter is a `UITextView`, so selection, copy and paste, dictation,
+autocorrect, and undo all behave as they do in any iOS app. Its text storage
+reports each change as an exact UTF-16 range and replacement, and the Rust
+core applies it to the same rope buffer the desktop edits. The core keeps the
+live word count, styles the edited paragraph (emphasis, headings, scene
+breaks), and saves the chapter through the desktop's atomic save, which
+re-attaches its front matter byte for byte and keeps annotations on their
+phrases.
+
+The app saves a second after typing pauses, and whenever it leaves the
+foreground (switching apps, locking the phone, or swiping up to the app
+switcher all pass through `.inactive` first), inside a background task so iOS
+lets the write finish. The cost of a keystroke through the core is guarded by
+`a_keystroke_is_fast_in_a_long_chapter` (see `docs/performance.md`).
+
 ## Signing and TestFlight
 
 Signing details are personal, so they stay out of the repository. Copy

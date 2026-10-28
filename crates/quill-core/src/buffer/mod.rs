@@ -793,6 +793,33 @@ impl Buffer {
         self.rope.len_bytes()
     }
 
+    // --- UTF-16 positions (#1232) --------------------------------------------
+    //
+    // UIKit addresses text in UTF-16 code units, the buffer in UTF-8 bytes. An
+    // emoji is two code units and four bytes; an "é" written as "e" plus a
+    // combining accent is two code units and three bytes. The phone converts
+    // every position through these, in O(log n) on the rope, never by counting
+    // through the text.
+
+    /// Total length in UTF-16 code units.
+    pub fn len_utf16(&self) -> usize {
+        self.rope.len_utf16_cu()
+    }
+
+    /// The byte offset of UTF-16 code unit `cu`, clamped to the end. An offset
+    /// inside a surrogate pair (half an emoji) rounds down to the start of
+    /// its character, so an edit can never split one.
+    pub fn byte_of_utf16(&self, cu: usize) -> usize {
+        let cu = cu.min(self.rope.len_utf16_cu());
+        self.rope.char_to_byte(self.rope.utf16_cu_to_char(cu))
+    }
+
+    /// The UTF-16 code unit offset of byte `byte`, clamped to the end.
+    pub fn utf16_of_byte(&self, byte: usize) -> usize {
+        let byte = byte.min(self.rope.len_bytes());
+        self.rope.char_to_utf16_cu(self.rope.byte_to_char(byte))
+    }
+
     /// The byte just past the grapheme starting at `byte` — so an inclusive
     /// motion or `x` can cover the grapheme the cursor is on. Clamped to the end.
     ///

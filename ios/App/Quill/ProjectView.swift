@@ -11,11 +11,12 @@ struct ProjectView: View {
         NavigationSplitView {
             ChapterSidebar(selection: $app.selectedChapter)
         } detail: {
-            if let index = app.selectedChapter,
-                let chapter = app.store.chapters.first(where: { $0.index == index })
-            {
-                ChapterReader(chapter: chapter)
-                    .id(chapter)
+            if let prose = app.prose {
+                ChapterEditorView(host: prose)
+            } else if let error = app.chapterError {
+                ContentUnavailableView(
+                    "Couldn't open the chapter", systemImage: "exclamationmark.triangle",
+                    description: Text(error))
             } else {
                 ContentUnavailableView("Choose a chapter", systemImage: "book")
             }
@@ -110,30 +111,43 @@ struct ChapterRow: View {
     }
 }
 
-/// A chapter's prose, read-only (#1231); editing arrives with #1232.
-struct ChapterReader: View {
-    @Environment(ProjectStore.self) private var store
-    let chapter: ChapterInfo
-    @State private var text = ""
-    @State private var error: String?
+/// The open chapter: its prose, editable, with a live word count.
+struct ChapterEditorView: View {
+    let host: ProseHost
 
     var body: some View {
-        ScrollView {
-            Text(error ?? text)
-                .font(.system(.body, design: .serif))
-                .frame(maxWidth: 640, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .textSelection(.enabled)
-        }
-        .navigationTitle(chapter.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .task(id: chapter) {
-            do {
-                text = try store.text(of: chapter)
-            } catch {
-                self.error = describe(error)
+        ProseTextView(host: host)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .navigationTitle(host.editor.chapter.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .status) {
+                    WordCountLabel(editor: host.editor)
+                }
             }
+            .toolbarTitleMenu {
+                if let error = host.editor.saveError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                }
+            }
+    }
+}
+
+/// "1,204 words", and a warning when the last save failed.
+struct WordCountLabel: View {
+    let editor: ChapterEditor
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if editor.saveError != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("Not saved")
+            }
+            Text(Format.words(editor.wordCount))
+                .monospacedDigit()
         }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 }

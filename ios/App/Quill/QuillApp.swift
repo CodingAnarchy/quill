@@ -21,12 +21,21 @@ struct QuillApp: App {
 struct RootView: View {
     @Environment(AppState.self) private var app
     @Environment(ProjectStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if store.url == nil {
-            LibraryView()
-        } else {
-            ProjectView()
+        Group {
+            if store.url == nil {
+                LibraryView()
+            } else {
+                ProjectView()
+            }
+        }
+        // Switching apps, locking the phone, or swiping to the app switcher all
+        // pass through `.inactive`: save there, before iOS can suspend or kill
+        // the app, so no typed word is lost (#1232).
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { app.saveForBackground() }
         }
     }
 }

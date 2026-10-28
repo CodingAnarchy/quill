@@ -10,6 +10,7 @@ mod editing;
 mod graphemes;
 mod motions;
 mod save_load;
+mod utf16;
 mod word_count;
 
 /// A unique-per-process path for a test file, inside a fresh scratch dir (#428).
