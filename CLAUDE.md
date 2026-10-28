@@ -37,6 +37,12 @@ The repository is a Cargo workspace (#1229):
   other core modules by name, so the editor still writes `crate::project`,
   `crate::buffer`, and so on.
 
+- **`crates/quill-ffi`** and **`ios/`**: the iPhone app (#1230). `quill-ffi`
+  exports a coarse Swift API over the core with UniFFI, and `ios/` holds the
+  Swift package and the SwiftUI app. `docs/ios.md` covers building and testing
+  them. Keep phone logic in the core or in `quill-ffi`, where Rust tests reach
+  it, and keep the Swift side thin.
+
 **`quill-core` must never depend on the terminal UI.** No `ratatui`, no
 `crossterm`, and no reaching back into `app`, `mode`, `ui`, or `theme`. (Cargo
 enforces the last part, because the core can't name the binary's modules.) When
@@ -122,7 +128,7 @@ cargo test            # unit + render tests (must be green)
 cargo clippy --all-targets   # must be clean
 ```
 
-Run them from the workspace root: `default-members` makes each cover both crates.
+Run them from the workspace root: `default-members` makes each cover every crate.
 (CI enforces these on every PR — see `.github/workflows/ci.yml`: fmt on ubuntu,
 clippy (`-D warnings`) and tests on both ubuntu and macos, plus a
 `--features local` job and an informational `cargo perf` run on pushes to

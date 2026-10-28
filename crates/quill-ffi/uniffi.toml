@@ -1,0 +1,7 @@
+# Swift module names for the generated bindings (#1230). The app imports
+# `QuillCore`; the C module under it (the header and module map packed into
+# the XCFramework by `ios/build-core.sh`) is `QuillFFI`.
+[bindings.swift]
+module_name = "QuillCore"
+ffi_module_name = "QuillFFI"
+ffi_module_filename = "QuillFFI"

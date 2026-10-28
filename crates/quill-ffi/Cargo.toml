@@ -1,0 +1,35 @@
+[package]
+name = "quill-ffi"
+version = "1.3.0"
+edition = "2021"
+description = "Swift bindings (UniFFI) over quill-core for the Quill iPhone app"
+license = "MIT"
+repository = "https://github.com/CodingAnarchy/quill"
+publish = false
+
+# `staticlib` is what the iOS app links (packaged into an XCFramework by
+# `ios/build-core.sh`); `lib` lets this crate's own Rust tests and the bindgen
+# binary use it.
+[lib]
+name = "quill_ffi"
+crate-type = ["lib", "staticlib"]
+
+# Generates the Swift bindings from the built library (UniFFI "library mode").
+# Behind a feature so a normal build doesn't compile the bindgen CLI.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[dependencies]
+quill-core = { path = "../quill-core" }
+uniffi = "0.32"
+
+[dev-dependencies]
+quill-core = { path = "../quill-core", features = ["test-support"] }
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[lints]
+workspace = true

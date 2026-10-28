@@ -16,3 +16,7 @@ channel = "1.98.0"
 # in CLAUDE.md ("Standard checks") actually run.
 profile = "minimal"
 components = ["clippy", "rustfmt"]
+# The iPhone app's targets (#1230): device and Apple-silicon simulator. Listed
+# here so rustup installs them with the pinned toolchain, on CI and locally,
+# and `ios/build-core.sh` never has to `rustup target add` anything.
+targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"]

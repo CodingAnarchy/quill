@@ -1,0 +1,14 @@
+title = "The Keeper's Daughter"
+author = "Quill"
+
+[[chapters]]
+title = "The Lamp Room"
+file = "01-the-lamp-room.md"
+
+[[chapters]]
+title = "Low Tide"
+file = "02-low-tide.md"
+
+[[chapters]]
+title = "What the Fog Kept"
+file = "03-what-the-fog-kept.md"
