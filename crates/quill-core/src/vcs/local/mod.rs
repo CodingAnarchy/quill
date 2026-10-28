@@ -51,6 +51,43 @@ const GITIGNORE: &str = "\
 *.tmp
 ";
 
+/// The lines of [`GITIGNORE`] that cover Quill's own editor state, which must
+/// stay out of commits however the repository was set up.
+const EDITOR_STATE: [&str; 2] = ["/.quill/", "/bible/.state.toml"];
+
+/// Keep Quill's editor state (the project lock, caches) out of `root`'s
+/// commits and out of its "uncommitted changes" check, even when the
+/// repository's own `.gitignore` doesn't list it: a repo set up outside Quill,
+/// then cloned onto the phone (#1231). Adds the lines to `.git/info/exclude`,
+/// which git reads like a `.gitignore` but never commits, so the author's
+/// files are untouched. A no-op outside a repository or when already present.
+pub fn exclude_editor_state(root: &Path) -> Result<(), String> {
+    if !is_repo(root) {
+        return Ok(());
+    }
+    let info = root.join(".git").join("info");
+    let path = info.join("exclude");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let missing: Vec<&str> = EDITOR_STATE
+        .into_iter()
+        .filter(|line| !existing.lines().any(|l| l.trim() == *line))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str("# Quill editor state\n");
+    for line in missing {
+        text.push_str(line);
+        text.push('\n');
+    }
+    fs::create_dir_all(&info).map_err(|e| format!("write {}: {e}", path.display()))?;
+    fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
 /// Whether `root` is already the top of a Git repository.
 pub fn is_repo(root: &Path) -> bool {
     root.join(".git").exists()

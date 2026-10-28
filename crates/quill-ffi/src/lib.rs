@@ -7,12 +7,14 @@
 //! never disagree with the desktop about it.
 
 mod error;
+mod git;
 mod project;
 
 use std::env;
 use std::path::Path;
 
 pub use error::QuillError;
+pub use git::{clone_destination, clone_project, set_git_token};
 pub use project::{BookInfo, ChapterInfo, ProjectForm, ProjectInfo, QuillProject};
 
 uniffi::setup_scaffolding!();

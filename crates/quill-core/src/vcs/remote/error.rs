@@ -60,9 +60,22 @@ impl RemoteError {
     /// by the concrete recovery move. This is what push/pull/sync return as their
     /// error, so the category shapes the message the editor shows.
     pub fn message(&self) -> String {
+        self.message_for(super::token::supplied().is_some())
+    }
+
+    /// [`message`](Self::message), told whether the front end supplied the
+    /// HTTPS token itself (the iPhone app, #1231), which has no SSH key or
+    /// credential helper to point the author at.
+    pub(in crate::vcs) fn message_for(&self, token_supplied: bool) -> String {
         match self.kind {
             RemoteErrorKind::Offline => {
                 "Can't reach the remote — check your internet connection, then try again."
+                    .to_string()
+            }
+            RemoteErrorKind::Auth if token_supplied => {
+                "Authentication failed — the remote rejected your access token. Check that \
+                 it hasn't expired and can read and write this repository, then enter it \
+                 again."
                     .to_string()
             }
             RemoteErrorKind::Auth => "Authentication failed — the remote rejected your \

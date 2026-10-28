@@ -27,6 +27,9 @@ uniffi = "0.32"
 
 [dev-dependencies]
 quill-core = { path = "../quill-core", features = ["test-support"] }
+# A bare repository stands in for the hosted remote in the sync tests. Already
+# in the tree through quill-core, so this adds no download.
+git2 = { version = "0.20", default-features = false }
 
 [features]
 bindgen = ["uniffi/cli"]

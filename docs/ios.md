@@ -78,6 +78,32 @@ CI runs the same steps on every PR (the `ios` job in
 `.github/workflows/ci.yml`): it builds the core, runs the QuillKit tests, and
 builds the app for the simulator and, unsigned, for a device.
 
+## Getting a novel onto the phone
+
+The phone reaches the author's novel through the same git remote the desktop
+pushes to. HTTPS only: iOS has no ssh-agent.
+
+1. On the host (GitHub, say), create a personal access token that can read and
+   write the novel's repository. On GitHub that's a fine-grained token with
+   **Contents: Read and write** on that one repository.
+2. In the app, open **Projects → Clone from Git…** and enter the repository's
+   HTTPS address and the token.
+
+The token goes into the iOS Keychain (this device only, readable after the
+first unlock), keyed by the remote's host, and is used only after a clone
+succeeds with it. It's handed to the Rust core in memory before each pull or
+sync and never written to `.git/config` or any other file.
+
+A clone lands whole or not at all. It's staged in a hidden folder and moved
+into `Documents/Projects` only once it has checked out and proven to be a
+Quill project. A wrong token, no network, or a repository without a
+`book.toml` each leaves nothing behind and says what to fix.
+
+**Pull** (or pull down on the chapter list) brings in what the desktop pushed.
+The app also keeps Quill's own editor state (`.quill/`) out of git through
+`.git/info/exclude`, so a repository set up without Quill's `.gitignore`
+still pulls cleanly.
+
 ## Signing and TestFlight
 
 Signing details are personal, so they stay out of the repository. Copy

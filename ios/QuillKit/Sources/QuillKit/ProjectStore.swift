@@ -11,6 +11,10 @@ public final class ProjectStore {
     /// The last failure to open or read, for the view to show.
     public private(set) var error: String?
     public private(set) var url: URL?
+    /// The `origin` the project pulls from, if it has one.
+    public private(set) var remote: String?
+    /// True while a pull is running.
+    public private(set) var pulling = false
 
     private var project: QuillProject?
 
@@ -36,14 +40,45 @@ public final class ProjectStore {
     /// Re-read the project's details and chapter list from the core.
     public func refresh() {
         guard let project else { return }
-        info = project.info()
-        chapters = project.chapters()
+        do {
+            info = try project.info()
+            chapters = try project.chapters()
+            remote = try project.remoteUrl()
+        } catch {
+            self.error = describe(error)
+        }
+    }
+
+    /// Close the project.
+    public func close() {
+        project = nil
+        info = nil
+        chapters = []
+        url = nil
+        remote = nil
+        error = nil
     }
 
     /// Switch a series to book `index`.
     public func selectBook(_ index: UInt32) {
-        project?.setActiveBook(index: index)
+        do {
+            try project?.setActiveBook(index: index)
+        } catch {
+            self.error = describe(error)
+        }
         refresh()
+    }
+
+    /// Pull the remote's changes and refresh the chapter list. Returns the
+    /// core's message for the author ("Pulled the latest changes…"). The
+    /// caller supplies the token first (``Library/useToken(for:)``).
+    public func pull() async throws -> String {
+        guard let project else { return "" }
+        pulling = true
+        defer { pulling = false }
+        let message = try await Task.detached { try project.pull() }.value
+        refresh()
+        return message
     }
 
     /// A chapter's prose, with its front matter hidden.

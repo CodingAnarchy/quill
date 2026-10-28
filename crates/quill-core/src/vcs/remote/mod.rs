@@ -21,16 +21,20 @@
 //! `pull` and the credential/branch plumbing, and re-exports the pieces so
 //! `super::remote::…` (and the flat `crate::vcs::…` surface) see one facade.
 
+mod clone;
 mod error;
 pub(in crate::vcs) mod merge;
 mod sync;
+mod token;
 
 use std::path::Path;
 
 use super::local::{is_dirty, signature};
 
-pub use error::RemoteError;
+pub use clone::{clone, folder_name};
+pub use error::{RemoteError, RemoteErrorKind};
 pub use sync::{finalize_sync, sync, ChapterConflict};
+pub use token::set_token;
 
 pub(in crate::vcs) use error::classify;
 
@@ -274,9 +278,10 @@ fn current_branch(repo: &git2::Repository) -> Result<String, String> {
 }
 
 /// git2 credential callback: reuse whatever the author already has, rather than
-/// inventing key management. SSH URLs use the ssh-agent; HTTPS uses a token from
-/// the environment if present, otherwise the system git credential helper (e.g.
-/// the macOS keychain or `gh`). Documented in `docs/git-integration-spike.md`.
+/// inventing key management. SSH URLs use the ssh-agent; HTTPS uses a token the
+/// front end supplied ([`set_token`], the iPhone app's Keychain, #1231), then one
+/// from the environment, otherwise the system git credential helper (e.g. the
+/// macOS keychain or `gh`). Documented in `docs/git-integration-spike.md`.
 fn credentials(
     url: &str,
     username: Option<&str>,
@@ -287,7 +292,7 @@ fn credentials(
         return git2::Cred::ssh_key_from_agent(username.unwrap_or("git"));
     }
     if allowed.contains(Type::USER_PASS_PLAINTEXT) {
-        if let Some(token) = token_from_env() {
+        if let Some(token) = token::supplied().or_else(token_from_env) {
             return git2::Cred::userpass_plaintext(username.unwrap_or("git"), &token);
         }
         let config = git2::Config::open_default()?;
