@@ -591,7 +591,7 @@ impl Manuscript {
     /// (recovery captures prose only, re-attaching front matter on save), so a
     /// recovered body compares cleanly against the chapter's on-disk prose. The
     /// recovery writer computes the same text from [`dirty_spans`](Self::dirty_spans).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn dirty_segments(&self) -> Vec<(usize, String)> {
         self.dirty_spans()
             .into_iter()

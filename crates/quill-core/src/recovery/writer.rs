@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use ropey::Rope;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use crate::atomic;
 use crate::buffer::normalize_trailing_newline;
 
@@ -115,13 +115,13 @@ struct State {
     /// The [`Writer`] was dropped: finish the queue, then exit.
     closed: bool,
     /// Test seam: the worker parks after taking a job until released.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     held: bool,
     /// Test seam: the next write fails (just before its rename).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fail_next: bool,
     /// Test seam: how many sidecar writes the worker has performed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     writes: usize,
 }
 
@@ -253,13 +253,13 @@ impl Writer {
 
     /// Test seam: park the worker after it takes its next job (and every job
     /// after it) until [`release`](Self::release) — a disk that's stuck.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn hold(&self) {
         self.shared.lock().held = true;
     }
 
     /// Test seam: let a [`hold`](Self::hold)-parked worker carry on.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn release(&self) {
         self.shared.lock().held = false;
         self.shared.changed.notify_all();
@@ -267,7 +267,7 @@ impl Writer {
 
     /// Test seam: a handle that releases a [`hold`](Self::hold) from another
     /// thread — so a test can bound how long a stuck write may block it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn releaser(&self) -> impl FnOnce() + Send + 'static {
         let shared = Arc::clone(&self.shared);
         move || {
@@ -278,7 +278,7 @@ impl Writer {
 
     /// Test seam: block until the worker has taken a job (and, if held, parked
     /// on it), so a test knows which job is in flight.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn wait_in_flight(&self) {
         let mut state = self.shared.lock();
         while !state.busy {
@@ -287,13 +287,13 @@ impl Writer {
     }
 
     /// Test seam: make the worker's next sidecar write fail before its rename.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn fail_next_write(&self) {
         self.shared.lock().fail_next = true;
     }
 
     /// Test seam: how many sidecar writes the worker has performed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn writes(&self) -> usize {
         self.shared.lock().writes
     }
@@ -306,7 +306,7 @@ impl Drop for Writer {
         {
             let mut state = self.shared.lock();
             state.closed = true;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             {
                 state.held = false;
             }
@@ -331,20 +331,20 @@ fn work(shared: &Shared, block: bool) {
             let job = state.queue.remove(0);
             state.busy = true;
             shared.changed.notify_all();
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             while state.held {
                 state = shared.wait(state);
             }
             // The fail point is thread-local, so it's armed here, on the thread
             // that performs the write.
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             if matches!(job.op, Op::Write(_)) && std::mem::take(&mut state.fail_next) {
                 atomic::fail_point::arm_pre_rename_failure();
             }
             job
         };
         let ticket = job.ticket;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let is_write = matches!(job.op, Op::Write(_));
         let ok = perform(job);
         let mut state = shared.lock();
@@ -352,7 +352,7 @@ fn work(shared: &Shared, block: bool) {
         if !ok {
             state.failed = Some(ticket);
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if ok && is_write {
             state.writes += 1;
         }

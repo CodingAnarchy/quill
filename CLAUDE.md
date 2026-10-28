@@ -230,7 +230,7 @@ What they assert:
   `cargo test`: driving keys, the settled pass, the recovery tick, and the idle
   pass performs **zero** atomic writes on the UI thread (counted by the
   `atomic::write_count` test seam). The crash-recovery sidecar is written by a
-  background writer (`src/recovery/writer.rs`); a durable write on the UI thread
+  background writer (`crates/quill-core/src/recovery/writer.rs`); a durable write on the UI thread
   stalled typing for up to seconds on a busy disk.
 - `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k

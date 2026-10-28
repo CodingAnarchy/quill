@@ -83,7 +83,7 @@ where
 {
     // Test-only seam: count this thread's atomic writes, so a guard can prove
     // the typing/idle path never does one on the UI thread.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     write_count::bump();
     let synced = durability == Durability::Synced;
     let path = &resolve_symlink(path)?;
@@ -279,7 +279,7 @@ pub mod fail_point {
 /// typing for as long as the disk takes, so it must happen on a worker thread
 /// (whose writes count on that thread, not the caller's). Compiled out of
 /// production builds.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod write_count {
     use std::cell::Cell;
 
