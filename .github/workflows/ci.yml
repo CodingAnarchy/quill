@@ -84,6 +84,37 @@ jobs:
       - name: cargo check --features local (Metal)
         run: cargo check --features local
 
+  # The iPhone app (#1230): build the Rust core for device and simulator, run
+  # QuillKit's Swift tests against the macOS slice, and build the app for both
+  # the simulator and a device (unsigned). A core change that breaks the phone
+  # build fails here. The Rust targets come from rust-toolchain.toml.
+  ios:
+    name: ios (core + app)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build the core (device, simulator, macOS)
+        run: ios/build-core.sh
+      - name: QuillKit tests
+        run: ios/test-kit.sh --no-build
+      - name: Generate the Xcode project
+        run: cd ios/App && xcodegen generate
+      - name: Build the app (simulator)
+        run: >-
+          xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath ios/build/DerivedData
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Build the app (device, unsigned)
+        run: >-
+          xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
+          -destination 'generic/platform=iOS'
+          -derivedDataPath ios/build/DerivedData
+          CODE_SIGNING_ALLOWED=NO build
+
   # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
   # single-threaded). Timing thresholds are tuned for a real machine; a shared CI
   # runner is a 2-vCPU VM that runs this CPU-bound work ~2.5–3x slower (e.g. the

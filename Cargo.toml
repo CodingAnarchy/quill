@@ -4,7 +4,7 @@
 # bare `cargo build` / `test` / `clippy` from here cover every crate.
 [workspace]
 members = [".", "crates/*"]
-default-members = [".", "crates/quill-core"]
+default-members = [".", "crates/quill-core", "crates/quill-ffi"]
 
 [package]
 name = "quill"
@@ -60,6 +60,17 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The iPhone app's build of the core (#1230, `ios/build-core.sh`). Release
+# speed, but thin LTO keeps the per-target builds quick, and `panic = "unwind"`
+# lets UniFFI turn a Rust panic into a Swift error instead of killing the app.
+# Symbols stay in: Xcode strips the app when it archives it.
+[profile.ios]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+panic = "unwind"
+strip = false
 
 [lints]
 workspace = true

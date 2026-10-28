@@ -1,0 +1,4 @@
+// Copy to Signing.xcconfig (git-ignored) and fill in your own values. See
+// docs/ios.md, "Signing and TestFlight".
+QUILL_BUNDLE_ID = com.yourname.quill
+QUILL_TEAM_ID = ABCDE12345

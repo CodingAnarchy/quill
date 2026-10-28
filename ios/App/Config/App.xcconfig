@@ -1,0 +1,14 @@
+// Build settings shared by every configuration of the Quill app (#1230).
+//
+// Signing details are personal, so they stay out of this public repository:
+// copy Signing.xcconfig.example to Signing.xcconfig (git-ignored) and fill in
+// your bundle ID and team ID. Without it, the defaults below build for the
+// simulator and with Xcode's free personal team.
+// The core is built for the Apple-silicon simulator only (ios/build-core.sh),
+// so an Intel simulator slice would have nothing to link.
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
+
+QUILL_BUNDLE_ID = dev.quill.Quill
+QUILL_TEAM_ID =
+
+#include? "../Signing.xcconfig"

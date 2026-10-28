@@ -1,0 +1,51 @@
+# The Quill iPhone app (#1230), as an XcodeGen spec. Generate the Xcode project
+# with `xcodegen generate` in this folder (it writes Quill.xcodeproj, which is
+# git-ignored), after ios/build-core.sh has built the Rust core.
+name: Quill
+options:
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/App.xcconfig
+  Release: Config/App.xcconfig
+packages:
+  QuillKit:
+    path: ../QuillKit
+targets:
+  Quill:
+    type: application
+    platform: iOS
+    sources:
+      - path: Quill
+      # Copied into the bundle as a folder; the app installs a writable copy.
+      - path: SampleNovel
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: QuillKit
+        product: QuillKit
+    info:
+      path: Quill/Info.plist
+      properties:
+        CFBundleDisplayName: Quill
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(QUILL_BUNDLE_ID)
+        DEVELOPMENT_TEAM: $(QUILL_TEAM_ID)
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "1.3.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_PREVIEWS: YES
