@@ -11,11 +11,14 @@
 //! which would defeat recovery exactly when it is needed.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::atomic;
+
+pub mod writer;
 
 const DIR: &str = ".quill";
 const FILE: &str = "recovery.json";
@@ -90,9 +93,17 @@ fn path(root: &Path) -> PathBuf {
 /// [`atomic::write`] — a PID-keyed sibling temp file, `fsync`ed and renamed into
 /// place — so an interrupted write can't leave a torn or empty sidecar over a
 /// previous good one, and concurrent processes never collide on the temp name.
-pub fn write(root: &Path, rec: &Recovery) -> std::io::Result<()> {
-    let json = serde_json::to_string(rec).map_err(std::io::Error::other)?;
-    fs::create_dir_all(root.join(DIR))?;
+///
+/// The editor calls this from its background [`writer`], so the write may land
+/// a moment after the capture: only `.quill/` itself is created, never the
+/// project root, so a late write for a project folder that has since been
+/// renamed or removed fails instead of resurrecting the folder.
+pub fn write(root: &Path, rec: &Recovery) -> io::Result<()> {
+    let json = serde_json::to_string(rec).map_err(io::Error::other)?;
+    match fs::create_dir(root.join(DIR)) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
     atomic::write(&path(root), json.as_bytes())
 }
 

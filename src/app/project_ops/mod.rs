@@ -157,13 +157,15 @@ impl App {
 
     /// Save and finalize the current project before adopting another in its place:
     /// flush the continuous window back to its chapters and the active chapter to
-    /// disk, then drop the recovery sidecar. Returns `Err` (with a message set) if
-    /// the save fails, so the caller aborts rather than risk unsaved work. Shared
-    /// by switching projects (#270) and renaming the open one (#424).
+    /// disk, then drop the recovery sidecar and wait for the background writer
+    /// to settle, so nothing queued for this project lands after it. Returns
+    /// `Err` (with a message set) if the save fails, so the caller aborts rather
+    /// than risk unsaved work. Shared by switching projects (#270) and renaming
+    /// the open one (#424).
     fn finalize_current_project(&mut self) -> Result<(), ()> {
         self.leave_continuous();
         self.flush_active()?;
-        self.clear_recovery();
+        self.settle_recovery_cleared();
         Ok(())
     }
 

@@ -232,6 +232,11 @@ fn main() -> io::Result<()> {
     // including a `?` error — leaves the terminal usable.
     let mut tui = Tui::new()?;
     let result = run(&mut tui, &mut app);
+    // Let the background recovery writer finish (bounded): a quit that discarded
+    // unsaved work queued a sidecar clear, and a clean quit may still have a
+    // write or clear in flight. Not a capture — a deliberate discard must not
+    // re-record what it just threw away.
+    app.flush_recovery();
     // The quiet on-quit recap (#1012): this session's net words and the day's net,
     // read from the daily tally already maintained (no new counting). Captured
     // before `record_session` advances the baseline, then printed *after* the TUI

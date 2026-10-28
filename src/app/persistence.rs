@@ -6,7 +6,7 @@ use crate::date;
 use crate::history;
 use crate::lastpos;
 use crate::mode::Pending;
-use crate::recovery;
+use crate::recovery::{self, writer::Segment, writer::Snapshot};
 
 use std::time::{Duration, Instant};
 
@@ -19,6 +19,13 @@ use super::App;
 /// loses at most this much typing beyond the last capture; the throttled write
 /// is deferred, never dropped (see [`App::tick_recovery`]).
 pub(super) const RECOVERY_MIN_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The longest [`App::flush_recovery`] waits for the background writer to
+/// settle. Only quit and the project-replacing actions (switch, rename, backup
+/// restore) wait at all; the bound keeps a disk that has stopped answering
+/// from hanging them for good. Generous, since a contended disk has been
+/// measured stalling a single sidecar write for several seconds.
+const RECOVERY_FLUSH_WAIT: Duration = Duration::from_secs(10);
 
 /// What a recovery capture wrote: the edit buffer's process-unique content
 /// [`revision`](crate::buffer::Buffer::revision) (re-issued on every edit and
@@ -181,14 +188,23 @@ impl App {
     /// once everything is clean — tracked by `recovery_written`, so a clean
     /// buffer issues at most one remove rather than one per idle tick.
     ///
+    /// Never touches the disk itself: it hands the background
+    /// [`writer`](recovery::writer) a snapshot — an O(1) clone of the buffer's
+    /// rope plus the chapter files to attribute it to — and returns, so a slow
+    /// durable write can't stall typing. The writer serializes and writes it,
+    /// newest snapshot first and never a backlog.
+    ///
     /// Only on change: a capture is keyed on the edit buffer's content revision
     /// plus the chapters it attributes text to ([`RecoveryKey`]), and an idle
-    /// pass whose key matches the last successful write returns before copying,
-    /// serializing, or fsyncing anything — an arrow key, a mouse move, or a pause
-    /// with no new edits costs a comparison, not a durable write. Unthrottled:
-    /// the event loop goes through [`tick_recovery`](Self::tick_recovery), which
-    /// adds the write-rate limit; tests and explicit callers capture at once.
+    /// pass whose key matches the last *submitted* capture returns before
+    /// snapshotting anything — an arrow key, a mouse move, or a pause with no
+    /// new edits costs a comparison. A write that fails resets the key (see
+    /// [`poll_recovery`](Self::poll_recovery)), so the next pass retries it.
+    /// Unthrottled: the event loop goes through
+    /// [`tick_recovery`](Self::tick_recovery), which adds the write-rate limit;
+    /// tests and explicit callers capture at once.
     pub(super) fn capture_recovery(&mut self) {
+        self.poll_recovery();
         let Some(key) = self.recovery_key() else {
             if self.recovery_written {
                 self.clear_recovery();
@@ -196,36 +212,59 @@ impl App {
             return;
         };
         if self.recovery_written && self.recovery_key.as_ref() == Some(&key) {
-            return; // the sidecar already holds exactly this text
+            return; // the sidecar already holds (or is getting) exactly this text
         }
-        let rec = match &self.manuscript {
-            // Continuous view: snapshot each dirty segment's in-memory prose,
-            // attributing it to that segment's chapter file.
-            Some(m) => {
-                let chapters = m
-                    .dirty_segments()
+        let snapshot = match &self.manuscript {
+            // Continuous view: each dirty segment's span of the window buffer,
+            // attributed to that segment's chapter file.
+            Some(m) => Snapshot::Segments {
+                text: m.buffer().rope().clone(),
+                segments: m
+                    .dirty_spans()
                     .into_iter()
-                    .map(|(index, body)| recovery::Chapter {
+                    .map(|(index, start, end)| Segment {
                         chapter_file: self.project.chapter_file(index).to_string(),
-                        body,
+                        start,
+                        end,
                     })
-                    .collect();
-                recovery::Recovery::from_chapters(chapters)
-            }
+                    .collect(),
+            },
             // Single-chapter view: the active chapter's buffer, 1:1 to its file
             // (the key already checked it's dirty and actually the active chapter).
-            None => Some(recovery::Recovery::single(
-                self.project.active_file().to_string(),
-                self.buffer.text(),
-            )),
+            None => Snapshot::Single {
+                chapter_file: self.project.active_file().to_string(),
+                text: self.buffer.rope().clone(),
+            },
         };
-        if let Some(rec) = rec {
-            if recovery::write(&self.project.root, &rec).is_ok() {
-                self.recovery_written = true;
-                self.recovery_key = Some(key);
-                self.recovery_captured_at = Some(Instant::now());
-            }
+        self.recovery_writer
+            .write(self.project.root.clone(), snapshot);
+        self.recovery_written = true;
+        self.recovery_key = Some(key);
+        self.recovery_captured_at = Some(Instant::now());
+    }
+
+    /// Note a failed background sidecar write: forget the submitted key and the
+    /// throttle stamp, so the next capture retries at once — as a failed
+    /// synchronous write always did. A cheap, uncontended poll (the writer holds
+    /// its lock only between jobs), run at the top of every capture.
+    fn poll_recovery(&mut self) {
+        if self.recovery_writer.take_failure() {
+            self.recovery_key = None;
+            self.recovery_captured_at = None;
         }
+    }
+
+    /// Wait (bounded by [`RECOVERY_FLUSH_WAIT`]) until every sidecar write and
+    /// clear handed to the background writer has reached the disk, then pick up
+    /// any failure. Never on the typing path: called at quit — so a captured
+    /// edit or a discard's clear isn't lost with the process — and before an
+    /// action replaces the project on disk or in the editor (switch, rename,
+    /// backup restore), so a late write or clear can't land in the next one.
+    /// Returns whether the writer settled in time.
+    pub(crate) fn flush_recovery(&mut self) -> bool {
+        let settled = self.recovery_writer.flush(RECOVERY_FLUSH_WAIT);
+        self.poll_recovery();
+        settled
     }
 
     /// The event loop's recovery capture: [`capture_recovery`](Self::capture_recovery)
@@ -235,9 +274,11 @@ impl App {
     /// A write the throttle holds back is not lost: the next call after the
     /// interval — at most one loop tick (~100ms) late, input or not — sees the
     /// changed key and writes the latest text, so the final state of a burst is
-    /// always captured within about `RECOVERY_MIN_INTERVAL` of the last edit.
-    /// Clearing the sidecar (everything saved) is never throttled.
+    /// always captured within about `RECOVERY_MIN_INTERVAL` of the last edit
+    /// (plus the background write itself). Clearing the sidecar (everything
+    /// saved) is never throttled, and neither is retrying a failed write.
     pub(crate) fn tick_recovery(&mut self) {
+        self.poll_recovery();
         let throttled = self
             .recovery_captured_at
             .is_some_and(|t| t.elapsed() < RECOVERY_MIN_INTERVAL);
@@ -285,11 +326,21 @@ impl App {
     }
 
     /// Remove the recovery sidecar — nothing left to recover (a clean save, an
-    /// explicit discard, or a deliberate quit despite unsaved changes).
+    /// explicit discard, or a deliberate quit despite unsaved changes). Queued on
+    /// the background writer behind any write already in flight, superseding any
+    /// still waiting, so the clear always lands last; returns at once.
     pub(super) fn clear_recovery(&mut self) {
-        recovery::clear(&self.project.root);
+        self.recovery_writer.clear(self.project.root.clone());
         self.recovery_written = false;
         self.recovery_key = None;
+    }
+
+    /// [`clear_recovery`](Self::clear_recovery) and wait for it to land — for an
+    /// action about to replace the project (switch, rename, backup restore), which
+    /// must not have a queued sidecar write or clear land in what replaces it.
+    pub(super) fn settle_recovery_cleared(&mut self) {
+        self.clear_recovery();
+        self.flush_recovery();
     }
 
     /// At launch, offer back any unsaved work a previous session left behind.

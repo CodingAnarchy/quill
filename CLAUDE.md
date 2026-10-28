@@ -225,6 +225,13 @@ What they assert:
   the per-block reparse; ~10ms before it). The heavy idle work (spell re-judging, tally, the fsync'd recovery
   write, undo sealing) is debounced to a pause in input (`on_quiet`); running it
   per batch again would roughly double this and trip the guard.
+- `the_typing_and_idle_path_never_writes_on_the_ui_thread`
+  (`app/tests/recovery_writer.rs`) — a plain (non-ignored) test, so it runs in
+  `cargo test`: driving keys, the settled pass, the recovery tick, and the idle
+  pass performs **zero** atomic writes on the UI thread (counted by the
+  `atomic::write_count` test seam). The crash-recovery sidecar is written by a
+  background writer (`crates/quill-core/src/recovery/writer.rs`); a durable write on the UI thread
+  stalled typing for up to seconds on a busy disk.
 - `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
   words), so flagging on idle never stutters. It runs on the idle tick, never the
