@@ -6,44 +6,31 @@
 
 mod ai;
 mod analysis;
-mod annotation;
 mod app;
-mod archive;
-mod atomic;
-mod buffer;
 mod clipboard;
 mod config;
-#[cfg(test)]
-mod datapath_tests;
-mod date;
-mod export;
 mod fonts;
-mod frontmatter;
 mod guide;
-mod history;
 mod history_view;
-mod lastpos;
-mod manuscript;
-mod manuscript_import;
 mod mode;
 mod onboarding;
-mod project;
-mod recent;
-mod recovery;
 mod report;
-mod scenes;
-mod spell;
 mod startup;
-mod syntax;
-#[cfg(test)]
-mod testutil;
-mod text;
 mod theme;
 mod typography;
 mod ui;
-mod vcs;
 mod workflow;
-mod wrap;
+
+// The UI-free editing core (#1229). Imported by name at the crate root so the
+// editor keeps addressing it as `crate::project`, `crate::buffer`, and so on;
+// `ai`, `analysis`, and `config` are local modules that re-export the core's
+// and add the pieces that draw.
+#[cfg(test)]
+use quill_core::testutil;
+use quill_core::{
+    annotation, archive, atomic, buffer, date, export, frontmatter, history, lastpos, manuscript,
+    manuscript_import, project, recent, recovery, scenes, spell, syntax, text, vcs, wrap,
+};
 
 use std::io::{self, Stdout, Write};
 use std::path::{Path, PathBuf};

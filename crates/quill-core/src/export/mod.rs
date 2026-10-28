@@ -325,7 +325,7 @@ pub enum TextStyle {
 impl TextStyle {
     /// The style for the given `(bold, italic)` emphasis flags — the bridge from the
     /// run-splitter's two accumulating booleans to the named style.
-    pub(crate) const fn from_flags(bold: bool, italic: bool) -> Self {
+    pub const fn from_flags(bold: bool, italic: bool) -> Self {
         match (bold, italic) {
             (false, false) => Self::Plain,
             (true, false) => Self::Bold,
@@ -335,12 +335,12 @@ impl TextStyle {
     }
 
     /// Whether the style is bold.
-    pub(crate) const fn is_bold(self) -> bool {
+    pub const fn is_bold(self) -> bool {
         matches!(self, Self::Bold | Self::BoldItalic)
     }
 
     /// Whether the style is italic.
-    pub(crate) const fn is_italic(self) -> bool {
+    pub const fn is_italic(self) -> bool {
         matches!(self, Self::Italic | Self::BoldItalic)
     }
 }
@@ -351,14 +351,14 @@ impl TextStyle {
 /// an untyped `(String, bool, bool)` tuple on each side (#506).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Run {
-    pub(crate) text: String,
-    pub(crate) bold: bool,
-    pub(crate) italic: bool,
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 impl Run {
     /// A run carrying `text` with the given [`TextStyle`] emphasis (#1083).
-    pub(crate) fn new(text: impl Into<String>, style: TextStyle) -> Self {
+    pub fn new(text: impl Into<String>, style: TextStyle) -> Self {
         Self {
             text: text.into(),
             bold: style.is_bold(),

@@ -37,7 +37,7 @@ The budgets are tuned for a real machine. A GitHub-hosted runner is a shared
 2-vCPU VM that runs this CPU-bound work ~2.5–3× slower (the continuous-view
 window reparse measured ~7 ms locally vs ~20 ms on CI), so a threshold that's
 honest on a dev box false-fails there. Every wall-clock guard therefore compares
-against `perf_budget_ms` / `perf_budget_us` (in `src/testutil.rs`), which triple
+against `perf_budget_ms` / `perf_budget_us` (in `crates/quill-core/src/testutil.rs`), which triple
 the budget when the `CI` env var is set — GitHub Actions sets it automatically.
 So the informational `perf` CI job (`.github/workflows/ci.yml`) only reddens on a
 gross (>3×) regression, while **`cargo perf` on real hardware, where `CI` is
@@ -49,7 +49,7 @@ hardware factor and deliberately don't use the slack.
 ### The catalog check is separate (network, run deliberately)
 
 Two `#[ignore]`d tests — `catalog_gguf_files_exist_on_huggingface` and
-`embed_catalog_files_exist_on_huggingface` (#726, in `src/ai/model_select.rs`) —
+`embed_catalog_files_exist_on_huggingface` (#726, in `crates/quill-core/src/ai/model_select.rs`) —
 HEAD each `MODELS`/`EMBED_MODELS` row's weights URL on HuggingFace to catch a
 catalog that names a file a user's download would 404 on. They reach the network,
 so they are *not* part of the offline perf gate. They no-op unless the
@@ -90,7 +90,7 @@ Corpora are generated deterministically in-test, so the suite needs no fixtures.
 | Benchmark | Location | Corpus | Budget | What it guards |
 | --- | --- | --- | --- | --- |
 | `keystroke_is_decoupled_from_document_size` | `buffer.rs` | 150-chapter buffer of blank-line-separated paragraphs (~110k words) | < 1 ms / keystroke | A keystroke only marks the parse stale (the reparse is deferred to the settled pass, and there is no tree bookkeeping per edit), so its cost is in the edit, not the document size. (Typically ~10 µs; ~1.6 ms before the per-block reparse, when every edit fixed up one inline tree per paragraph.) |
-| `reparse_is_fast_at_window_size` | `buffer.rs` | ~3-chapter window of realistic paragraphs (~13k words) | keystroke reparse < 2 ms (best of 5); unclosed-fence reparse < 16 ms | The reparse after a keystroke sends only the edited block through tree-sitter — every other block's parse is cached by its text (`src/syntax/segment.rs`) — so it is ~0.2 ms here (it was ~20 ms when the whole window was re-parsed). The worst case, opening a fence near the top so the rest of the window turns to code, re-parses the rest once (~10 ms, the cost of a cold parse) and must stay under a frame. Best-of-5 because a single sample catches one-off noise (scheduling, CPU ramp); noise only ever *adds* time. |
+| `reparse_is_fast_at_window_size` | `buffer.rs` | ~3-chapter window of realistic paragraphs (~13k words) | keystroke reparse < 2 ms (best of 5); unclosed-fence reparse < 16 ms | The reparse after a keystroke sends only the edited block through tree-sitter — every other block's parse is cached by its text (`crates/quill-core/src/syntax/segment.rs`) — so it is ~0.2 ms here (it was ~20 ms when the whole window was re-parsed). The worst case, opening a fence near the top so the rest of the window turns to code, re-parses the rest once (~10 ms, the cost of a cold parse) and must stay under a frame. Best-of-5 because a single sample catches one-off noise (scheduling, CPU ramp); noise only ever *adds* time. |
 | `render_stays_within_a_frame` | `ui/tests/perf.rs` | ~83k-word chapter (emphasis on every line) + 150-chapter outline pane, 100×60; 300 spell flags, 600 proximity repeats, 200 style flags, 201 annotations; then a find with 7,500 matches | prose and search passes < 4 ms / frame (~0.5 ms measured); folded / modal / scrolled / assistant passes < 16 ms | A full `draw()` of unfolded, wrapped, styled prose from mid-chapter stays well under a frame. The body renderer narrows each whole-buffer range list (conceal markers, matches, flags, annotations) to the row by binary search; scanning those lists per character cost ~45 ms on this corpus, so the tight budget catches that regression. The status bar's word count is O(document); the pane reads cached per-chapter metadata, never files. Catches rendering that re-reads files or does per-chapter work proportional to the novel. The folded pass reads the fold view as one sorted line range per folded section, answered by binary search; it used to insert every hidden line into a `HashSet` each frame (~0.85 ms of the ~1 ms folded frame; the view now builds in ~30 µs). |
 | `outline_pane_is_flat_in_chapter_count` | `ui/tests/perf.rs` | small chapter (40 headings) beside a 150- vs a 1500-chapter outline, active chapter 90% down the list | pane at 1500 chapters < 1.5× its 150-chapter time + 20 µs (~1.2× measured, ~45 µs); full 1500-chapter frame < 4 ms (~0.15 ms) | The outline pane walks an unstyled row model to place its scroll and styles only the visible rows, so a series-sized outline costs about what a novel's does. It used to format a styled row for every chapter each frame (and never scrolled): ~66 µs → ~190 µs from 150 to 1500 chapters. The active-chapter index (an O(chapters) scan) is resolved once per `draw()` and threaded to the panes that need it. |
 | `open_is_fast_for_a_large_novel` | `project.rs` | 150 chapters on disk | < 250 ms | Opening reads and parses each chapter once (word count + front matter) and caches it; catches a regression to per-chapter re-reads or O(n²) work at open. (Typically a few ms.) |
@@ -117,8 +117,8 @@ typical so it keeps defending the win.
   enforces this.
 - **A reparse is proportional to the edit** — the document is cut into blocks at
   blank lines and each block's parse is cached by its text, so only changed
-  blocks go through tree-sitter (`src/syntax/segment.rs`; the property tests in
-  `src/syntax/tests/incremental.rs` hold the result identical to a whole-document
+  blocks go through tree-sitter (`crates/quill-core/src/syntax/segment.rs`; the property tests in
+  `crates/quill-core/src/syntax/tests/incremental.rs` hold the result identical to a whole-document
   parse). The window reparse guard enforces this.
 - **Heavy idle work waits for a pause** — per input batch the loop runs only
   `on_input_settled` (the reparse plus re-anchoring the byte-offset caches the

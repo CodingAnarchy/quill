@@ -517,6 +517,20 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn longest_sentences_keeps_a_bounded_top_n() {
+        let mut top = LongestSentences::new(2);
+        top.consider("One", "short", 3);
+        top.consider("One", "medium length here", 10);
+        top.consider("Two", "the longest of them all by far", 25);
+        top.consider("Two", "also short", 4);
+        let got = top.into_vec();
+        assert_eq!(got.len(), 2, "capped at 2");
+        assert_eq!(got[0].words, 25); // longest first
+        assert_eq!(got[1].words, 10);
+        assert_eq!(got[0].chapter, "Two");
+    }
+
     /// Lexical variety of a raw string (tokenize-then-measure), for tests.
     fn variety(text: &str) -> f64 {
         let mut tokens = Vec::new();

@@ -61,7 +61,7 @@ pub enum CharClass {
 }
 
 impl CharClass {
-    pub(crate) fn of(grapheme: &str) -> Self {
+    pub fn of(grapheme: &str) -> Self {
         let c = grapheme.chars().next().unwrap_or(' ');
         if c.is_whitespace() {
             Self::Space

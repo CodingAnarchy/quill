@@ -20,8 +20,8 @@ static DICT: LazyLock<Dictionary> = LazyLock::new(|| {
                   parsing the bundled dictionary can't fail at runtime"
     )]
     Dictionary::new(
-        include_str!("../assets/dictionary/en_US.aff"),
-        include_str!("../assets/dictionary/en_US.dic"),
+        include_str!("../../../assets/dictionary/en_US.aff"),
+        include_str!("../../../assets/dictionary/en_US.dic"),
     )
     .expect("the bundled en_US dictionary parses")
 });

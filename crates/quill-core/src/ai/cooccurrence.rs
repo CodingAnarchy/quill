@@ -37,7 +37,7 @@ pub enum EntryKind {
 
 impl EntryKind {
     /// The short label shown beside an entry name in the report.
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Character => "character",
             Self::Motif => "motif",
@@ -48,7 +48,7 @@ impl EntryKind {
 impl Entry {
     /// Build an entry, de-duplicating repeated chapter titles while keeping the
     /// first-seen order (so the report reads the way the bible listed them).
-    pub(crate) fn new(name: impl Into<String>, kind: EntryKind, chapters: &[String]) -> Self {
+    pub fn new(name: impl Into<String>, kind: EntryKind, chapters: &[String]) -> Self {
         let mut seen = BTreeSet::new();
         let chapters = chapters
             .iter()
@@ -106,7 +106,7 @@ pub struct Report {
 impl Report {
     /// Whether the read found nothing worth reporting — no co-occurring pair and no
     /// notable absence (too little bible data, or everything appears everywhere).
-    pub(crate) const fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.pairings.is_empty() && self.absences.is_empty()
     }
 }

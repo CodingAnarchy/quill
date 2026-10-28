@@ -5,6 +5,16 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Quill is now a Cargo workspace. The editing core (projects, chapters,
+  parsing, analysis, export, version control, and the AI backends) builds as
+  the `quill-core` library with no terminal UI, so other front ends can share
+  it, starting with an iPhone app (#1229). The `quill` binary, its install
+  methods, and its project files are unchanged.
+
 ## [1.3.0] - 2026-10-27
 
 Short fiction comes to Quill. A project can now be a short story (one piece of

@@ -473,7 +473,7 @@ token/dollar cost from the manuscript size and the effective model. When the
 estimate exceeds `cost_threshold`, it shows a `~12k tokens · ~$0.34 on
 claude-opus-4-8 — run? (y/N)` confirm; cheaper passes run straight through. The
 estimate is a local upper bound (no `count_tokens` round-trip). Ask and Revision
-triage skip it — they're interactive or local. See `src/ai/cost.rs`.
+triage skip it — they're interactive or local. See `crates/quill-core/src/ai/cost.rs`.
 
 Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
 author-owned `<!-- notes:start/end -->` block that survives regeneration; a
@@ -481,7 +481,7 @@ author-owned `<!-- notes:start/end -->` block that survives regeneration; a
 generated block opens with a readable provenance line (#832) naming the source
 chapters and the generated / edited state (see Trust & provenance below). The
 findings overlay lets the author jump to a finding's chapter, mark it as an `xxx`
-TODO, or dismiss it. The shared bible machinery lives in `src/ai/bible.rs`.
+TODO, or dismiss it. The shared bible machinery lives in `crates/quill-core/src/ai/bible.rs`.
 
 ### Incremental scoping (#90)
 
@@ -505,7 +505,7 @@ timeline) scope themselves to what changed:
 
 The findings-only passes (naming, style, scaffold) have no persistent cache to
 revise, so they always run a full pass. The scoping logic lives in
-`src/ai/incremental.rs`. The state file is a derivable cache (gitignored): if it's
+`crates/quill-core/src/ai/incremental.rs`. The state file is a derivable cache (gitignored): if it's
 absent — a fresh clone, or hand-deleted — the next pass rebuilds in full.
 
 **Force a full rebuild on demand** (#176): in the AI palette (Ctrl-A), press
@@ -647,7 +647,7 @@ switching to the local model (the `Ctrl-K` backend switch, or an `offline` pin)
 makes the assistant work fully offline, with no change to the pane. Claude uses
 its native tool-calling; the local Qwen has none, so each local turn is one
 **constrained choice** — a JSON `{action, message}` over the registry-derived tool
-names plus `respond`, which constrained decoding (`src/ai/constrain.rs`)
+names plus `respond`, which constrained decoding (`crates/quill-core/src/ai/constrain.rs`)
 guarantees is valid and on-list. The model makes one choice per turn (it can run a
 tool, see the result, then choose again), so a small model never has to juggle
 several calls at once. Tool-use quality scales with the chosen model; a

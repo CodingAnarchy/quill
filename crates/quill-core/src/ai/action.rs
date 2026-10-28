@@ -171,61 +171,61 @@ pub enum Needs {
 /// *content* — the system prompt and schema field names — deliberately stays in each
 /// `ai::<pass>` module; this table is the mechanism, not the analysis.
 pub struct AiActionSpec {
-    pub(crate) action: AiAction,
+    pub action: AiAction,
     /// The stable token the run-action registry and workflows reference — the AI
     /// half of [`Action::name`](super::Action::name). Never change without a config
     /// migration.
-    pub(crate) slug: &'static str,
-    pub(crate) cost: AiCost,
+    pub slug: &'static str,
+    pub cost: AiCost,
     /// The reasoning weight the router uses to size *which* cloud model runs this
     /// pass (#930) — [`Heavy`](ModelWeight::Heavy) for the top model,
     /// [`Light`](ModelWeight::Light) for a cheaper tier when the pass is small.
     /// Only meaningful for the [`AiCost::Manuscript`] passes; the non-costed and
     /// naming passes carry [`Heavy`](ModelWeight::Heavy) as an inert default (they
     /// never reach the per-action cloud picker).
-    pub(crate) weight: ModelWeight,
+    pub weight: ModelWeight,
     /// The story-bible key this pass tracks (the incremental cache key and the
     /// series-rollup label), or `None` for the non-bible passes.
-    pub(crate) bible_key: Option<&'static str>,
-    /// The [`FindingKind`](crate::mode::FindingKind) a pass's findings carry (#827),
-    /// or [`Other`](crate::mode::FindingKind::Other) for the actions that surface no
+    pub bible_key: Option<&'static str>,
+    /// The [`FindingKind`](FindingKind) a pass's findings carry (#827),
+    /// or [`Other`](FindingKind::Other) for the actions that surface no
     /// triage findings — the single place the pass→kind mapping is written, so it
     /// can't drift from the health dashboard's grouping.
-    pub(crate) finding_kind: crate::mode::FindingKind,
+    pub finding_kind: FindingKind,
     /// The full run-action label shown in the unified menu (`"AI · Character bible"`),
     /// the AI half of [`Action::label`](super::Action::label).
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The AI palette's short label + one-line blurb (the compact entry the AI
     /// palette lists), or `None` for the actions that never appear there directly.
     /// Every current AI action carries one, so this is `Some` throughout today.
-    pub(crate) palette: Option<(&'static str, &'static str)>,
+    pub palette: Option<(&'static str, &'static str)>,
     /// Whether the authorial assistant (#307/#392) may run this action as a tool —
     /// the descriptor field that CLOSES the hand-maintained allowlist (#1069). The
     /// analysis passes that surface findings (no prose) and the arg-taking generative
     /// helpers are runnable; the thesaurus/image passes, the local views, and the
     /// off-manuscript copy generators are not.
-    pub(crate) assistant_runnable: bool,
+    pub assistant_runnable: bool,
     /// This action's single free-text argument (#390) for the actions that take one
     /// (the question for Ask, the concern for Accuracy, …), or `None`. The single
     /// source the assistant's tool schema, its dispatch, and the palette's argument
     /// prompt read.
-    pub(crate) text_arg: Option<AiArg>,
+    pub text_arg: Option<AiArg>,
     /// Which backend this action needs ([`Needs`]) — the single source the
     /// availability gate, the enable-AI on-ramp (#602), and the workflow sync/async
     /// split derive from.
-    pub(crate) needs: Needs,
+    pub needs: Needs,
 }
 
 /// The free-text argument an [`AiAction`] takes (#390): what the assistant's tool
 /// schema names it, and how the palette prompts the author for it.
 pub struct AiArg {
     /// The JSON property name the assistant supplies the argument under.
-    pub(crate) key: &'static str,
+    pub key: &'static str,
     /// The label of the prompt the palette opens to ask the author for it.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The message a blank prompt entry cancels with, for the actions that can't
     /// run without one; `None` hands a blank entry to the handler, which ignores it.
-    pub(crate) blank: Option<&'static str>,
+    pub blank: Option<&'static str>,
 }
 
 /// An [`AiArg`] row for the SPECS table.
@@ -295,7 +295,7 @@ impl AiAction {
     /// finding kind, run-action + palette labels, assistant-runnability (#1069), the
     /// free-text argument, and the backend it needs. Everything derivable reads from
     /// here.
-    pub(crate) const SPECS: &'static [AiActionSpec] = &[
+    pub const SPECS: &'static [AiActionSpec] = &[
         AiActionSpec {
             assistant_runnable: true,
             text_arg: Some(arg("question", "Ask the manuscript: ", None)),
@@ -737,7 +737,7 @@ impl AiAction {
     ];
 
     /// This action's descriptor — its single source of every derivable fact.
-    pub(crate) fn spec(self) -> &'static AiActionSpec {
+    pub fn spec(self) -> &'static AiActionSpec {
         #[allow(
             clippy::expect_used,
             reason = "SPECS is the single hand-maintained table listing every AiAction \
@@ -750,36 +750,36 @@ impl AiAction {
     }
 
     /// The stable run-action slug for this AI action.
-    pub(crate) fn slug(self) -> &'static str {
+    pub fn slug(self) -> &'static str {
         self.spec().slug
     }
 
     /// The AI palette's short label + one-line blurb, or `None` for an action that
     /// never lists in the AI palette directly (none today). Descriptor lookup.
-    pub(crate) fn palette_entry(self) -> Option<(&'static str, &'static str)> {
+    pub fn palette_entry(self) -> Option<(&'static str, &'static str)> {
         self.spec().palette
     }
 
     /// The JSON property name of this action's free-text argument (#390), or `None`.
-    pub(crate) fn text_arg(self) -> Option<&'static str> {
+    pub fn text_arg(self) -> Option<&'static str> {
         self.arg().map(|a| a.key)
     }
 
     /// This action's free-text argument — its key, prompt label, and blank-entry
     /// message — or `None` for the actions that take none.
-    pub(crate) fn arg(self) -> Option<&'static AiArg> {
+    pub fn arg(self) -> Option<&'static AiArg> {
         self.spec().text_arg.as_ref()
     }
 
     /// Which backend this action needs ([`Needs`]) — a descriptor lookup, so the
     /// availability gate, the enable-AI on-ramp, and `is_sync` can't drift apart.
-    pub(crate) fn needs(self) -> Needs {
+    pub fn needs(self) -> Needs {
         self.spec().needs
     }
 
     /// Resolve an AI action from its stable [`slug`](Self::slug) — the inverse used
     /// to rehydrate a durable pass queue (#923) from the slugs it stores.
-    pub(crate) fn from_slug(slug: &str) -> Option<Self> {
+    pub fn from_slug(slug: &str) -> Option<Self> {
         Self::SPECS
             .iter()
             .find(|s| s.slug == slug)
@@ -788,14 +788,14 @@ impl AiAction {
 
     /// This pass's cost profile — the data the cost gate resolves against live AI
     /// settings.
-    pub(crate) fn cost(self) -> AiCost {
+    pub fn cost(self) -> AiCost {
         self.spec().cost
     }
 
     /// This pass's reasoning weight (#930) — the hint the router uses to size which
     /// cloud model runs it (heavy → the configured top model, light → a cheaper
     /// tier when the pass is small). See [`ModelWeight`].
-    pub(crate) fn weight(self) -> ModelWeight {
+    pub fn weight(self) -> ModelWeight {
         self.spec().weight
     }
 
@@ -803,17 +803,17 @@ impl AiAction {
     /// passes. The one place the `Characters→characters` / `Continuity→timeline` /
     /// `Setting→setting` mapping is written; both the incremental cache (#90,
     /// `worker.rs`) and the series-rollup label (#340, `series_bible.rs`) read it.
-    pub(crate) fn bible_key(self) -> Option<&'static str> {
+    pub fn bible_key(self) -> Option<&'static str> {
         self.spec().bible_key
     }
 
-    /// The [`FindingKind`](crate::mode::FindingKind) a pass's findings carry (#827)
+    /// The [`FindingKind`](FindingKind) a pass's findings carry (#827)
     /// — the category that survives the map to a summary string and the durable
     /// store, so the health dashboard can group by pass. A descriptor lookup, so the
     /// pass→kind mapping is written exactly once (#563) and can't drift; the passes
-    /// that surface no triage findings carry [`Other`](crate::mode::FindingKind::Other)
+    /// that surface no triage findings carry [`Other`](FindingKind::Other)
     /// in the table.
-    pub(crate) fn finding_kind(self) -> FindingKind {
+    pub fn finding_kind(self) -> FindingKind {
         self.spec().finding_kind
     }
 }
