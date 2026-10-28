@@ -1,15 +1,26 @@
 import QuillKit
 import SwiftUI
 
-/// The open project: its chapter list beside the selected chapter. On a
-/// compact screen the split view collapses to one column at a time.
+/// The open project: its chapter list beside the selected chapter (#1234).
+///
+/// Folded, and on any standard iPhone, the horizontal size class is compact
+/// and the split view collapses to one column: the list, or the chapter.
+/// Unfolded, the Duo's inner screen is wide enough for both, so the list
+/// stays beside the chapter (`.all`, `.balanced`) rather than sliding over it
+/// the way it would on an iPad in portrait. Folding mid-sentence doesn't
+/// rebuild the chapter: its text view belongs to ``AppState`` (see
+/// ``ProseHost``), so it moves between layouts with its text, cursor,
+/// selection, undo history, and keyboard intact.
 struct ProjectView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var columns = NavigationSplitViewVisibility.all
 
     var body: some View {
         @Bindable var app = app
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             ChapterSidebar(selection: $app.selectedChapter)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
             if let prose = app.prose {
                 ChapterEditorView(host: prose)
@@ -20,6 +31,11 @@ struct ProjectView: View {
             } else {
                 ContentUnavailableView("Choose a chapter", systemImage: "book")
             }
+        }
+        .navigationSplitViewStyle(.balanced)
+        // Unfolding shows the list again even if it was hidden before.
+        .onChange(of: sizeClass) { _, size in
+            if size == .regular { columns = .all }
         }
     }
 }

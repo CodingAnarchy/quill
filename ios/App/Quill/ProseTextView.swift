@@ -103,6 +103,29 @@ final class ProseUITextView: UITextView {
     /// The widest the text column gets, in points (about 70 characters).
     static let maxLineWidth: CGFloat = 620
 
+    /// Whether the author was typing when the view left its window. Folding
+    /// or unfolding the phone moves this view to a new place in the layout,
+    /// which takes it out of the window for a moment and drops the keyboard;
+    /// it comes straight back with the cursor where it was (#1234).
+    private var wasEditing = false
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil {
+            wasEditing = isFirstResponder
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, wasEditing else { return }
+        wasEditing = false
+        let selection = selectedRange
+        becomeFirstResponder()
+        selectedRange = selection
+        scrollRangeToVisible(selection)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         let side = max(16, (bounds.width - Self.maxLineWidth) / 2)

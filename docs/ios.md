@@ -99,6 +99,26 @@ into `Documents/Projects` only once it has checked out and proven to be a
 Quill project. A wrong token, no network, or a repository without a
 `book.toml` each leaves nothing behind and says what to fix.
 
+## Layout on the iPhone Duo
+
+The project is a `NavigationSplitView`: the chapter list (with a book picker
+for a series) and the open chapter.
+
+- **Folded, or on a standard iPhone** (a compact width): one column at a time,
+  the list or the chapter.
+- **Unfolded** (a regular width): the list stays beside the chapter, in both
+  orientations, and the prose column is capped at about 70 characters
+  (620 points) so lines don't run edge to edge.
+
+Folding or unfolding mid-sentence keeps the chapter exactly as it was. Its
+`UITextView` belongs to the app state (`ProseHost`), not to SwiftUI's view
+tree, so the new layout places the same view, with its text, cursor,
+selection, and undo history. The view also restores the keyboard when it
+moves. Nothing is reloaded or saved by the fold.
+
+Still to check on the real device: which horizontal size class the unfolded
+Duo reports. The layout assumes regular, as for an iPad.
+
 ## Sync
 
 The phone syncs when the app comes back to the foreground, when it goes to the
