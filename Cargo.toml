@@ -1,3 +1,11 @@
+# A Cargo workspace (#1229): the `quill` terminal editor is this root package,
+# and its UI-free editing core is `crates/quill-core`, which other front ends
+# (the iPhone app, through `crates/quill-ffi`) share. `default-members` makes a
+# bare `cargo build` / `test` / `clippy` from here cover every crate.
+[workspace]
+members = [".", "crates/*"]
+default-members = [".", "crates/quill-core"]
+
 [package]
 name = "quill"
 version = "1.3.0"
@@ -23,99 +31,38 @@ pkg-fmt = "tgz"
 bin-dir = "quill{ binary-ext }"
 
 [dependencies]
+quill-core = { path = "crates/quill-core" }
 ratatui = "0.30.2"
 crossterm = "0.29"
-ropey = "1.6"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
-tree-sitter = "0.26.9"
-tree-sitter-md = { version = "0.5.3", features = ["parser"] }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 serde_json = "1.0.150"
 time = { version = "0.3.49", features = ["local-offset", "macros", "parsing", "formatting"] }
 ureq = { version = "3.3.0", features = ["json"] }
 similar = "3.1.1"
-# Manuscript export (#7): the .docx/OOXML container is a zip; the XML is
-# hand-written. Already present transitively, so this adds no new download.
 zip = { version = "7.2", default-features = false, features = ["deflate"] }
-# Flate (zlib) compression for embedded font programs and page content streams in
-# the PDF export (#662). Already in the tree via `zip`, so this adds no download.
-flate2 = "1.1"
-# Version control (#54). https + ssh enable remote push/pull (#134); the local
-# operations need neither. vendored-openssl builds OpenSSL from source so the
-# HTTPS transport doesn't depend on a system OpenSSL install.
 git2 = { version = "0.20", default-features = false, features = ["https", "ssh", "vendored-openssl"] }
-
-# Local-model backend (#124): candle + tokenizers, off by default so the heavy
-# inference deps (and their build) stay out of a normal Quill build. Build/run
-# with `--features local`.
-candle-core = { version = "0.11", optional = true }
-candle-transformers = { version = "0.11", optional = true }
-# candle-nn's `VarBuilder` loads the BERT embedding model's safetensors for the
-# on-device semantic retrieval index (#831); only the `local` embedder needs it.
-candle-nn = { version = "0.11", optional = true }
-tokenizers = { version = "0.22", optional = true }
-# Hardware detection + direct model download for hardware-aware selection (#85).
-sysinfo = { version = "0.33", optional = true }
-hf-hub = { version = "0.4", optional = true }
-# Raster decode/encode (#240 local PNG output; #490 PDF image ornaments — the PDF
-# embeds decoded image samples, which needs a codec). A default dep since image
-# ornaments are part of the standard designed-export path.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-spellbook = "0.4.2"
-# Hyphenation for justified body text in the print PDF (#678). The `embed_en-us`
-# feature bakes the en-US Knuth-Liang patterns into the binary, so export is
-# self-contained (no runtime pattern files) and the dictionary builds once — the
-# editor never touches it, it runs only on the export path.
-hyphenation = { version = "0.8", features = ["embed_en-us"] }
-# Print-ready PDF export (#464) reads glyph metrics (advances, cmap, bbox) from the
-# bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
-# reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
-ttf-parser = "0.25"
-# `variable-fonts` lets the subsetter instance a variable `[wght]` font to a pinned
-# weight while subsetting (#638), so bold body text embeds a genuinely heavier
-# outline rather than the default instance reused for every weight.
-subsetter = { version = "0.2.6", features = ["variable-fonts"] }
-# OS secret store for API keys (#530): keys live in the macOS Keychain / Linux
-# Secret Service / Windows Credential Manager, not plaintext in the synced config.
-# The platform-native + sync-secret-service stores cover desktop; env vars cover
-# headless (where there's no login session to unlock the store).
-keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
-# Advisory project instance lock (#871): a `kill(pid, 0)` liveness probe on Unix
-# lets the O_EXCL lockfile distinguish a still-running Quill from a crashed one
-# (a stale lock), so a second instance opens read-only rather than racing writes.
-# Already in the tree transitively (keyring/git2), so this adds no new download.
-libc = "0.2"
-# Regex mode for find & replace (#891): the project-wide and chapter finds treat
-# the query as a regular expression when the `re` toggle is on. Already in the
-# tree transitively (via a few build-time deps), so this adds no new download.
-regex = "1"
+hf-hub = { version = "0.4", optional = true }
 
 [dev-dependencies]
-# Property / round-trip and adversarial-input testing for the data path (#265).
-# Dev-only — never built into the shipped editor.
-proptest = "1"
+# The binary's tests drive the core, so they need its hermetic test stand-ins
+# (no network, no keychain, a scratch config directory).
+quill-core = { path = "crates/quill-core", features = ["test-support"] }
 
 [features]
-# Swaps in the hermetic stand-ins the unit tests rely on (offline HTTP, a no-op
-# keychain, the config-directory override) for any test build that links the
-# core, not only its own (#1229). Never enabled in a shipped build.
-test-support = []
-local = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
-
-# On macOS, give candle the Metal backend (GPU). Cargo unions these features into
-# the optional deps above, so `--features local` is CPU elsewhere and Metal here.
-[target.'cfg(target_os = "macos")'.dependencies]
-candle-core = { version = "0.11", optional = true, features = ["metal"] }
-candle-nn = { version = "0.11", optional = true, features = ["metal"] }
-candle-transformers = { version = "0.11", optional = true, features = ["metal"] }
+local = ["quill-core/local", "dep:hf-hub"]
 
 [profile.release]
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[lints]
+workspace = true
 
 # Clippy lint policy. All `deny`: the tree is clean of every lint below (the
 # idiomatic/perf/correctness cleanup landed in #793), so these are promoted from
@@ -129,7 +76,7 @@ strip = true
 # Deliberately NOT enabled: doc_markdown (noisy, low value) and the
 # cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
 # usize<->u16 conversions in TUI layout code).
-[lints.clippy]
+[workspace.lints.clippy]
 # A bare unwrap/expect in the editor turns a violated assumption into a panic that
 # takes the whole session down mid-write (#794). Denied in production code; the
 # `allow-{unwrap,expect}-in-tests` keys in clippy.toml keep test unwraps (they
@@ -178,8 +125,8 @@ ignore_without_reason = "deny"
 use_self = "deny"
 # Push toward the T::default() convention over Default::default().
 default_trait_access = "deny"
-# Single binary crate with no external consumers, so pub(crate) == pub for us;
-# redundant pub(crate) on items in already-private modules is just noise to strip.
+# No external consumers (quill-core is unpublished), so pub(crate) inside an
+# already-private module is just noise to strip.
 redundant_pub_crate = "deny"
 
 # const-fn where possible. Nursery lint with occasional false positives (a fn that

@@ -140,13 +140,13 @@ impl WordLists {
 
     /// Whether `word` (lowercased) is an excluded frequency word. Crate-visible so
     /// the flag-sweep scanner (#1001) shares the report's exact stopword definition.
-    pub(crate) fn is_stopword(&self, word: &str) -> bool {
+    pub fn is_stopword(&self, word: &str) -> bool {
         self.stopwords.contains(word)
     }
 
     /// Whether `word` (lowercased) is a filtering verb. Crate-visible so the
     /// flag-sweep scanner (#1001) flags the same words the report counts.
-    pub(crate) fn is_filter_word(&self, word: &str) -> bool {
+    pub fn is_filter_word(&self, word: &str) -> bool {
         self.filter_words.contains(word)
     }
 }

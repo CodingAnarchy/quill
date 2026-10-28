@@ -342,7 +342,7 @@ impl Project {
     /// the front matter and preserves the body. Used by manuscript-wide replace
     /// for chapters other than the active one (whose live buffer is edited
     /// directly so its change stays undoable).
-    pub(crate) fn replace_chapter_body(
+    pub fn replace_chapter_body(
         &mut self,
         index: usize,
         ranges: &[(usize, usize)],
@@ -401,10 +401,7 @@ impl Project {
     ///   already applied, it rolls the applied ones back to their originals. On any
     ///   swap failure the caller sees `Err` with every destination either all-new
     ///   or all-restored — never a half-updated split state (#262).
-    pub(crate) fn write_chapters_atomic(
-        &mut self,
-        contents: &[(usize, String)],
-    ) -> std::io::Result<()> {
+    pub fn write_chapters_atomic(&mut self, contents: &[(usize, String)]) -> std::io::Result<()> {
         if self.is_read_only() {
             return Err(Self::read_only_error()); // #871: don't race another instance
         }

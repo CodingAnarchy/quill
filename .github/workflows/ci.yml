@@ -89,7 +89,7 @@ jobs:
   # runner is a 2-vCPU VM that runs this CPU-bound work ~2.5–3x slower (e.g. the
   # window reparse measured ~7ms locally vs ~20ms here). The guards widen their
   # budget 3x when the `CI` env var is set (GitHub Actions sets it; see
-  # `perf_budget_ms`/`perf_budget_us` in `src/testutil.rs`), so a real machine's
+  # `perf_budget_ms`/`perf_budget_us` in `crates/quill-core/src/testutil.rs`), so a real machine's
   # `cargo perf` stays the strict, authoritative gate while this job only reddens
   # on a gross (>3x) regression. It stays INFORMATIONAL (`continue-on-error`) so a
   # rare noisy run still can't turn master red. The catalog network checks no-op

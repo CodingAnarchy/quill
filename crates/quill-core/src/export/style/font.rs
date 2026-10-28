@@ -81,7 +81,7 @@ impl EmbeddedFont {
     /// The CSS `@font-face` `format(...)` token for this file's media type (#709),
     /// so a reader that can't handle the format has a fallback signal instead of
     /// downloading an unusable face. `None` for a type with no standard token.
-    pub(crate) fn css_format(&self) -> Option<&'static str> {
+    pub fn css_format(&self) -> Option<&'static str> {
         Some(match self.media_type {
             "font/ttf" => "truetype",
             "font/otf" => "opentype",

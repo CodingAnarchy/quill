@@ -5,22 +5,51 @@ Quill is a terminal editor optimized for writing novels (Rust, `ratatui` +
 `tree-sitter-md`). See `README.md` for the product roadmap and `docs/` for the
 feature specs. Storage model: one chapter per file; a buffer holds one chapter
 (single-chapter view) or at most ~3 chapters (continuous view), never the whole
-novel. A project's `form` (`src/project/form.rs`) is a novel (the default), a
+novel. A project's `form` (`crates/quill-core/src/project/form.rs`) is a novel (the default), a
 short story (one body chapter whose title mirrors the project title, structured by
-the scenes in `src/scenes.rs`), or a collection that links short story projects by
-relative path (`src/project/collection.rs`) rather than copying them.
+the scenes in `crates/quill-core/src/scenes.rs`), or a collection that links short story projects by
+relative path (`crates/quill-core/src/project/collection.rs`) rather than copying them.
 
 Chapter files may begin with a `---`-fenced YAML front matter block. Quill
-splits it off when loading (`src/frontmatter.rs`), keeps it out of the prose
+splits it off when loading (`crates/quill-core/src/frontmatter/`), keeps it out of the prose
 buffer so the editor shows only the body, and re-attaches it verbatim on save.
 Titles stay in the manifest; front matter carries the rest of the chapter
 metadata (the #3 epic builds typed access on this).
 
 The continuous-manuscript view (`Ctrl-l`) concatenates a window of up to ~3
-adjacent chapters into one editable buffer (`src/manuscript.rs`), paging
+adjacent chapters into one editable buffer (`crates/quill-core/src/manuscript/`), paging
 chapters in/out around the cursor and writing edits back to each chapter's file.
 Chapter boundaries are fixed seams (editing never merges chapters); the centered
 title dividers between chapters are render-only.
+
+## Crate layout
+
+The repository is a Cargo workspace (#1229):
+
+- **`crates/quill-core`**: the editing core as a library. Projects, chapters,
+  buffers, front matter, parsing, analysis, export, version control, config, and
+  the AI backends and passes.
+- **The root package (`src/`)**: the `quill` terminal editor. That covers the
+  app state machine (`app/`), drawing (`ui/`), modes and the action registry
+  (`mode/`), the color theme, startup, and the pieces of `ai`, `analysis`, and
+  `config` that draw. `src/ai`, `src/analysis`, and `src/config` re-export the
+  core module of the same name and add those pieces, and `main.rs` imports the
+  other core modules by name, so the editor still writes `crate::project`,
+  `crate::buffer`, and so on.
+
+**`quill-core` must never depend on the terminal UI.** No `ratatui`, no
+`crossterm`, and no reaching back into `app`, `mode`, `ui`, or `theme`. (Cargo
+enforces the last part, because the core can't name the binary's modules.) When
+a core type needs a terminal rendering, the rendering goes in the binary, next
+to the code that draws it. `cargo tree -p quill-core` must not list `ratatui` or
+`crossterm`.
+
+Test seams in the core (offline HTTP, the no-op keychain, the config-directory
+override, failure injection) are gated `#[cfg(any(test, feature =
+"test-support"))]`, not `#[cfg(test)]`. The binary turns `test-support` on from
+its dev-dependencies, so its tests stay hermetic too. A `#[cfg(test)]` seam in
+the core is invisible to the binary's tests, which then hit the real network,
+keychain, or `~/.config`.
 
 ## AI assistance boundaries (non-negotiable)
 
@@ -93,6 +122,7 @@ cargo test            # unit + render tests (must be green)
 cargo clippy --all-targets   # must be clean
 ```
 
+Run them from the workspace root: `default-members` makes each cover both crates.
 (CI enforces these on every PR — see `.github/workflows/ci.yml`: fmt on ubuntu,
 clippy (`-D warnings`) and tests on both ubuntu and macos, plus a
 `--features local` job and an informational `cargo perf` run on pushes to
@@ -126,7 +156,7 @@ What they assert:
   (~µs) even on a ~110k-word buffer of realistic paragraphs.
 - `reparse_is_fast_at_window_size` (`buffer.rs`) — on a ~13k-word, 3-chapter
   window, the reparse after a keystroke re-parses only the edited block (see
-  `src/syntax/segment.rs`; ~0.2ms, budget 2ms), and the worst case — an
+  `crates/quill-core/src/syntax/segment.rs`; ~0.2ms, budget 2ms), and the worst case — an
   unclosed fence near the top, re-parsing the rest — stays under a 16ms frame.
 - `render_stays_within_a_frame` (`ui/tests/perf.rs`) — a full `draw()` (large
   chapter + a many-chapter outline pane) stays under one frame. The main pass
@@ -202,7 +232,7 @@ rendering, or project load.
 If you make per-keystroke work depend on document size, the first guard will
 catch it. Keep parsing off the keystroke path (mark dirty on edit, reparse per
 input batch in the `main.rs` event loop), and keep the reparse proportional to
-the edit (the per-block parse cache in `src/syntax/segment.rs`). Keep per-frame rendering off the filesystem —
+the edit (the per-block parse cache in `crates/quill-core/src/syntax/segment.rs`). Keep per-frame rendering off the filesystem —
 cache file-derived data (word counts, front-matter metadata) on the manifest
 at open, like `ChapterEntry` does.
 

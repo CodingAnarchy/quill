@@ -122,7 +122,7 @@ fn a_configured_body_font_replaces_the_serif() {
         body_font: Some("body.ttf".into()),
         ..Default::default()
     };
-    let font = include_bytes!("../../../../assets/fonts/LiberationSerif-Italic.ttf");
+    let font = include_bytes!("../../../../../../assets/fonts/LiberationSerif-Italic.ttf");
     let warnings = style.resolve_fonts(|_| Ok(font.to_vec()));
     assert!(warnings.is_empty(), "font resolves: {warnings:?}");
     let bytes = to_pdf(&doc(), &style).unwrap();
@@ -165,9 +165,9 @@ fn all_four_body_styles_and_the_heading_resolve_to_the_chosen_families() {
     // resolves to a body face (never the bundled Liberation fallback, never the
     // heading font), true italics use the italic file, and the heading is its own
     // face — not conflated with body-bold.
-    let body_up = include_bytes!("../../../../assets/fonts/LiberationSerif-Regular.ttf");
-    let body_it = include_bytes!("../../../../assets/fonts/LiberationSerif-Italic.ttf");
-    let head = include_bytes!("../../../../assets/fonts/DejaVuSans.ttf");
+    let body_up = include_bytes!("../../../../../../assets/fonts/LiberationSerif-Regular.ttf");
+    let body_it = include_bytes!("../../../../../../assets/fonts/LiberationSerif-Italic.ttf");
+    let head = include_bytes!("../../../../../../assets/fonts/DejaVuSans.ttf");
     let style = ExportStyle {
         fonts: vec![
             embedded(FontRole::Body, false, "BookBody", body_up),
@@ -213,7 +213,7 @@ fn an_italic_style_without_a_true_italic_file_is_synthesized() {
     // A body font with no `-italic` sibling (#638): italic styles fall back to the
     // upright file, drawn with a synthetic slant — never the bundled Liberation
     // italic, never a different family.
-    let body_up = include_bytes!("../../../../assets/fonts/LiberationSerif-Regular.ttf");
+    let body_up = include_bytes!("../../../../../../assets/fonts/LiberationSerif-Regular.ttf");
     let style = ExportStyle {
         fonts: vec![embedded(FontRole::Body, false, "OnlyUpright", body_up)],
         ..Default::default()

@@ -52,12 +52,13 @@ pub(super) type ObjMap = BTreeMap<u32, Vec<u8>>;
 pub(super) type GidMap = BTreeMap<u16, u16>;
 
 // Bundled font programs.
-const REGULAR: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
-const BOLD: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Bold.ttf");
-const ITALIC: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Italic.ttf");
-const BOLD_ITALIC: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-BoldItalic.ttf");
-const FALLBACK: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
-const MONO: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSansMono.ttf");
+const REGULAR: &[u8] = include_bytes!("../../../../../assets/fonts/LiberationSerif-Regular.ttf");
+const BOLD: &[u8] = include_bytes!("../../../../../assets/fonts/LiberationSerif-Bold.ttf");
+const ITALIC: &[u8] = include_bytes!("../../../../../assets/fonts/LiberationSerif-Italic.ttf");
+const BOLD_ITALIC: &[u8] =
+    include_bytes!("../../../../../assets/fonts/LiberationSerif-BoldItalic.ttf");
+const FALLBACK: &[u8] = include_bytes!("../../../../../assets/fonts/DejaVuSans.ttf");
+const MONO: &[u8] = include_bytes!("../../../../../assets/fonts/DejaVuSansMono.ttf");
 
 /// The `/F1`…`/F4` resource names for the four body faces (regular/bold/italic/
 /// bold-italic), `/Fh1`/`/Fh2` for the heading faces (regular/bold), `/Ffb` for the

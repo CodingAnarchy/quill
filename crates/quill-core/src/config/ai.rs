@@ -198,7 +198,7 @@ pub struct AiConfig {
     /// `pub(crate)` only so tests can build an `AiConfig { .. }` literal; treat it
     /// as private (write nothing but `OnceCell::new()`).
     #[serde(skip)]
-    pub(crate) keychain_cache: OnceCell<Option<String>>,
+    pub keychain_cache: OnceCell<Option<String>>,
 }
 
 impl Default for AiConfig {
@@ -265,7 +265,7 @@ pub struct ImageConfig {
     /// config — skipped on load, reset on reload. `pub(crate)` only so tests can
     /// build the struct literal; treat as private.
     #[serde(skip)]
-    pub(crate) keychain_cache: OnceCell<Option<String>>,
+    pub keychain_cache: OnceCell<Option<String>>,
 }
 
 impl Default for ImageConfig {

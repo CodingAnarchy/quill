@@ -143,7 +143,7 @@ fn embedded_fonts_are_subset_smaller_than_the_source() {
     // book's glyphs (#709), so far smaller than the ~380 KB source, yet still
     // render every character the text uses — punctuation and the smart-typography
     // em-dash/curly quotes included.
-    let source = include_bytes!("../../../../assets/fonts/LiberationSerif-Regular.ttf");
+    let source = include_bytes!("../../../../../../assets/fonts/LiberationSerif-Regular.ttf");
     let d = Document {
         title: "The Book".into(),
         subtitle: None,

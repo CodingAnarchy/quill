@@ -129,20 +129,6 @@ fn sentence_stats_summarize_lengths() {
 }
 
 #[test]
-fn longest_sentences_keeps_a_bounded_top_n() {
-    let mut top = LongestSentences::new(2);
-    top.consider("One", "short", 3);
-    top.consider("One", "medium length here", 10);
-    top.consider("Two", "the longest of them all by far", 25);
-    top.consider("Two", "also short", 4);
-    let got = top.into_vec();
-    assert_eq!(got.len(), 2, "capped at 2");
-    assert_eq!(got[0].words, 25); // longest first
-    assert_eq!(got[1].words, 10);
-    assert_eq!(got[0].chapter, "Two");
-}
-
-#[test]
 fn length_stats_summarize_and_fence_outliers() {
     // Mostly ~1000-word chapters with one tiny and one huge outlier.
     let words = vec![1000, 1050, 980, 1020, 1010, 100, 5000];

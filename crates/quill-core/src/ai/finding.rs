@@ -62,7 +62,7 @@ impl FindingKind {
     /// folds over it too, so slug resolution can't drift from this list; [`slug`](Self::slug)
     /// and [`label`](Self::label) are independent exhaustive `match` arms (not folds
     /// over `ALL`), so the compiler forces them to cover every variant directly.
-    pub(crate) const ALL: &'static [Self] = &[
+    pub const ALL: &'static [Self] = &[
         Self::Continuity,
         Self::Setting,
         Self::Plot,
@@ -83,7 +83,7 @@ impl FindingKind {
 
     /// The stable slug persisted in the durable store and matched back on load —
     /// never change one without a migration. Also the dashboard's group key.
-    pub(crate) const fn slug(self) -> &'static str {
+    pub const fn slug(self) -> &'static str {
         match self {
             Self::Continuity => "continuity",
             Self::Setting => "setting",
@@ -105,7 +105,7 @@ impl FindingKind {
     }
 
     /// The human label shown in the dashboard's group headers.
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Continuity => "Continuity",
             Self::Setting => "Setting",
@@ -130,7 +130,7 @@ impl FindingKind {
     /// corrupt value) falls back to [`Other`](Self::Other) rather than failing.
     /// Folds over [`ALL`](Self::ALL), so a new kind is resolvable the moment it
     /// joins the enum's ordering — no separate list to keep in sync.
-    pub(crate) fn from_slug(slug: &str) -> Self {
+    pub fn from_slug(slug: &str) -> Self {
         Self::ALL
             .iter()
             .copied()
@@ -144,26 +144,26 @@ impl FindingKind {
 #[derive(Clone, Debug)]
 pub struct Finding {
     /// One-line summary shown in the list (e.g. "object: the locket …").
-    pub(crate) summary: String,
+    pub summary: String,
     /// The category / lens this finding belongs to (#827) — which pass it speaks
     /// for. Survives the map to a summary string and the durable-store round-trip
     /// (where `action` is lost), so the dashboard can group by it and cross-pass
     /// dedup can key on it.
-    pub(crate) kind: FindingKind,
+    pub kind: FindingKind,
     /// Chapters involved; the first is the jump target.
-    pub(crate) chapters: Vec<String>,
+    pub chapters: Vec<String>,
     /// The book the finding belongs to in a multi-book series (#341):
     /// `Some(index)` when a series-bible refresh produced it, so triage can
     /// attribute and jump across books (chapter titles can repeat between
     /// books). `None` targets the active book — every standalone-novel and
     /// active-book pass, unchanged.
-    pub(crate) book: Option<usize>,
+    pub book: Option<usize>,
     /// The pass that produced this finding, so the author can re-check just this
     /// one after a fix by re-running its originating pass scoped to `chapters`
     /// (#608). `None` for findings not tied to a re-runnable pass — Q&A citations
     /// and history rows — and for findings restored from the durable store, which
     /// records content, not the pass (a fresh pass re-attributes them).
-    pub(crate) action: Option<AiAction>,
+    pub action: Option<AiAction>,
     /// Other passes that independently raised the *same span* (#921): cross-pass
     /// consensus. `kind` is this finding's own pass; `corroborators` holds the
     /// additional passes that flagged the same chapters + summary, so the health
@@ -171,14 +171,14 @@ pub struct Finding {
     /// Empty for a lone finding. Not part of identity — merging corroborators
     /// never changes which finding this *is* — so triage dedup and dismiss-matching
     /// stay keyed on content alone.
-    pub(crate) corroborators: Vec<FindingKind>,
+    pub corroborators: Vec<FindingKind>,
 }
 
 impl Finding {
     /// Every pass that agrees on this finding (#921): its own `kind` first, then
     /// the corroborating passes, de-duplicated and in first-seen order. One pass
     /// means no consensus; two or more is cross-pass agreement.
-    pub(crate) fn agreement(&self) -> Vec<FindingKind> {
+    pub fn agreement(&self) -> Vec<FindingKind> {
         let mut passes = vec![self.kind];
         for &k in &self.corroborators {
             if !passes.contains(&k) {
@@ -192,7 +192,7 @@ impl Finding {
     /// pass raises the same span. Records `other`'s own kind and any consensus it
     /// already carried, skipping this finding's own kind and duplicates, so the
     /// agreement set stays a clean union.
-    pub(crate) fn corroborate(&mut self, other: &Self) {
+    pub fn corroborate(&mut self, other: &Self) {
         for k in other.agreement() {
             if k != self.kind && !self.corroborators.contains(&k) {
                 self.corroborators.push(k);
@@ -206,7 +206,7 @@ impl Finding {
     /// listed in agreement order (the primary first), lower-cased to read as a
     /// fragment. The single place the signal's wording lives, so the list, the
     /// dashboard, and its export stay identical.
-    pub(crate) fn agreement_signal(&self) -> Option<String> {
+    pub fn agreement_signal(&self) -> Option<String> {
         let passes = self.agreement();
         if passes.len() < 2 {
             return None;

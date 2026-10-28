@@ -1,9 +1,15 @@
-//! Shared test scaffolding (#428). Only compiled under `cfg(test)`.
+//! Shared test scaffolding (#428). Only compiled for tests: this crate's own, and
+//! the `quill` binary's through the `test-support` feature (#1229).
 //!
 //! The "unique-per-process scratch directory" contract is load-bearing for
 //! parallel-test isolation — every test binary runs concurrently, so two tests
 //! must never share a path. Keeping it in one place means the contract (and its
 //! cleanup) can't drift across the dozen modules that need a scratch dir.
+
+#![allow(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a scratch dir that can't be made should fail the test loudly"
+)]
 
 use std::path::PathBuf;
 

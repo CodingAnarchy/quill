@@ -22,7 +22,7 @@
 /// embedded as the PDF/X output intent's destination profile (#817). Generated for
 /// Quill; carries a "Public Domain" copyright tag so the exported PDF stays freely
 /// distributable.
-pub(super) const GRAY_ICC: &[u8] = include_bytes!("../../../assets/icc/QuillGray.icc");
+pub(super) const GRAY_ICC: &[u8] = include_bytes!("../../../../../assets/icc/QuillGray.icc");
 
 /// The PDF/X version string recorded in `/Info` under `/GTS_PDFXVersion` and echoed by
 /// `/GTS_PDFXConformance` (#817). A PDF/X reader keys off this to select validation.
