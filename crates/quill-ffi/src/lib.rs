@@ -10,6 +10,7 @@ mod bible;
 mod error;
 mod git;
 mod lookup;
+mod markers;
 mod project;
 mod session;
 
@@ -20,6 +21,7 @@ pub use bible::{BiblePage, FindingInfo, TextSpan};
 pub use error::QuillError;
 pub use git::{clone_destination, clone_project, set_git_token, SyncReport};
 pub use lookup::{has_claude_api_key, look_up_words, set_claude_api_key, WordCandidate};
+pub use markers::MarkerInfo;
 pub use project::{BookInfo, ChapterInfo, ProjectForm, ProjectInfo, QuillProject};
 pub use session::{ChapterSession, StyleKind, StyleSpan};
 

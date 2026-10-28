@@ -22,6 +22,8 @@ final class AppState {
     private(set) var chapterError: String?
     /// How the last sync went, for the chapter list's footer.
     private(set) var syncStatus: String?
+    /// Whether the TODO markers list is showing (#1237).
+    var showingMarkers = false
     /// The word lookup in progress (#1235), and the range it replaces.
     var lookup: (lookup: WordLookup, range: NSRange)?
     /// A message the author must see (work parked on a draft, a failed manual
@@ -122,6 +124,12 @@ final class AppState {
         if let passage { prose?.textView.reveal(passage) }
     }
 
+    /// Open a TODO marker's chapter with the marker selected (#1237).
+    func open(_ marker: MarkerInfo) {
+        if selectedChapter != marker.chapterIndex { selectedChapter = marker.chapterIndex }
+        prose?.textView.reveal(NSRange(location: Int(marker.start), length: Int(marker.length)))
+    }
+
     /// Save the open chapter now.
     func save() {
         prose?.editor.save()
@@ -147,6 +155,8 @@ final class AppState {
             host.onLookUp = { [weak self] selection, range, line in
                 self?.lookup = (WordLookup(selection: selection, line: line), range)
             }
+            host.onShowMarkers = { [weak self] in self?.showingMarkers = true }
+            host.todoMarker = store.todoMarker
             prose = host
         } catch {
             chapterError = describe(error)

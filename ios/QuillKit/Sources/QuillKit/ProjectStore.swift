@@ -105,6 +105,17 @@ public final class ProjectStore {
         }
     }
 
+    /// The project's TODO marker (`xxx` unless `book.toml` sets another).
+    public var todoMarker: String {
+        (try? project?.todoMarker()) ?? "xxx"
+    }
+
+    /// Every TODO marker in the active book (#1237). Reads only chapters
+    /// whose cached marker count is nonzero.
+    public func markers() -> [MarkerInfo] {
+        (try? project?.markers()) ?? []
+    }
+
     /// The story bible's pages (#1236), read-only.
     public func biblePages() -> [BiblePage] {
         (try? project?.biblePages()) ?? []
