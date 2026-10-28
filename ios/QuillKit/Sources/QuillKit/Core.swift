@@ -20,7 +20,8 @@ extension QuillError {
     /// is a debug dump of the enum case).
     public var message: String {
         switch self {
-        case let .NotFound(message), let .Invalid(message), let .Io(message), let .Remote(message):
+        case let .NotFound(message), let .Invalid(message), let .Io(message), let .Remote(message),
+            let .Lookup(message):
             return message
         }
     }

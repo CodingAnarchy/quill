@@ -17,6 +17,8 @@ pub enum QuillError {
     /// A clone, pull, or sync couldn't finish: no network, a rejected token, or
     /// a remote that isn't a Quill project. The message says which.
     Remote { message: String },
+    /// A word lookup couldn't run: no API key, no network, or a rejected key.
+    Lookup { message: String },
 }
 
 impl fmt::Display for QuillError {
@@ -24,7 +26,8 @@ impl fmt::Display for QuillError {
         let (Self::NotFound { message }
         | Self::Invalid { message }
         | Self::Io { message }
-        | Self::Remote { message }) = self;
+        | Self::Remote { message }
+        | Self::Lookup { message }) = self;
         f.write_str(message)
     }
 }
