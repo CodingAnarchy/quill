@@ -61,6 +61,11 @@ ios/test-kit.sh --no-build # reuse the last build
 cargo test -p quill-ffi    # the Rust side of the bindings
 ```
 
+`ios/typecheck-app.sh` typechecks the whole app (views included) without Xcode.
+The macOS SDK carries UIKit for Mac Catalyst, so the app, QuillKit, and the
+bindings typecheck together as one Catalyst module. It catches Swift errors
+locally; CI still builds the real iOS app.
+
 QuillKit's tests run on macOS against the real Rust core, so they cover the
 whole path from Swift through UniFFI into `quill-core` without a simulator.
 
