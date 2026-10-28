@@ -113,6 +113,15 @@ final class AppState {
         }
     }
 
+    /// Open a finding's chapter at the passage it cites (#1236), selected and
+    /// ready to edit; at the top when it quotes nothing that's there.
+    func open(_ finding: FindingInfo) {
+        guard let index = finding.chapterIndex else { return }
+        let passage = store.passage(for: finding)
+        if selectedChapter != index { selectedChapter = index }
+        if let passage { prose?.textView.reveal(passage) }
+    }
+
     /// Save the open chapter now.
     func save() {
         prose?.editor.save()

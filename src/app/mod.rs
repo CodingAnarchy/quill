@@ -51,7 +51,7 @@ mod dispatch;
 mod editing;
 mod export_style;
 mod exporting;
-mod findings_store;
+use crate::findings_store;
 mod folds;
 mod fonts;
 mod health;

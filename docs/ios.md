@@ -115,6 +115,21 @@ model. Add your API key under **Settings** in the library. It's stored in the
 Keychain through the same `ai::keychain` store the desktop uses. Without a key,
 or without a network, the lookup says which is missing.
 
+## The story bible and findings
+
+**Bible & Findings** in the chapter list shows the project's `bible/`, read
+only: the story pages (setting, theme, research) and each character, plus the
+open findings from the desktop's last analysis passes, grouped by chapter.
+Tapping a finding opens its chapter. When the finding quotes a phrase the
+chapter contains, that passage is selected, ready to edit. The chapter is
+matched by title the way an answer's citations are (exactly, else ignoring
+case).
+
+The phone makes no AI call for any of this, and nothing it does writes under
+`bible/`. Dismissing or resolving a finding stays a desktop action, so bible
+updates from the desktop never conflict with phone work. A desktop update
+arrives with the next sync.
+
 ## Layout on the iPhone Duo
 
 The project is a `NavigationSplitView`: the chapter list (with a book picker

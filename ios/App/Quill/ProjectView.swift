@@ -45,6 +45,7 @@ struct ChapterSidebar: View {
     @Environment(AppState.self) private var app
     @Environment(ProjectStore.self) private var store
     @Binding var selection: UInt32?
+    @State private var showingNotes = false
 
     var body: some View {
         List(selection: $selection) {
@@ -78,6 +79,9 @@ struct ChapterSidebar: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Projects", systemImage: "books.vertical") { app.closeProject() }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Bible & Findings", systemImage: "text.book.closed") { showingNotes = true }
+            }
             if store.remote != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     if store.pulling {
@@ -92,6 +96,9 @@ struct ChapterSidebar: View {
         }
         .refreshable {
             await app.sync(.manual)
+        }
+        .sheet(isPresented: $showingNotes) {
+            NotesView()
         }
     }
 

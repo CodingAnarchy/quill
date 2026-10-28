@@ -105,6 +105,31 @@ public final class ProjectStore {
         }
     }
 
+    /// The story bible's pages (#1236), read-only.
+    public func biblePages() -> [BiblePage] {
+        (try? project?.biblePages()) ?? []
+    }
+
+    /// A bible page's text, without front matter.
+    public func biblePage(_ page: BiblePage) throws -> String {
+        guard let project else { return "" }
+        return try project.biblePage(path: page.path)
+    }
+
+    /// The open findings the desktop's analysis saved, in manuscript order.
+    public func findings() -> [FindingInfo] {
+        (try? project?.findings()) ?? []
+    }
+
+    /// Where in its chapter a finding points (UTF-16), if it quotes a phrase
+    /// the chapter contains.
+    public func passage(for finding: FindingInfo) -> NSRange? {
+        guard let project, let index = finding.chapterIndex,
+            let span = try? project.findingPassage(index: index, summary: finding.summary)
+        else { return nil }
+        return NSRange(location: Int(span.start), length: Int(span.length))
+    }
+
     /// A chapter's prose, with its front matter hidden.
     public func text(of chapter: ChapterInfo) throws -> String {
         guard let project else { return "" }

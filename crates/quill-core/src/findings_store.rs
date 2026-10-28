@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::ai::{Finding, FindingKind};
 use crate::atomic;
-use crate::mode::{Finding, FindingKind};
 
 /// A content key for a finding — stable across sessions and re-runs, derived from
 /// what the finding *says* (kind + summary + chapters + book), not its list
@@ -95,7 +95,7 @@ impl Record {
 /// The on-disk triage store: every finding the project has seen and its dismiss
 /// state, keyed by content. Serialized as `bible/findings.toml`.
 #[derive(Serialize, Deserialize, Default)]
-pub(super) struct FindingsStore {
+pub struct FindingsStore {
     #[serde(default)]
     findings: Vec<Record>,
 }
@@ -107,7 +107,7 @@ fn store_path(root: &Path) -> PathBuf {
 /// The project-relative path of the findings store, so a caller can read the same
 /// file out of git history (a past milestone or branch) via
 /// [`crate::vcs::show_file_at`] — the basis for the findings diff (#1051).
-pub(super) const fn store_rel_path() -> &'static str {
+pub const fn store_rel_path() -> &'static str {
     "bible/findings.toml"
 }
 
@@ -120,19 +120,19 @@ pub(super) const fn store_rel_path() -> &'static str {
 /// at the earlier point and by plot at the later one is one persisting issue —
 /// "still open" — not a resolution plus an introduction. (See [`diff_findings`].)
 #[derive(Default, Debug)]
-pub(super) struct FindingsDiff {
+pub struct FindingsDiff {
     /// Open at A, gone at B — the revision closed these out.
-    pub(super) resolved: Vec<Finding>,
+    pub resolved: Vec<Finding>,
     /// New at B, absent at A — the work surfaced (or created) these.
-    pub(super) introduced: Vec<Finding>,
+    pub introduced: Vec<Finding>,
     /// Open at both points — carried through unchanged.
-    pub(super) still_open: Vec<Finding>,
+    pub still_open: Vec<Finding>,
 }
 
 impl FindingsDiff {
     /// No change at all between the two points — nothing resolved, introduced, or
     /// even carried over (both stores empty, or identical *and* empty).
-    pub(super) const fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.resolved.is_empty() && self.introduced.is_empty() && self.still_open.is_empty()
     }
 }
@@ -162,7 +162,7 @@ impl FindingsDiff {
 /// the diff as "issues at spans", and a summary+chapters+book match is, in
 /// practice, the same underlying issue. Dismissed records don't count as open on
 /// either side, so they never appear in the diff.
-pub(super) fn diff_findings(before: &FindingsStore, after: &FindingsStore) -> FindingsDiff {
+pub fn diff_findings(before: &FindingsStore, after: &FindingsStore) -> FindingsDiff {
     let a: std::collections::HashSet<String> = before.open().iter().map(span_key).collect();
     let b: std::collections::HashSet<String> = after.open().iter().map(span_key).collect();
     let mut diff = FindingsDiff::default();
@@ -192,7 +192,7 @@ pub(super) fn diff_findings(before: &FindingsStore, after: &FindingsStore) -> Fi
 impl FindingsStore {
     /// Load the store, or the empty default when it's missing/unreadable (best
     /// effort — a corrupt file just starts triage fresh, never blocks the editor).
-    pub(super) fn load(root: &Path) -> Self {
+    pub fn load(root: &Path) -> Self {
         std::fs::read_to_string(store_path(root))
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
@@ -204,7 +204,7 @@ impl FindingsStore {
     /// (#1051). Unparseable or empty text yields the empty store, matching
     /// [`load`](Self::load)'s best-effort behavior, so a point that predates the
     /// store (or has a corrupt one) simply diffs as "no findings there".
-    pub(super) fn from_toml(text: &str) -> Self {
+    pub fn from_toml(text: &str) -> Self {
         toml::from_str(text).unwrap_or_default()
     }
 
@@ -234,7 +234,7 @@ impl FindingsStore {
     /// empty-chapters record has no jump target and can't be acted on, so we drop
     /// it here rather than restore an un-jumpable (and potentially panic-inducing
     /// on a `.first()`-less path) finding.
-    pub(super) fn open(&self) -> Vec<Finding> {
+    pub fn open(&self) -> Vec<Finding> {
         self.findings
             .iter()
             .filter(|r| !r.dismissed && !r.chapters.is_empty())
@@ -248,7 +248,7 @@ impl FindingsStore {
     /// pass, since the two describe one issue. The span key still tracks the
     /// underlying text, so a prose edit that changes the summary/chapters lets the
     /// finding re-surface.
-    pub(super) fn is_dismissed(&self, f: &Finding) -> bool {
+    pub fn is_dismissed(&self, f: &Finding) -> bool {
         let span = span_key(f);
         self.findings
             .iter()
@@ -259,7 +259,7 @@ impl FindingsStore {
     /// on file — open or dismissed — keeps its state untouched, so this never
     /// resurrects a dismissal. Returns whether the store was actually written, so
     /// the caller can auto-commit the store (#1060) only when a pass changed it.
-    pub(super) fn remember(&mut self, root: &Path, f: &Finding) -> bool {
+    pub fn remember(&mut self, root: &Path, f: &Finding) -> bool {
         if self.position(f).is_none() {
             self.findings.push(Record::from(f, false));
             self.save(root);
@@ -270,7 +270,7 @@ impl FindingsStore {
 
     /// Mark a finding dismissed and persist. The record is kept (not removed) so a
     /// later re-run of the same pass doesn't re-surface it.
-    pub(super) fn dismiss(&mut self, root: &Path, f: &Finding) {
+    pub fn dismiss(&mut self, root: &Path, f: &Finding) {
         match self.position(f) {
             Some(i) => self.findings[i].dismissed = true,
             None => self.findings.push(Record::from(f, true)),
@@ -281,7 +281,7 @@ impl FindingsStore {
     /// Drop a resolved finding (the author marked it `xxx`) and persist. Unlike a
     /// dismissal, a resolved finding leaves no record — if the underlying issue
     /// recurs in a later manuscript, a fresh pass *should* surface it again.
-    pub(super) fn resolve(&mut self, root: &Path, f: &Finding) {
+    pub fn resolve(&mut self, root: &Path, f: &Finding) {
         if let Some(i) = self.position(f) {
             self.findings.remove(i);
             self.save(root);
@@ -292,8 +292,8 @@ impl FindingsStore {
 #[cfg(test)]
 mod tests {
     use super::{diff_findings, store_path, FindingsStore};
+    use crate::ai::{Finding, FindingKind};
     use crate::atomic;
-    use crate::mode::{Finding, FindingKind};
 
     fn finding(summary: &str) -> Finding {
         finding_of(FindingKind::Continuity, summary)

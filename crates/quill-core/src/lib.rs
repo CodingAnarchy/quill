@@ -18,6 +18,7 @@ pub mod config;
 mod datapath_tests;
 pub mod date;
 pub mod export;
+pub mod findings_store;
 pub mod frontmatter;
 pub mod history;
 pub mod lastpos;

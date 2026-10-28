@@ -6,6 +6,7 @@
 //! series books, short story forms) stays in `quill-core` and the phone can
 //! never disagree with the desktop about it.
 
+mod bible;
 mod error;
 mod git;
 mod lookup;
@@ -15,6 +16,7 @@ mod session;
 use std::env;
 use std::path::Path;
 
+pub use bible::{BiblePage, FindingInfo, TextSpan};
 pub use error::QuillError;
 pub use git::{clone_destination, clone_project, set_git_token, SyncReport};
 pub use lookup::{has_claude_api_key, look_up_words, set_claude_api_key, WordCandidate};
