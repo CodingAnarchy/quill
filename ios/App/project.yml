@@ -49,3 +49,27 @@ targets:
         MARKETING_VERSION: "1.3.0"
         CURRENT_PROJECT_VERSION: "1"
         ENABLE_PREVIEWS: YES
+  # Drives the real app in a simulator (#1232): open the sample, edit a
+  # chapter, background and kill the app, and find the words still there.
+  QuillUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: QuillUITests
+    dependencies:
+      - target: Quill
+    settings:
+      base:
+        TEST_TARGET_NAME: Quill
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.quill.QuillUITests
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  Quill:
+    build:
+      targets:
+        Quill: all
+    test:
+      targets:
+        - QuillUITests

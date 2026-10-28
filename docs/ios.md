@@ -66,6 +66,15 @@ The macOS SDK carries UIKit for Mac Catalyst, so the app, QuillKit, and the
 bindings typecheck together as one Catalyst module. It catches Swift errors
 locally; CI still builds the real iOS app.
 
+With Xcode, the UI tests (`ios/App/QuillUITests`) drive the real app in a
+simulator: they open the sample, check the chapter list, type into a chapter,
+background and kill the app, and find the words still there after a relaunch.
+On a wide screen they check that the list stays beside the chapter. Run them
+with
+`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone 17' test`
+(use an iPhone 17 Pro Max for the wide check, rotated to landscape by the
+test).
+
 QuillKit's tests run on macOS against the real Rust core, so they cover the
 whole path from Swift through UniFFI into `quill-core` without a simulator.
 
