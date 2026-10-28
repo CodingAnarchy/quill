@@ -22,6 +22,8 @@ final class AppState {
     private(set) var chapterError: String?
     /// How the last sync went, for the chapter list's footer.
     private(set) var syncStatus: String?
+    /// The word lookup in progress (#1235), and the range it replaces.
+    var lookup: (lookup: WordLookup, range: NSRange)?
     /// A message the author must see (work parked on a draft, a failed manual
     /// sync), shown as an alert.
     var notice: String?
@@ -132,7 +134,11 @@ final class AppState {
             let chapter = store.chapters.first(where: { $0.index == index })
         else { return }
         do {
-            prose = ProseHost(editor: try store.editor(for: chapter))
+            let host = ProseHost(editor: try store.editor(for: chapter))
+            host.onLookUp = { [weak self] selection, range, line in
+                self?.lookup = (WordLookup(selection: selection, line: line), range)
+            }
+            prose = host
         } catch {
             chapterError = describe(error)
         }

@@ -6,6 +6,7 @@ struct LibraryView: View {
     @Environment(AppState.self) private var app
     @Environment(Library.self) private var library
     @State private var showingClone = false
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -24,8 +25,16 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Quill")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                }
+            }
             .sheet(isPresented: $showingClone) {
                 CloneView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
             .overlay {
                 if let error = app.store.error {

@@ -126,6 +126,7 @@ struct ChapterRow: View {
 
 /// The open chapter: its prose, editable, with a live word count.
 struct ChapterEditorView: View {
+    @Environment(AppState.self) private var app
     let host: ProseHost
 
     var body: some View {
@@ -141,6 +142,16 @@ struct ChapterEditorView: View {
             .toolbarTitleMenu {
                 if let error = host.editor.saveError {
                     Label(error, systemImage: "exclamationmark.triangle")
+                }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { app.lookup != nil }, set: { if !$0 { app.lookup = nil } })
+            ) {
+                if let (lookup, range) = app.lookup {
+                    LookupSheet(lookup: lookup) { word in
+                        host.place(word, over: range, expecting: lookup.selection)
+                    }
                 }
             }
     }

@@ -26,11 +26,14 @@ struct ProseTextView: UIViewRepresentable {
 
 /// One open chapter's text view and the bridge from its edits to the core.
 @MainActor
-final class ProseHost: NSObject, NSTextStorageDelegate {
+final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
     let editor: ChapterEditor
     let textView: ProseUITextView
     /// True while restyling, so attribute changes aren't taken for edits.
     private var styling = false
+    /// Asked to look up the selected word or phrase (#1235): the selection,
+    /// its range, and the paragraph it sits in.
+    var onLookUp: (_ selection: String, _ range: NSRange, _ line: String) -> Void = { _, _, _ in }
 
     init(editor: ChapterEditor) {
         self.editor = editor
@@ -54,6 +57,39 @@ final class ProseHost: NSObject, NSTextStorageDelegate {
             NSAttributedString(string: editor.initialText, attributes: ProseStyle.base))
         restyle(view.textStorage, NSRange(location: 0, length: view.textStorage.length))
         view.textStorage.delegate = self
+        view.delegate = self
+    }
+
+    /// Add "Look Up Word" to the edit menu when a word or short phrase is
+    /// selected: the author chose the slot, so this is a reference lookup,
+    /// never an offer to rewrite (CLAUDE.md, AI boundaries).
+    func textView(
+        _ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        let text = textView.textStorage.string as NSString
+        guard range.length > 0, NSMaxRange(range) <= text.length else { return nil }
+        let selection = text.substring(with: range)
+        let words = selection.split(whereSeparator: \.isWhitespace).count
+        guard (1...4).contains(words) else { return UIMenu(children: suggestedActions) }
+        let line = text.substring(with: text.paragraphRange(for: range))
+        let lookUp = UIAction(title: "Look Up Word", image: UIImage(systemName: "character.book.closed")) {
+            [weak self] _ in
+            self?.onLookUp(selection, range, line)
+        }
+        return UIMenu(children: [lookUp] + suggestedActions)
+    }
+
+    /// Put `word` in place of the looked-up selection, if that text is still
+    /// there. It goes through the text view, so it's one undoable edit and
+    /// reaches the core like typing.
+    func place(_ word: String, over range: NSRange, expecting selection: String) {
+        let text = textView.textStorage.string as NSString
+        guard NSMaxRange(range) <= text.length, text.substring(with: range) == selection,
+            let start = textView.position(from: textView.beginningOfDocument, offset: range.location),
+            let end = textView.position(from: start, offset: range.length),
+            let target = textView.textRange(from: start, to: end)
+        else { return }
+        textView.replace(target, withText: word)
     }
 
     nonisolated func textStorage(

@@ -99,6 +99,22 @@ into `Documents/Projects` only once it has checked out and proven to be a
 Quill project. A wrong token, no network, or a repository without a
 `book.toml` each leaves nothing behind and says what to fix.
 
+## Looking up a word
+
+Select a word or a short phrase (up to four words) and choose **Look Up Word**
+from the edit menu. Quill runs the desktop's thesaurus lookup
+(`ai::thesaurus`): the selection and the paragraph it sits in go to Claude,
+and the paragraph is used only to judge which candidates fit. Candidates come
+back with a definition and, where known, syllables, origin, and rarity.
+Tapping one replaces the selection and nothing else, as one undoable edit. The
+lookup never offers a rewritten sentence (see the AI boundaries in
+`CLAUDE.md`).
+
+It runs on the Claude cloud backend only. The phone build has no on-device
+model. Add your API key under **Settings** in the library. It's stored in the
+Keychain through the same `ai::keychain` store the desktop uses. Without a key,
+or without a network, the lookup says which is missing.
+
 ## Layout on the iPhone Duo
 
 The project is a `NavigationSplitView`: the chapter list (with a book picker
