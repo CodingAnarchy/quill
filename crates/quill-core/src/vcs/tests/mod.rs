@@ -5,9 +5,11 @@
 //! use a bare repo as a stand-in remote, so nothing reaches the network.
 //!
 //! Split to mirror the code modules: [`history`] covers init/commit/log/milestones/
-//! diff/restore, [`remote`] the push/pull plumbing, [`sync`] the two-way sync (#962)
+//! diff/restore, [`clone`] cloning onto a second device (#1231), [`remote`] the
+//! push/pull plumbing, [`sync`] the two-way sync (#962)
 //! and its hand-resolved finalization (#963), and [`drafts`] branch-as-draft (#965).
 
+mod clone;
 mod drafts;
 mod history;
 mod remote;

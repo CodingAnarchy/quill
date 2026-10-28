@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use quill_core::frontmatter::Band;
 use quill_core::project::{length_category, Form, Project};
+use quill_core::vcs;
 
 use crate::QuillError;
 
@@ -89,7 +90,9 @@ impl From<Band> for Matter {
 /// racing its saves; dropping the object releases the lock.
 #[derive(uniffi::Object)]
 pub struct QuillProject {
-    inner: Mutex<Project>,
+    /// `None` only for the moment between dropping a project and reopening it
+    /// ([`reopen`](Self::reopen)), so the reopen doesn't find its own lock.
+    inner: Mutex<Option<Project>>,
 }
 
 #[uniffi::export]
@@ -98,14 +101,20 @@ impl QuillProject {
     #[uniffi::constructor]
     pub fn open(path: &str) -> Result<Arc<Self>, QuillError> {
         let project = Project::open(path)?;
+        // Opening writes the project lock under `.quill/`; keep it out of git in
+        // a repository set up without Quill's `.gitignore` (#1231), so a pull
+        // doesn't see it as uncommitted work. Best-effort: a read-only repo
+        // still opens.
+        let _ = vcs::exclude_editor_state(&project.root);
         Ok(Arc::new(Self {
-            inner: Mutex::new(project),
+            inner: Mutex::new(Some(project)),
         }))
     }
 
     /// The project's title, form, books, and totals.
-    pub fn info(&self) -> ProjectInfo {
-        let p = self.lock();
+    pub fn info(&self) -> Result<ProjectInfo, QuillError> {
+        let guard = self.lock();
+        let p = guard.get()?;
         let m = &p.manifest;
         let words: usize = (0..m.chapters.len()).map(|i| p.chapter_words(i)).sum();
         let books = (0..p.book_count())
@@ -115,7 +124,7 @@ impl QuillProject {
                 words: p.book_word_count(b) as u64,
             })
             .collect();
-        ProjectInfo {
+        Ok(ProjectInfo {
             title: p.series_title().unwrap_or(&m.title).to_string(),
             author: m.author.clone(),
             form: m.form.into(),
@@ -127,13 +136,14 @@ impl QuillProject {
             length_category: m
                 .story_chapter()
                 .map(|i| length_category(p.chapter_words(i)).to_string()),
-        }
+        })
     }
 
     /// The active book's chapters, in manuscript order.
-    pub fn chapters(&self) -> Vec<ChapterInfo> {
-        let p = self.lock();
-        p.manifest
+    pub fn chapters(&self) -> Result<Vec<ChapterInfo>, QuillError> {
+        let guard = self.lock();
+        let p = guard.get()?;
+        Ok(p.manifest
             .chapters
             .iter()
             .enumerate()
@@ -145,13 +155,14 @@ impl QuillProject {
                 summary: c.summary.clone(),
                 matter: p.chapter_band(i).into(),
             })
-            .collect()
+            .collect())
     }
 
     /// Chapter `index`'s prose, with its front matter split off exactly as the
     /// desktop editor shows it.
     pub fn chapter_text(&self, index: u32) -> Result<String, QuillError> {
-        let p = self.lock();
+        let guard = self.lock();
+        let p = guard.get()?;
         let index = index as usize;
         if index >= p.manifest.chapters.len() {
             return Err(QuillError::NotFound {
@@ -162,16 +173,59 @@ impl QuillProject {
     }
 
     /// Switch a series to book `index`; its chapters become the ones listed.
-    pub fn set_active_book(&self, index: u32) {
-        self.lock().set_active_book(index as usize);
+    pub fn set_active_book(&self, index: u32) -> Result<(), QuillError> {
+        self.lock().get_mut()?.set_active_book(index as usize);
+        Ok(())
+    }
+
+    /// The project's folder.
+    pub fn path(&self) -> Result<String, QuillError> {
+        Ok(self.lock().get()?.root.to_string_lossy().into_owned())
     }
 }
 
 impl QuillProject {
-    /// The project, recovering it from a poisoned lock: a panic on another
+    /// The open project. Recovers from a poisoned lock: a panic on another
     /// thread mid-call must not make the author's open project unusable.
-    fn lock(&self) -> MutexGuard<'_, Project> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    pub fn lock(&self) -> ProjectGuard<'_> {
+        ProjectGuard(self.inner.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Close and reopen the project, so everything cached at open (word
+    /// counts, statuses, the chapter list) reflects what's on disk now, after
+    /// a pull rewrote it. The old project is dropped first to release its lock.
+    pub fn reopen(&self) -> Result<(), QuillError> {
+        let mut slot = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let root = slot.as_ref().map(|p| p.root.clone());
+        let Some(root) = root else {
+            return Err(QuillError::Io {
+                message: "The project isn't open.".into(),
+            });
+        };
+        *slot = None;
+        *slot = Some(Project::open(&root)?);
+        Ok(())
+    }
+}
+
+/// A locked, open project. A failed [`QuillProject::reopen`] can leave the
+/// slot empty; every call after that reports the project as closed rather
+/// than panicking.
+pub struct ProjectGuard<'a>(MutexGuard<'a, Option<Project>>);
+
+impl ProjectGuard<'_> {
+    pub fn get(&self) -> Result<&Project, QuillError> {
+        self.0.as_ref().ok_or_else(closed)
+    }
+
+    pub fn get_mut(&mut self) -> Result<&mut Project, QuillError> {
+        self.0.as_mut().ok_or_else(closed)
+    }
+}
+
+fn closed() -> QuillError {
+    QuillError::Io {
+        message: "The project couldn't be reopened. Close it and open it again.".into(),
     }
 }
 

@@ -20,11 +20,14 @@ mod remote;
 
 pub use local::{
     checkout_branch, commit, commit_findings, create_branch, create_tag, current_branch, diff,
-    diff_file_to_worktree, diff_tree_to_worktree, finalize_branch_merge, init, is_repo,
-    list_branches, list_tags, log, merge_branch, restore, restore_all, set_tag_message,
-    show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
+    diff_file_to_worktree, diff_tree_to_worktree, exclude_editor_state, finalize_branch_merge,
+    init, is_repo, list_branches, list_tags, log, merge_branch, restore, restore_all,
+    set_tag_message, show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
 };
-pub use remote::{finalize_sync, pull, push, remote_url, set_remote, sync, ChapterConflict};
+pub use remote::{
+    clone, finalize_sync, folder_name, pull, push, remote_url, set_remote, set_token, sync,
+    ChapterConflict, RemoteError, RemoteErrorKind,
+};
 
 // `diff_file` is the commit-to-commit diff primitive the UI doesn't wire yet —
 // reached by name only from the tests, so re-export it there.

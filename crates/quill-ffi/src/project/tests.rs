@@ -34,14 +34,14 @@ fn lists_chapters_with_the_desktops_cached_counts() {
     novel(&dir);
     let project = open(&dir);
 
-    let info = project.info();
+    let info = project.info().unwrap();
     assert_eq!(info.title, "The Lighthouse");
     assert_eq!(info.author.as_deref(), Some("A. Writer"));
     assert_eq!(info.form, ProjectForm::Novel);
     assert_eq!(info.books.len(), 1);
     assert_eq!(info.length_category, None);
 
-    let chapters = project.chapters();
+    let chapters = project.chapters().unwrap();
     let titles: Vec<&str> = chapters.iter().map(|c| c.title.as_str()).collect();
     assert_eq!(titles, ["Arrival", "Storm"]);
     // The same per-chapter cache the desktop's outline pane reads.
@@ -89,7 +89,7 @@ fn a_short_story_names_its_length_category() {
     drop(story);
     fs::write(file, "word ".repeat(1_200)).unwrap();
 
-    let info = open(&dir).info();
+    let info = open(&dir).info().unwrap();
     assert_eq!(info.form, ProjectForm::ShortStory);
     assert_eq!(info.length_category.as_deref(), Some("short story"));
     fs::remove_dir_all(&dir).ok();

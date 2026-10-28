@@ -14,11 +14,17 @@ pub enum QuillError {
     Invalid { message: String },
     /// Reading or writing failed for another reason (permissions, a full disk).
     Io { message: String },
+    /// A clone, pull, or sync couldn't finish: no network, a rejected token, or
+    /// a remote that isn't a Quill project. The message says which.
+    Remote { message: String },
 }
 
 impl fmt::Display for QuillError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (Self::NotFound { message } | Self::Invalid { message } | Self::Io { message }) = self;
+        let (Self::NotFound { message }
+        | Self::Invalid { message }
+        | Self::Io { message }
+        | Self::Remote { message }) = self;
         f.write_str(message)
     }
 }
