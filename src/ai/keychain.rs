@@ -33,7 +33,7 @@
 /// The keyring service name under which Quill's keys are filed. Stable — changing
 /// it would orphan already-stored keys. Only read by the real-keyring code path,
 /// which is compiled out of test builds (#531), so it's dead there.
-#[cfg_attr(test, allow(dead_code))]
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 const SERVICE: &str = "quill";
 
 /// Which provider key a keychain entry holds. The variant maps to the keyring
@@ -99,12 +99,12 @@ pub fn resolve_lazy(
 // const is impossible in a non-test build.
 #[allow(clippy::missing_const_for_fn)]
 pub fn get(key: Key) -> Option<String> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         let _ = key;
         None
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         let entry = keyring::Entry::new(SERVICE, key.account()).ok()?;
         entry.get_password().ok().and_then(|secret| {
@@ -123,12 +123,12 @@ pub fn get(key: Key) -> Option<String> {
 /// real keychain. The set-key command is exercised through the pure helpers, not
 /// by hitting the store.
 pub fn set(key: Key, secret: &str) -> Result<(), String> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         let _ = (key, secret);
         Err("keychain is disabled in test builds".into())
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         let entry = keyring::Entry::new(SERVICE, key.account())
             .map_err(|e| format!("couldn't open the OS keychain: {e}"))?;

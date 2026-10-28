@@ -100,7 +100,7 @@ where
         // already destroyed). Production builds compile this out entirely.
         // Every entry point reaches it here, so a `write`, a `write_with`, and a
         // `write_hint` each count as exactly one armed step of the countdown.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if fail_point::should_fail_before_rename() {
             return Err(io::Error::other("injected pre-rename failure"));
         }
@@ -188,7 +188,7 @@ fn temp_path(path: &Path) -> PathBuf {
 /// the data-path suite can simulate a crash mid-save without touching the
 /// filesystem's permissions, and parallel tests can't perturb each other.
 /// Compiled out of production builds.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod fail_point {
     use std::cell::Cell;
 

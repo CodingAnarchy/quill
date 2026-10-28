@@ -13,14 +13,13 @@
 //! `[editor]` knob descriptor table ([`setting`]) — each re-exported
 //! here so the public surface, and every caller, is unchanged.
 
-mod ai;
 mod command;
 mod palette;
 mod registry;
 mod setting;
 mod table;
 
-pub use ai::{AiAction, AiCost, ModelWeight, Needs};
+pub use crate::ai::{AiAction, AiCost, Needs};
 pub use command::{
     Command, FontTarget, PortraitChoice, SettingPicker, SettingTextKnob, StoryCommand, StylePicker,
     StyleTextKnob,

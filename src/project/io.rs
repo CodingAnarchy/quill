@@ -457,11 +457,11 @@ impl Project {
         // left half-updated.
         for (i, (_, tmp, dest, _)) in plan.iter().enumerate() {
             let failed = {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 {
                     atomic::fail_point::should_fail_swap()
                 }
-                #[cfg(not(test))]
+                #[cfg(not(any(test, feature = "test-support")))]
                 {
                     false
                 }

@@ -313,7 +313,7 @@ impl EmbedModel {
     /// check to HEAD every row and catch a filename that doesn't exist *before* a
     /// user's download 404s (#726), exactly like [`Model::gguf_resolve_url`]. A live
     /// file answers with a `302` redirect to the CDN.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn weights_resolve_url(&self) -> String {
         format!(
             "https://huggingface.co/{}/resolve/main/{}",
@@ -381,7 +381,7 @@ impl Model {
     /// Only the vetting check consumes it, so it's `#[cfg(test)]`-gated — it isn't a
     /// production affordance, and gating it also keeps it off the `dead_code` radar
     /// in every non-test build (default and `--features local`).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn gguf_resolve_url(&self) -> String {
         format!(
             "https://huggingface.co/{}/resolve/main/{}",

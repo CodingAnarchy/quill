@@ -123,7 +123,7 @@ pub struct Buffer {
 impl Buffer {
     /// An empty, untitled buffer. Test-only today; #24 (a freshly created chapter
     /// before its first save) will reuse it — un-gate it then.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn empty() -> Self {
         Self::from_text("")
     }

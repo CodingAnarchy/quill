@@ -1,5 +1,5 @@
 //! Section loading with the per-project override layered over the home config
-//! (#710). Each typed loader ([`EditorConfig::load`], [`load_theme`], …) routes
+//! (#710). Each typed loader ([`EditorConfig::load`], `load_theme`, …) routes
 //! through [`load_section`]: read the global `[section]`, read the project's
 //! `[quill.section]` override, merge them field by field, then deserialize. The
 //! merge is untyped ([`toml::Value`]) so the two layers overlay key by key before
@@ -12,7 +12,6 @@
 //! the files fresh, exactly as before.
 //!
 //! [`EditorConfig`]: super::EditorConfig
-//! [`load_theme`]: super::load_theme
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -35,7 +34,7 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// How many config files this thread has read and parsed (test-only), so a
     /// test can prove a session parses each file once.
@@ -107,7 +106,7 @@ fn parsed(
     extract: fn(toml::Table) -> Option<toml::Table>,
 ) -> Option<toml::Table> {
     let load = || {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         PARSES.with(|n| n.set(n.get() + 1));
         std::fs::read_to_string(path)
             .ok()
@@ -229,7 +228,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::super::{
-        load_snippets, load_theme, set_config_dir, set_project_dir, set_values, EditorConfig,
+        load_snippets, set_config_dir, set_project_dir, set_values, theme_name, EditorConfig,
     };
     use super::*;
     use crate::project::Project;
@@ -428,7 +427,7 @@ mod tests {
         {
             let _session = LoadSession::begin();
             assert_eq!(EditorConfig::load().column_width, 100);
-            let _ = load_theme();
+            let _ = theme_name();
             let _ = load_snippets();
             let _nested = LoadSession::begin(); // joins the open session
             let _ = EditorConfig::load();

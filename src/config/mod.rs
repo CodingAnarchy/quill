@@ -41,6 +41,7 @@
 mod ai;
 mod load;
 mod splice;
+mod theme;
 mod types;
 
 use std::ffi::OsString;
@@ -50,9 +51,10 @@ pub use ai::{AiConfig, BackendKind, ImageBackendKind, ImageConfig, Policy};
 pub use load::{forget_parsed, global_config_warning, load_section, LoadSession};
 pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
+pub use theme::load_theme;
 pub use types::{
-    load_snippets, load_theme, AuthorConfig, BackupConfig, EditorConfig, EditorFlags,
-    GeneralConfig, ProjectsConfig, Snippet,
+    load_snippets, AuthorConfig, BackupConfig, EditorConfig, EditorFlags, GeneralConfig,
+    ProjectsConfig, Snippet,
 };
 pub use types::{theme_color_overrides, theme_name};
 
@@ -66,11 +68,11 @@ pub use types::{theme_color_overrides, theme_name};
 /// request. A test that exercises config points it at a temp dir via
 /// [`set_config_dir`].
 pub fn config_dir() -> Option<PathBuf> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         TEST_CONFIG_DIR.with(|c| c.borrow().clone())
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         resolve_config_dir(
             std::env::var_os("XDG_CONFIG_HOME"),
@@ -90,7 +92,7 @@ fn resolve_config_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<P
     Some(base.join("quill"))
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Per-test override for [`config_dir`] (#528) — see its docs. Per-thread, so
     /// parallel tests don't race the way a process-global env var would.
@@ -112,7 +114,7 @@ thread_local! {
 /// Point config resolution at `dir` (or clear it with `None`) for the current
 /// test thread (#528). Test-only; production resolves from `$XDG_CONFIG_HOME` /
 /// `$HOME`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn set_config_dir(dir: Option<PathBuf>) {
     TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
 }
@@ -149,11 +151,11 @@ pub fn config_path() -> Option<PathBuf> {
 /// `~/.local/share`, so no test writes to the machine's data dir. A test that
 /// exercises backups points it at a temp dir via [`set_data_dir`].
 pub fn data_dir() -> Option<PathBuf> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         TEST_DATA_DIR.with(|c| c.borrow().clone())
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         resolve_data_dir(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"))
     }
@@ -183,7 +185,7 @@ pub fn backups_dir(project_root: &std::path::Path) -> Option<PathBuf> {
     Some(data_dir()?.join("backups").join(name))
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Per-test override for [`data_dir`] (#888) — mirrors [`TEST_CONFIG_DIR`], so
     /// backup tests write to a scratch dir and never the developer's real
@@ -195,7 +197,7 @@ thread_local! {
 /// Point [`data_dir`] resolution at `dir` (or clear it with `None`) for the current
 /// test thread (#888). Test-only; production resolves from `$XDG_DATA_HOME` /
 /// `$HOME`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn set_data_dir(dir: Option<PathBuf>) {
     TEST_DATA_DIR.with(|c| *c.borrow_mut() = dir);
 }

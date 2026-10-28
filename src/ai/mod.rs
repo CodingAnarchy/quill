@@ -9,6 +9,7 @@
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
 pub mod accuracy;
+mod action;
 pub mod ad_creative;
 pub mod batch;
 pub mod bible;
@@ -25,6 +26,7 @@ pub mod editorial;
 pub mod embed;
 pub mod factcheck; // research-notebook fact-check (#1049)
 pub mod fal;
+mod finding;
 pub mod foreshadow;
 mod http;
 pub mod image;
@@ -42,6 +44,7 @@ pub mod naming;
 pub mod pacing;
 pub mod plot;
 pub mod relationship;
+mod render;
 pub mod retrieval;
 pub mod router;
 pub mod scaffold;
@@ -57,24 +60,21 @@ pub mod tools;
 pub mod voice;
 pub mod workflow_gen;
 
+pub use action::{AiAction, AiCost, ModelWeight, Needs};
 pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
+pub use finding::{Finding, FindingKind};
 pub use plot::Plot;
+pub use render::answer_to_lines;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
 pub use submission::Submission;
 pub use theme::Theme;
-// `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
-// Aliased so it doesn't collide with this module's own `theme` submodule (the AI
-// theme/motif tracker, #828); `crate::theme` is the UI color theme.
-use crate::theme as ui_theme;
 use std::fmt;
 use std::fmt::Write as _;
 
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
 /// A provider that turns a [`Request`] into a [`Response`] — the Claude HTTP
@@ -191,14 +191,14 @@ pub enum Outcome {
     Scaffold(Result<Scaffold, AiError>),
     /// A completed analysis-only findings pass (#563): the UI findings the pass
     /// produced, already mapped from its typed result *and attributed to its
-    /// originating action* by the worker (each [`Finding`](crate::mode::Finding) carries
+    /// originating action* by the worker (each [`Finding`](Finding) carries
     /// `action: Some(_)`), so one generic apply path (`show_findings`) serves every
     /// analysis-only pass — naming, style, editorial, voice, accuracy, relationship,
     /// foreshadow, factcheck, pacing. Collapses the per-pass `Outcome` variants + their
     /// `error()` arms + `apply_outcome` dispatch arms into this one. The persistent-bible
     /// passes (characters/continuity/setting/plot/theme) and scaffold keep their own
     /// variants — they write a bible file, not just findings.
-    Findings(Result<Vec<crate::mode::Finding>, AiError>),
+    Findings(Result<Vec<Finding>, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
     /// Story brainstorming from a premise (#255).
@@ -233,20 +233,20 @@ pub enum Outcome {
     /// scoped to the finding's chapters, parsed to the fresh UI findings that
     /// pass now produces (so the one being rechecked is cleared if it's gone, or
     /// kept if it's still flagged). Analysis-only — it writes no bible file.
-    Recheck(Result<Vec<crate::mode::Finding>, AiError>),
+    Recheck(Result<Vec<Finding>, AiError>),
     /// Re-check of every open triage finding in one pass (#830): each open
     /// finding's originating pass re-run scoped to its chapters (grouped by
     /// pass + chapters to avoid redundant runs), parsed to the combined fresh UI
     /// findings across all groups (so each rechecked finding is cleared if it's
     /// gone or kept if still flagged). Analysis-only — it writes no bible file.
-    RecheckAll(Result<Vec<crate::mode::Finding>, AiError>),
+    RecheckAll(Result<Vec<Finding>, AiError>),
     /// On-demand scope-to-selection pass (#1054): a continuity/setting pass the
     /// author invoked over an editor selection / chapter range, re-run scoped to
     /// just those chapters and parsed to the same kind of findings the full pass
     /// produces — surfaced fresh (not reconciled against one flagged finding like
     /// [`Recheck`](Self::Recheck)). Analysis-only; narrows input, never the output
     /// contract, and writes no bible file.
-    ScopedPass(Result<Vec<crate::mode::Finding>, AiError>),
+    ScopedPass(Result<Vec<Finding>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -512,9 +512,9 @@ impl Settings {
     pub fn resolved_key(&self) -> Option<String> {
         // The env key is the headless escape hatch in production; test builds never
         // read it, so the suite can't reach the API by accident (#528).
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let env: Option<String> = None;
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         let env = std::env::var("ANTHROPIC_API_KEY").ok();
         // `resolve_lazy` only calls the thunk when the env var is absent, so an env
         // key still skips the keychain; the thunk memoizes the read so repeated
@@ -601,7 +601,7 @@ text — only answer about the manuscript.";
 
 /// A grounded Q&A reply (#609): the answer prose plus the chapter titles it was
 /// drawn from, so the author can jump to each cited chapter (like a
-/// [`Finding`](crate::mode::Finding)). The AI answers *about* the manuscript — it
+/// [`Finding`](Finding)). The AI answers *about* the manuscript — it
 /// never writes into it; `citations` are retrieval, not prose.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Answer {
@@ -731,29 +731,6 @@ pub fn parse_answer(text: &str) -> Answer {
         citations: Vec::new(),
         coverage: None,
     })
-}
-
-/// Render a Q&A answer's prose as overlay lines: the answer, then a dimmed usage
-/// line. Long lines are wrapped by the renderer (the overlay enables wrapping).
-/// Citations are surfaced separately as jumpable entries (#609).
-pub fn answer_to_lines(answer: &Answer, usage: &Usage) -> Vec<Line<'static>> {
-    let mut out: Vec<Line> = answer
-        .answer
-        .lines()
-        .map(|l| Line::raw(l.to_string()))
-        .collect();
-    if out.is_empty() {
-        out.push(Line::raw("(no answer)"));
-    }
-    out.push(Line::raw(""));
-    out.push(Line::from(Span::styled(
-        format!(
-            "{} tokens in ({} cached) · {} out",
-            usage.input_tokens, usage.cache_read_tokens, usage.output_tokens
-        ),
-        Style::default().fg(ui_theme::current().dim),
-    )));
-    out
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ mod template;
 mod words;
 
 use annotations::load_annotations;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub use annotations::write_count as annotation_writes;
 pub use collection::{StoryLink, STORIES_DIR};
 pub use convert::GrownChapter;
@@ -773,14 +773,14 @@ impl Project {
 
     /// A minimal in-memory project (one chapter, no files on disk) for tests and
     /// headless rendering. Like real projects, it always has an active chapter.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn scratch() -> Self {
         Self::scratch_with(&["Chapter 1"])
     }
 
     /// An in-memory project with the given chapter titles (no files on disk),
     /// for tests and headless rendering. Always has an active chapter (the first).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn scratch_with(titles: &[&str]) -> Self {
         let chapters: Vec<ChapterEntry> = titles
             .iter()

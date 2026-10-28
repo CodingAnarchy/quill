@@ -101,7 +101,7 @@ impl Live {
 /// (the note is then dropped). An insertion inside the range extends it; a
 /// deletion inside it shrinks it; an edit wholly before it slides it; one wholly
 /// after it leaves it untouched.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn remap(range: (usize, usize), edit: (usize, usize, usize)) -> Option<(usize, usize)> {
     let (ns, ne) = (shift_point(range.0, edit), shift_point(range.1, edit));
     (ns < ne).then_some((ns, ne))

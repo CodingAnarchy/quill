@@ -55,7 +55,7 @@ impl Project {
     /// Replace chapter `file`'s annotations with `live` (byte ranges + notes) and
     /// persist the side file (#302) — [`set_annotations`](Self::set_annotations)
     /// for a single chapter.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_chapter_annotations(&mut self, file: &str, live: &[Live]) -> io::Result<()> {
         self.set_annotations([(file, live)])
     }
@@ -130,7 +130,7 @@ impl Project {
             let text = toml::to_string_pretty(&file).map_err(io::Error::other)?;
             atomic::write(&path, text.as_bytes())?;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         write_count::bump();
         self.annotations_unsaved = false;
         Ok(())
@@ -151,7 +151,7 @@ pub(super) fn load_annotations(root: &Path) -> Vec<Annotation> {
 /// can assert a batch writes once and an unchanged one writes nothing — content
 /// alone can't tell "rewritten identically" from "not touched". Compiled out of
 /// production builds.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod write_count {
     use std::cell::Cell;
 

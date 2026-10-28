@@ -49,7 +49,7 @@ pub(super) struct Segments {
     cache: HashMap<Box<[u8]>, Rc<Parsed>>,
     /// How many pieces went through tree-sitter — lets tests assert a keystroke
     /// reparses one block, not the document.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fresh_parses: usize,
 }
 
@@ -73,7 +73,7 @@ impl Default for Segments {
             block,
             inline,
             cache: HashMap::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             fresh_parses: 0,
         }
     }
@@ -152,7 +152,7 @@ impl Segments {
     /// over each inline node's ranges, exactly as `tree_sitter_md::MarkdownParser`
     /// does for a fresh parse.
     fn parse_piece(&mut self, piece: &str) -> Parsed {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         {
             self.fresh_parses += 1;
         }

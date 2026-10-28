@@ -12,10 +12,10 @@
 //! only ever changes *where* an action runs — never *what* it does, and never the
 //! manuscript-prose boundary.
 
+use super::ModelWeight;
 use crate::ai::cost::Estimate;
 use crate::ai::model_select::STANDARD_CONTEXT_TOKENS;
 use crate::ai::BackendKind;
-use crate::mode::ModelWeight;
 
 /// The author's routing preference, from `[ai] routing`. It's a config *value*, so
 /// the enum now lives in [`config::Policy`](crate::config::Policy) alongside the

@@ -27,7 +27,7 @@
 //! read-only, exactly as at open.
 
 use std::fs::{self, File};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -311,7 +311,7 @@ fn try_create(lock_path: &Path, our_host: &str) -> Result<InstanceLock, TryError
 
 /// Read the pid recorded in the lockfile at `root`, if any. Test-only helper so a
 /// test can assert *which* process owns the lock without reaching into internals.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn recorded_pid(root: &Path) -> Option<i32> {
     let mut buf = String::new();
     File::open(path(root)).ok()?.read_to_string(&mut buf).ok()?;
