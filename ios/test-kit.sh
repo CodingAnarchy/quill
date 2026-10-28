@@ -17,4 +17,5 @@ if [[ "$dev" == *CommandLineTools* ]]; then
   flags=(-Xswiftc -F -Xswiftc "$fw" -Xlinker -F -Xlinker "$fw"
     -Xlinker -rpath -Xlinker "$fw" -Xlinker -rpath -Xlinker "$lib")
 fi
-swift test "${flags[@]}"
+# `${flags[@]+...}`: macOS bash 3.2 treats an empty array as unbound under `set -u`.
+swift test ${flags[@]+"${flags[@]}"}
