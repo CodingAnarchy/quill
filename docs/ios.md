@@ -99,6 +99,22 @@ into `Documents/Projects` only once it has checked out and proven to be a
 Quill project. A wrong token, no network, or a repository without a
 `book.toml` each leaves nothing behind and says what to fix.
 
+## Short stories
+
+A short story project (#1239) opens straight into its prose, with no chapter
+list and no chapter-level actions. Its structure is its scenes, which the core
+derives (`scenes::story_scenes`, the same rules as the desktop's) from scene
+breaks and `##` headings. The scene list shows each scene's heading or first
+line, its synopsis, and its status, updates as you type, and moves the cursor
+to a scene's start when you tap it. Unfolded, the list sits beside the story.
+Folded, or on a standard iPhone, the story comes first and the scenes are one
+back-swipe away. The word count names the length category (flash fiction,
+short story, novelette), as the desktop's status bar does.
+
+Reordering scenes, editing synopses, and changing a scene's status stay on the
+desktop for now. Collections (#1244), whose stories are separate projects, need
+their own design on the phone.
+
 ## Looking up a word
 
 Select a word or a short phrase (up to four words) and choose **Look Up Word**

@@ -18,6 +18,12 @@ public final class ChapterEditor {
     public let initialText: String
     public private(set) var wordCount: UInt64
     public private(set) var dirty = false
+    /// Bumped on every edit, so views over the live text (the scene list)
+    /// refresh as the author types.
+    public private(set) var revision = 0
+    /// Whether this is a short story's prose (#1247), which names its length
+    /// category beside the word count.
+    public let isStory: Bool
     /// The last save failure, for the view to show.
     public private(set) var saveError: String?
 
@@ -35,6 +41,7 @@ public final class ChapterEditor {
     ) throws {
         session = try project.editChapter(index: chapter.index)
         self.chapter = chapter
+        isStory = (try? project.info())?.storyChapter == chapter.index
         self.onSave = onSave
         initialText = session.text()
         wordCount = session.wordCount()
@@ -48,12 +55,24 @@ public final class ChapterEditor {
             replacement: replacement)
         wordCount = session.wordCount()
         dirty = true
+        revision += 1
         noteEdit()
     }
 
     /// The styled spans overlapping `range` (UTF-16).
     public func styles(in range: NSRange) -> [StyleSpan] {
         session.styles(start: UInt32(range.location), end: UInt32(range.location + range.length))
+    }
+
+    /// The story's scenes as the prose stands now (#1247).
+    public func scenes() -> [SceneInfo] {
+        session.scenes()
+    }
+
+    /// The short-fiction length category of the live count ("short story"),
+    /// for a short story; `nil` for a novel's chapter.
+    public var lengthCategory: String? {
+        isStory ? storyLength(words: wordCount) : nil
     }
 
     /// The TODO markers in this chapter as it stands, saved or not (#1237).
