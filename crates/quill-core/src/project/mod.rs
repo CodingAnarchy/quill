@@ -41,6 +41,7 @@ mod words;
 use annotations::load_annotations;
 #[cfg(any(test, feature = "test-support"))]
 pub use annotations::write_count as annotation_writes;
+pub use annotations::AnnotationsWrite;
 pub use collection::{StoryLink, STORIES_DIR};
 pub use convert::GrownChapter;
 pub use form::{length_category, Form, NOVELLA_WORDS};

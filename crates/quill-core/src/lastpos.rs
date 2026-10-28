@@ -45,7 +45,9 @@ fn path(root: &Path) -> PathBuf {
 /// a word. Chapters, the manifest, and annotations stay on the durable path.
 pub fn write(root: &Path, pos: &Position) -> std::io::Result<()> {
     let json = serde_json::to_string(pos).map_err(std::io::Error::other)?;
-    fs::create_dir_all(root.join(DIR))?;
+    // Only `.quill/` itself: a background write that lands after the project
+    // folder was renamed or removed fails instead of recreating it.
+    atomic::create_leaf_dir(&root.join(DIR))?;
     atomic::write_hint(&path(root), json.as_bytes())
 }
 

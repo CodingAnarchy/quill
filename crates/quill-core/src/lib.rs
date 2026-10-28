@@ -12,6 +12,7 @@ pub mod analysis;
 pub mod annotation;
 pub mod archive;
 pub mod atomic;
+pub mod bgwrite;
 pub mod buffer;
 pub mod config;
 #[cfg(test)]

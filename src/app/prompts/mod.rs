@@ -36,6 +36,12 @@ impl App {
     /// word count. Returns `Err(())` (and sets a status message) if the save
     /// failed, so callers can abort before switching away from it.
     pub(super) fn flush_active(&mut self) -> Result<(), ()> {
+        // Let a background save land first (it may already have cleaned the
+        // buffer), so this write can't race it — and refuse, rather than switch
+        // away from the only copy of the edits, if the disk won't answer.
+        if !self.settle_saves() {
+            return Err(());
+        }
         if self.buffer.dirty {
             if let Err(e) = self.buffer.save() {
                 self.message = Some(format!("Save failed: {e}"));

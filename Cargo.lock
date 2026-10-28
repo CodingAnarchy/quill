@@ -3075,6 +3075,7 @@ dependencies = [
  "image",
  "quill-core",
  "ratatui",
+ "ropey",
  "serde",
  "serde_json",
  "similar",

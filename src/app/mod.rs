@@ -22,6 +22,7 @@ use crate::ai::theme as ai_theme;
 use crate::ai::theme::Theme as ThemeBible;
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::analysis;
+use crate::bgwrite;
 use crate::buffer::{self, Buffer, TextObject};
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
@@ -90,6 +91,7 @@ mod project_search;
 mod prompts;
 mod proximity_repeats; // the near-proximity word-repeat marking: toggle, dim-mark in place (#1002)
 mod quick_switch;
+mod saving;
 mod sequenced;
 mod series_bible;
 mod spell;
@@ -286,6 +288,10 @@ impl App {
             recovery_key: None,
             recovery_captured_at: None,
             recovery_writer: recovery::writer::Writer::new(),
+            file_writer: bgwrite::Writer::new("quill-save"),
+            pending_saves: Vec::new(),
+            #[cfg(test)]
+            settle_saves_eagerly: true,
             pending_switch: None,
             pending_manage: None,
             pending_restore_rev: None,

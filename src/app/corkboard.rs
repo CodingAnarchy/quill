@@ -643,6 +643,10 @@ impl App {
     /// count, so a corkboard edit survives reopening the project and the chapter
     /// pane reflects it. Reports a save failure in the status message.
     fn persist_active_chapter(&mut self) {
+        // Never race a background save of the same file.
+        if !self.settle_saves() {
+            return;
+        }
         if let Err(e) = self.buffer.save() {
             self.message = Some(format!("Save failed: {e}"));
             return;
