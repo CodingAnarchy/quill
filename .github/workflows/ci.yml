@@ -110,8 +110,10 @@ jobs:
           CODE_SIGNING_ALLOWED=NO build
       - name: UI tests (simulator)
         run: |
-          # The first available iPhone simulator; CI's Xcode decides the models.
-          sim=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')
+          # The iPhone Duo (folded) when CI's Xcode has it (27.1 and later),
+          # otherwise the first available iPhone simulator.
+          sims=$(xcrun simctl list devices available | grep -oE 'iPhone [^(]+' | sed 's/ *$//')
+          sim=$(echo "$sims" | grep -m1 -x 'iPhone Duo' || echo "$sims" | head -1)
           xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill \
             -destination "platform=iOS Simulator,name=$sim" \
             -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO test

@@ -71,9 +71,20 @@ simulator: they open the sample, check the chapter list, type into a chapter,
 background and kill the app, and find the words still there after a relaunch.
 On a wide screen they check that the list stays beside the chapter. Run them
 with
-`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone 17' test`
-(use an iPhone 17 Pro Max for the wide check, rotated to landscape by the
-test).
+`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone Duo' test`
+
+The iPhone Duo simulator needs Xcode 27.1 or later. Xcode 27 replaces the
+Simulator app with DeviceHub (Xcode → Open Developer Tool → DeviceHub), and
+folding and unfolding is done from DeviceHub's window: neither `simctl` nor
+the UI tests can do it. So the suite runs in whichever state the Duo is in.
+Folded (466 points wide) the wide check skips, and unfolded (about 950 by 670,
+wider than tall) it runs. On an older Xcode, use an iPhone 17 Pro Max for the
+wide check; the test rotates it to landscape. CI uses the Duo, folded, when
+its Xcode has one.
+
+Don't fake a fold with `simctl io … screenConfig power`. It turns a screen
+off without folding the device, and SpringBoard crashes until the simulator
+is erased.
 
 QuillKit's tests run on macOS against the real Rust core, so they cover the
 whole path from Swift through UniFFI into `quill-core` without a simulator.
