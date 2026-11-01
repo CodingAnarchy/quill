@@ -155,6 +155,15 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
         }
     }
 
+    /// Put the TODO marker at `location` in the chapter (#1284), as an
+    /// undoable edit that reaches the core like typing.
+    func insertMarker(at location: Int) {
+        guard let start = textView.position(from: textView.beginningOfDocument, offset: location),
+            let here = textView.textRange(from: start, to: start)
+        else { return }
+        textView.replace(here, withText: "\(todoMarker) ")
+    }
+
     /// Restyle the whole chapter (after a style-affecting change elsewhere).
     func restyleAll() {
         restyle(textView.textStorage, NSRange(location: 0, length: textView.textStorage.length))
@@ -173,6 +182,9 @@ final class ProseUITextView: UITextView {
     /// which takes it out of the window for a moment and drops the keyboard;
     /// it comes straight back with the cursor where it was (#1234).
     private var wasEditing = false
+    /// Where to put the cursor and the top of the view when it's next on
+    /// screen: the reading position the book spread hands back (#1284).
+    private var pendingReveal: Int?
 
     override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
@@ -183,12 +195,42 @@ final class ProseUITextView: UITextView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, wasEditing else { return }
+        guard window != nil else { return }
+        if let location = pendingReveal {
+            pendingReveal = nil
+            // After this pass, once the view has its size in the new layout.
+            DispatchQueue.main.async { self.showAtTop(location) }
+            return
+        }
+        guard wasEditing else { return }
         wasEditing = false
         let selection = selectedRange
         becomeFirstResponder()
         selectedRange = selection
         scrollRangeToVisible(selection)
+    }
+
+    /// Put the cursor at `location` with its line at the top of the view, now
+    /// if the view is on screen, or when it next is. The author was reading,
+    /// so the keyboard stays down.
+    func revealOnShow(at location: Int) {
+        wasEditing = false
+        if window == nil {
+            pendingReveal = location
+        } else {
+            showAtTop(location)
+        }
+    }
+
+    private func showAtTop(_ location: Int) {
+        let location = min(max(location, 0), textStorage.length)
+        selectedRange = NSRange(location: location, length: 0)
+        guard let position = position(from: beginningOfDocument, offset: location) else { return }
+        layoutIfNeeded()
+        let top = -adjustedContentInset.top
+        let bottom = max(top, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        let y = caretRect(for: position).minY - textContainerInset.top + top
+        setContentOffset(CGPoint(x: contentOffset.x, y: min(max(y, top), bottom)), animated: false)
     }
 
     override func layoutSubviews() {

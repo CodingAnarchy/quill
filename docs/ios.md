@@ -80,8 +80,12 @@ Neither `simctl` nor XCTest can fold it, so a plain `xcodebuild test` runs in
 whichever state the Duo is in. Folded (466 points wide), the wide check
 skips. Unfolded (about 950 by 670, wider than tall), it runs.
 
-`ios/test-duo.sh` runs the suite both ways: folded, then unfolded, failing if
-the wide check skips while unfolded. It presses DeviceHub's fold buttons with
+`ios/test-duo.sh` runs the suite in each pose: folded, unfolded (where the
+wide check must run, not skip), and half open and upright (where the book
+check must run). It sets the pose for the tests through
+`TEST_RUNNER_QUILL_DUO_POSE`, and it turns the phone by checking the inner
+screen's shape, because XCTest's idea of portrait isn't upright on the Duo's
+inner screen. It presses DeviceHub's fold buttons with
 [devicehubctl](https://github.com/ChrisThoma/devicehubctl), a separate MIT
 tool. Build it with `swift build -c release`, put `.build/release/devicehubctl`
 on your `PATH`, and allow your terminal under System Settings → Privacy &
@@ -202,9 +206,28 @@ for a series) and the open chapter.
 
 - **Folded, or on a standard iPhone** (a compact width): one column at a time,
   the list or the chapter.
-- **Unfolded** (a regular width): the list stays beside the chapter, in both
-  orientations, and the prose column is capped at about 70 characters
-  (620 points) so lines don't run edge to edge.
+- **Unfolded** (a regular width): held upright (about 950 by 670 points), the
+  list stays beside the chapter. Turned sideways (670 wide), the list slides
+  over the chapter from a sidebar button, as on an iPad in portrait. Either
+  way, the prose column is capped at about 70 characters (620 points), so
+  lines don't run edge to edge.
+- **Half open and upright, like a book** (#1284): the open chapter becomes a
+  two-page spread, one page on each side of the crease, with the chapter's
+  title over the left-hand pages, the book's over the right, and page numbers
+  below. Swipe to turn. The pages are for reading: select a passage and
+  choose **Add TODO** to drop the project's TODO marker at its start, for the
+  next writing session. The marker goes in through the editor, so it's
+  undoable, saved, and listed with the other markers. Open the phone fully
+  and the editor is back at the page you were reading. With no chapter open,
+  the half-open phone shows the list as usual.
+
+Quill reads the posture from the hinge (`UIHingeInteraction`, iOS 27.1) and
+the screen's shape. Upright is wider than tall; sideways is taller than wide.
+iOS has no API for where the crease is, so Quill takes the middle of the
+screen's long side. The hinge reads as half open all the way through opening
+and closing the phone, so half open counts only once the hinge has held still
+for a moment, and the spread never flashes up mid-fold. Built with an Xcode
+older than 27.1, or run on an older iOS, the phone always reads as flat.
 
 Folding or unfolding mid-sentence keeps the chapter exactly as it was. Its
 `UITextView` belongs to the app state (`ProseHost`), not to SwiftUI's view
