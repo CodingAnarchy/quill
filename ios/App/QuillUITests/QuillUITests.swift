@@ -121,6 +121,49 @@ final class QuillUITests: XCTestCase {
         attach("marked")
     }
 
+    /// Half open and sideways like a laptop, with the on-screen keyboard up,
+    /// the chapter's text stays above the crease; with the keyboard put away,
+    /// it uses the whole screen again (#1285).
+    func testHalfOpenAndSidewaysKeepsTheWritingAboveTheKeyboard() throws {
+        try requirePose("laptop")
+        openSample()
+        let text = app.textViews.firstMatch
+        if !text.waitForExistence(timeout: 5) {
+            // The list slides over the chapter here: show it, then choose.
+            let sidebar = app.buttons["Show Sidebar"]
+            if sidebar.waitForExistence(timeout: 5) { sidebar.tap() }
+            openChapter("The Lamp Room")
+        }
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        let crease = app.windows.firstMatch.frame.midY
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.height, app.windows.firstMatch.frame.width, "sideways")
+        // Choosing the chapter puts the list away, so the writing is uncovered.
+        XCTAssertFalse(app.staticTexts["Low Tide"].isHittable, "the list shouldn't cover the chapter")
+
+        text.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "the on-screen keyboard should be up")
+        XCTAssertGreaterThan(keyboard.frame.minY, crease - 150, "the keyboard belongs on the lower half")
+        XCTAssertLessThanOrEqual(text.frame.maxY, crease + 1, "the writing should stay above the crease")
+        // Tap the keys: `typeText` types as a hardware keyboard would, and
+        // iOS puts the on-screen one away for it.
+        let before = text.value as? String ?? ""
+        for key in ["g", "u", "l", "l"] {
+            // Upper or lower case, whichever the keyboard is showing.
+            keyboard.keys.matching(NSPredicate(format: "label ==[c] %@", key)).firstMatch.tap()
+        }
+        XCTAssertNotEqual(text.value as? String ?? "", before, "the keys should type into the chapter")
+        XCTAssertTrue(keyboard.exists, "the on-screen keyboard should still be up")
+        XCTAssertLessThanOrEqual(text.frame.maxY, crease + 1, "typing shouldn't push the writing onto the fold")
+        attach("laptop")
+
+        // With the keyboard put away, the chapter has the whole screen again.
+        app.buttons["Hide the keyboard"].tap()
+        XCTAssertTrue(
+            keyboard.waitForNonExistence(timeout: 5), "the keyboard should go away")
+        XCTAssertGreaterThan(text.frame.maxY, crease + 100, "without the keyboard, the chapter should fill the screen")
+    }
+
     // MARK: - Helpers
 
     /// Skip unless `ios/test-duo.sh` put the Duo in `pose` for this run. No

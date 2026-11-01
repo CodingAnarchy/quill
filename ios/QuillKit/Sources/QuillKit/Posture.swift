@@ -16,9 +16,9 @@ public enum Posture: Equatable, Sendable {
     case laptop(crease: CGFloat)
 
     /// The posture for a hinge that is (or isn't) partially open, given the
-    /// screen's bounds in the coordinates of the view laying out the content.
+    /// screen's bounds in the coordinates the crease should come back in.
     /// The crease is at the middle of the screen's long side, whatever part
-    /// of the screen that view covers.
+    /// of the screen those coordinates start from.
     public init(partiallyOpen: Bool, screen: CGRect) {
         guard partiallyOpen, !screen.isEmpty else {
             self = .flat
