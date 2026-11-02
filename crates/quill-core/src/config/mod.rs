@@ -52,7 +52,7 @@ pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
 pub use types::{
     load_snippets, AuthorConfig, BackupConfig, EditorConfig, EditorFlags, GeneralConfig,
-    ProjectsConfig, Snippet,
+    HistoryConfig, ProjectsConfig, Snippet,
 };
 pub use types::{theme_color_overrides, theme_name};
 

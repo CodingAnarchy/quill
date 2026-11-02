@@ -166,6 +166,7 @@ impl App {
         self.leave_continuous();
         self.flush_active()?;
         self.settle_recovery_cleared();
+        self.snapshot_on_close();
         Ok(())
     }
 
@@ -184,7 +185,11 @@ impl App {
                 let title = project.manifest.title.clone();
                 // A fresh App resets every per-project field (buffer, manuscript,
                 // splits, tally baselines, caches, VC status) in one move.
+                let auto_history = self.auto_history_armed;
                 *self = Self::new(buffer, project);
+                if auto_history {
+                    self.start_auto_history(); // the new book gets history too (#1296)
+                }
                 self.load_history();
                 recent::record(&root, &title);
                 // Preserve the read-only warning `Self::new` set (#871) rather than

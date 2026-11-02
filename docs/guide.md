@@ -340,9 +340,13 @@ never zero-word-caches a chapter or wrongly offers recovery.
 VERSION CONTROL
 
 Ctrl-V opens the version-control menu — real Git history, presented as a writing
-tool. On a project that isn't under version control yet it offers only
-"Initialize"; choose it and Quill starts a repository (with a sensible .gitignore
-that leaves editor scratch out). From then on the menu offers Commit, Drafts,
+tool. Every book gets that history automatically: the first time Quill opens a
+book without one, it starts a repository (with a sensible .gitignore that leaves
+editor scratch out) and then snapshots the book a few minutes after you stop
+writing and whenever you close it, so you never have to commit. Nothing is sent
+anywhere unless you set a remote. A book you already manage with Git is left
+alone, and Settings > Automatic version history turns it off. With it off, the
+menu offers "Initialize" to start a repository by hand. From then on the menu offers Commit, Drafts,
 Milestone, History, the diffs and restores, and Set remote — plus Push, Pull, and
 Sync once a remote is set.
 

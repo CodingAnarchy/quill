@@ -55,10 +55,22 @@ fn the_menu_lists_every_knob() {
         panic!("the setter opens a palette");
     };
     // Theme, width, smart typography, auto-pair, vim, autosave, typewriter,
-    // focus, paragraph indent, annotation margin, daily goal cue, stopwords, theme
-    // colors, key bindings.
-    assert_eq!(p.items.len(), 14);
+    // focus, paragraph indent, annotation margin, daily goal cue, stopwords,
+    // automatic version history, theme colors, key bindings.
+    assert_eq!(p.items.len(), 15);
     assert_eq!(p.title, "Settings");
+}
+
+#[test]
+fn turning_automatic_history_off_persists_and_stops_snapshots() {
+    let (mut app, _dir) = settings_app("settings-history");
+    app.auto_snapshots = true;
+    app.set_auto_history(false);
+    let toml = config_text();
+    assert!(toml.contains("[history]"), "{toml}");
+    assert!(toml.contains("automatic = false"), "{toml}");
+    assert!(!app.history.automatic, "applied live");
+    assert!(!app.auto_snapshots, "the snapshots stop at once");
 }
 
 #[test]

@@ -258,6 +258,50 @@ impl BackupConfig {
     }
 }
 
+/// The `[history]` section (#1296): automatic version history. Every book gets
+/// a history with no setup, and Quill snapshots it as the author works. This is
+/// local only; pushing anywhere is `[backup]`'s business, and needs a remote.
+#[derive(Clone, Deserialize)]
+#[serde(default)]
+pub struct HistoryConfig {
+    /// Start a history for a book that has none, and snapshot it as the author
+    /// works. On by default; `automatic = false` turns both off.
+    pub automatic: bool,
+    /// Take a snapshot once this many minutes have passed since the last save,
+    /// so a pause in writing is captured. Closing the book always snapshots.
+    /// `0` leaves only the snapshot on close.
+    pub snapshot_after_mins: u64,
+    /// Also snapshot a book whose history Quill didn't start (one the author
+    /// manages with git). Off by default, so Quill never adds commits to a
+    /// history it doesn't own unless asked.
+    pub existing_repos: bool,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            automatic: true,
+            snapshot_after_mins: 5,
+            existing_repos: false,
+        }
+    }
+}
+
+impl HistoryConfig {
+    /// Load the `[history]` section, with the open project's `[quill.history]`
+    /// over the global config. A missing or unreadable file yields the defaults.
+    pub fn load() -> Self {
+        load_section("history")
+    }
+
+    /// How long after the last save a snapshot is due, or `None` when
+    /// automatic history is off or only the close snapshot is wanted.
+    pub fn snapshot_after(&self) -> Option<std::time::Duration> {
+        (self.automatic && self.snapshot_after_mins > 0)
+            .then(|| std::time::Duration::from_secs(self.snapshot_after_mins * 60))
+    }
+}
+
 /// The `[general]` section (#837): app-level flags that aren't editor behavior,
 /// a theme, or a project setting. Today it carries only the first-run marker.
 #[derive(Clone, Deserialize, Default)]
@@ -522,6 +566,26 @@ mod tests {
         let projects: ProjectsConfig =
             toml::from_str("open_last = true\nfuture = \"x\"\n").unwrap();
         assert!(projects.open_last_enabled());
+    }
+
+    #[test]
+    fn history_is_automatic_by_default_and_can_be_turned_off() {
+        let on = HistoryConfig::default();
+        assert!(on.automatic);
+        assert_eq!(
+            on.snapshot_after(),
+            Some(std::time::Duration::from_secs(300))
+        );
+        assert!(
+            !on.existing_repos,
+            "a history Quill didn't start is left alone"
+        );
+
+        let off: HistoryConfig = toml::from_str("automatic = false").expect("parse");
+        assert_eq!(off.snapshot_after(), None);
+        let close_only: HistoryConfig = toml::from_str("snapshot_after_mins = 0").expect("parse");
+        assert_eq!(close_only.snapshot_after(), None);
+        assert!(close_only.automatic, "still snapshots on close");
     }
 
     #[test]

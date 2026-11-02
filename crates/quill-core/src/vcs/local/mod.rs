@@ -15,9 +15,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod auto;
 mod drafts;
 mod graph;
 mod history;
+
+pub use auto::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
 
 pub use drafts::{
     checkout_branch, create_branch, current_branch, finalize_branch_merge, list_branches,

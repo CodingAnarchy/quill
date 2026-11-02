@@ -2,10 +2,11 @@
 //! touches `git2` (libgit2) lives here, so the backend stays swappable (the spike
 //! #129 chose git2 over the CLI and gitoxide; see `docs/git-integration-spike.md`).
 //!
-//! Version control is opt-in: a project is only a repository once the author runs
-//! [`init`]. This first slice (#130) covers detecting and initializing a
-//! repository with a sensible `.gitignore`; commit / status / log / diff land in
-//! the later tickets through this same module.
+//! Every book gets version history without setup (#1296): the editor calls
+//! [`start_auto_history`] on open and takes [`snapshot`]s as the author works,
+//! in a repository Quill marks as its own. A book the author already manages
+//! with git, or one inside a larger repository, is left alone. Connecting a
+//! remote stays a deliberate, separate step.
 //!
 //! Two cohesive halves make up the module (#659): [`local`] is the offline,
 //! working-tree side (init/status/log/show/diff/restore/commit and the drafts and
@@ -24,6 +25,7 @@ pub use local::{
     init, is_repo, list_branches, list_tags, log, merge_branch, restore, restore_all,
     set_tag_message, show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
 };
+pub use local::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
 pub use remote::{
     clone, finalize_sync, folder_name, pull, push, remote_url, set_remote, set_token, sync,
     sync_or_divert, ChapterConflict, DeviceSync, RemoteError, RemoteErrorKind, PHONE_DRAFT_PREFIX,

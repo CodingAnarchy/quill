@@ -672,6 +672,13 @@ git ignores. To bring one back, **Restore project from archive…** (or
 `archive:restore`) unpacks a `.zip` into a new folder and opens it — it refuses
 to overwrite an existing project, so a stray path can't clobber your work.
 
+Every book also keeps **version history automatically**: Quill starts a local
+Git history the first time it opens a book and snapshots it as you work, so any
+earlier version of a chapter can be found and restored with no setup. It stays
+on your machine; a book you already manage with Git is left alone; and
+`[history] automatic = false` turns it off (see
+[`docs/version-control.md`](docs/version-control.md)).
+
 For backups you don't have to remember, an opt-in `[backup]` table automates two
 kinds. A project under version control that points at a remote (Ctrl-V → **Set
 remote**) can push to it on a cadence in the background — an always-current

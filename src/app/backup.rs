@@ -125,8 +125,8 @@ impl App {
     /// manual push/pull/sync task or the automatic-backup push. The auto-backup
     /// cadence gates on this so it never starts a push while a manual VC op (whose
     /// pull/sync force-checks-out the tree) holds the repo, nor doubles up its own push.
-    const fn repo_busy(&self) -> bool {
-        self.vc_task.is_busy() || self.backup_task.is_busy()
+    pub(super) const fn repo_busy(&self) -> bool {
+        self.vc_task.is_busy() || self.backup_task.is_busy() || self.snapshot_task.is_busy()
     }
 
     /// Whether an automatic backup is due as of `now` (#887): the on-save flag is

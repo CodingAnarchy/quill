@@ -584,6 +584,7 @@ impl App {
                     Some(Command::OpenSettingPicker(p)) => self.open_setting_picker(p),
                     Some(Command::SetSettingBool(knob, v)) => self.set_setting_bool(knob, v),
                     Some(Command::SetSettingTheme(i)) => self.set_setting_theme(i),
+                    Some(Command::SetAutoHistory(on)) => self.set_auto_history(on),
                     Some(Command::EditSettingText(k)) => self.prompt_setting_text(k),
                     None => {}
                 }

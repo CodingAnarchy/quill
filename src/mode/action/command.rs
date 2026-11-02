@@ -119,6 +119,8 @@ pub enum Command {
     /// Set the `[theme] name` from the Settings menu (#592): the index into the
     /// built-in theme list.
     SetSettingTheme(usize),
+    /// Turn automatic version history on or off from the Settings menu (#1296).
+    SetAutoHistory(bool),
     /// Open the text prompt for a free-text / numeric Settings knob (#592) — the
     /// column width, the autosave interval, or the analysis stopwords.
     EditSettingText(SettingTextKnob),
@@ -139,6 +141,8 @@ pub enum SettingPicker {
     /// The Vim `[editor.keys]` key bindings (#1109): a row per remappable action
     /// showing its current key, each opening a prompt to remap it.
     KeyBindings,
+    /// On/off for automatic version history, `[history] automatic` (#1296).
+    AutoHistory,
 }
 
 /// A numeric / free-text Settings knob the plain menu edits through a prompt (#592):

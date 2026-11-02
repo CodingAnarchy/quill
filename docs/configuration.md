@@ -231,6 +231,24 @@ An unknown theme name, an unknown field, or an unparseable color is reported in
 the status line at startup and falls back to the default for that piece, rather
 than failing to start.
 
+## `[history]` — automatic version history
+
+Every book gets local version history with no setup (#1296): Quill starts a Git
+history the first time it opens a book that has none, then snapshots it as you
+work. Nothing is pushed anywhere; that takes a remote (see
+[version control](version-control.md)).
+
+| Key | Default | Valid values | What it does |
+| --- | --- | --- | --- |
+| `automatic` | `true` | `true` / `false` | Start a history for a book that has none, and snapshot it as you write. `false` turns both off; the history already taken stays. Also in Settings as **Automatic version history**. |
+| `snapshot_after_mins` | `5` | a whole number of minutes; `0` | Snapshot once this long has passed since the last save. `0` leaves only the snapshot taken when the book closes. |
+| `existing_repos` | `false` | `true` / `false` | Also snapshot a book whose history Quill didn't start (one you manage with Git). Off, Quill never adds commits to a history it doesn't own. |
+
+```toml
+[history]
+snapshot_after_mins = 10
+```
+
 ## `[projects]` — the project browser
 
 Where the project browser looks for books, and how a bare `quill` launch behaves

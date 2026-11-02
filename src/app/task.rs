@@ -84,6 +84,20 @@ impl<T: Send + 'static> Task<T> {
         self.rx = Some(rx);
     }
 
+    /// Block until the job in flight finishes, and return its result. `Pending`
+    /// when nothing is running. For shutdown paths that must not leave work
+    /// behind, never the event loop.
+    pub(crate) fn wait(&mut self) -> Poll<T> {
+        let Some(rx) = self.rx.take() else {
+            return Poll::Pending;
+        };
+        match rx.recv() {
+            Ok(Outcome::Value(value)) => Poll::Ready(value),
+            Ok(Outcome::Panic(msg)) => Poll::Died(msg),
+            Err(_) => Poll::Died(None),
+        }
+    }
+
     /// Non-blocking check for the result. Clears the job on `Ready`/`Died`.
     pub(crate) fn poll(&mut self) -> Poll<T> {
         let Some(rx) = self.rx.as_ref() else {
