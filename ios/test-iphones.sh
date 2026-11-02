@@ -83,6 +83,11 @@ fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
+# Each phone's result bundle (screenshots, the accessibility tree at a failure,
+# a screen recording) is kept in ios/build/results when its tests fail, so a CI
+# failure can be looked at rather than guessed at; CI uploads the folder.
+RESULTS="$ROOT/ios/build/results"
+mkdir -p "$RESULTS"
 # Every phone runs even after one fails, so one run shows them all.
 failed=()
 for i in "${!phones[@]}"; do
@@ -90,8 +95,11 @@ for i in "${!phones[@]}"; do
   echo "== $phone"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
+  bundle="$RESULTS/${phone// /-}.xcresult"
   run_tests() {
-    xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" test-without-building 2>&1 |
+    rm -rf "$bundle"
+    xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" \
+      -resultBundlePath "$bundle" test-without-building 2>&1 |
       tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
   }
   run_tests
@@ -105,6 +113,11 @@ for i in "${!phones[@]}"; do
   fi
   # Free the runner for the next phone.
   xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+  if grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
+    rm -rf "$bundle" # keep only what explains a failure
+  else
+    echo "   results: $bundle"
+  fi
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
     failed+=("$phone: tests failed")
     # A failure before any test ran explains itself only in the full output.
