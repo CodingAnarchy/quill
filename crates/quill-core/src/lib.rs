@@ -30,6 +30,7 @@ pub mod recent;
 pub mod recovery;
 pub mod scenes;
 pub mod spell;
+pub mod synced;
 pub mod syntax;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testutil;

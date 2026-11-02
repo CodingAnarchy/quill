@@ -39,7 +39,10 @@ struct RootView: View {
             switch phase {
             case .inactive: app.saveForBackground()
             case .background: app.saveAndSyncForBackground()
-            case .active where old == .background: Task { await app.sync(.foreground) }
+            case .active where old == .background:
+                // Another device may have changed the book meanwhile (#1298).
+                app.checkForChangesElsewhere()
+                Task { await app.sync(.foreground) }
             default: break
             }
         }

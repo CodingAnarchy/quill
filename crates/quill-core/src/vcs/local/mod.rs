@@ -15,13 +15,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::synced;
+
 mod auto;
 mod drafts;
 mod graph;
 mod history;
 mod versions;
 
-pub use auto::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
+pub use auto::{
+    is_auto_history, snapshot, snapshot_from, snapshot_message, start_auto_history, AutoHistory,
+};
 
 pub use drafts::{
     checkout_branch, create_branch, current_branch, finalize_branch_merge, list_branches,
@@ -47,6 +51,7 @@ pub use history::diff_file;
 const GITIGNORE: &str = "\
 # Quill editor state — not part of the manuscript
 /.quill/
+/.quill.nosync/
 /unused/
 /bible/.state.toml
 
@@ -58,7 +63,7 @@ const GITIGNORE: &str = "\
 
 /// The lines of [`GITIGNORE`] that cover Quill's own editor state, which must
 /// stay out of commits however the repository was set up.
-const EDITOR_STATE: [&str; 2] = ["/.quill/", "/bible/.state.toml"];
+const EDITOR_STATE: [&str; 3] = ["/.quill/", "/.quill.nosync/", "/bible/.state.toml"];
 
 /// Keep Quill's editor state (the project lock, caches) out of `root`'s
 /// commits and out of its "uncommitted changes" check, even when the
@@ -70,7 +75,7 @@ pub fn exclude_editor_state(root: &Path) -> Result<(), String> {
     if !is_repo(root) {
         return Ok(());
     }
-    let info = root.join(".git").join("info");
+    let info = open_repo(root)?.path().join("info");
     let path = info.join("exclude");
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let missing: Vec<&str> = EDITOR_STATE
@@ -93,16 +98,50 @@ pub fn exclude_editor_state(root: &Path) -> Result<(), String> {
     fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
-/// Whether `root` is already the top of a Git repository.
+/// Whether the book at `root` has a repository: its own `.git`, or (for a book
+/// in a synced folder, #1298) this device's history of it.
 pub fn is_repo(root: &Path) -> bool {
-    root.join(".git").exists()
+    root.join(".git").exists() || synced::history_dir(root).is_some_and(|dir| dir.exists())
 }
 
-/// Initialize a Git repository at `root` and write a default `.gitignore` (only
-/// if one isn't already present, so a hand-tuned file is never clobbered).
-/// Idempotent: re-initializing an existing repository is safe.
+/// Open the repository behind the book at `root`: this device's history of it
+/// when the book is in a synced folder (#1298), with `root` as the working
+/// tree, else the book's own `.git`. Every operation in this module opens the
+/// repository this way, so a synced book's history works like any other.
+pub fn open_repo(root: &Path) -> Result<git2::Repository, String> {
+    if let Some(dir) = synced::history_dir(root).filter(|dir| dir.exists()) {
+        let repo = git2::Repository::open(&dir).map_err(|e| format!("open history: {e}"))?;
+        repo.set_workdir(root, false)
+            .map_err(|e| format!("open history: {e}"))?;
+        return Ok(repo);
+    }
+    git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))
+}
+
+/// Initialize a Git repository for the book at `root` and write a default
+/// `.gitignore` (only if one isn't already present, so a hand-tuned file is
+/// never clobbered). Idempotent: re-initializing an existing repository is safe.
+///
+/// A book in a synced folder (#1298) gets its repository in this device's
+/// storage, keyed by an `id` written into `book.toml`, with the book folder as
+/// its working tree: nothing git-related goes in the folder the sync carries.
 pub fn init(root: &Path) -> Result<(), String> {
-    git2::Repository::init(root).map_err(|e| format!("git init: {e}"))?;
+    if synced::is_synced(root) && !root.join(".git").exists() {
+        synced::ensure_project_id(root).map_err(|e| format!("give the book an id: {e}"))?;
+        let dir = synced::history_dir(root)
+            .ok_or_else(|| "this device has no place to keep the book's history".to_string())?;
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.no_dotgit_dir(true).workdir_path(root);
+        git2::Repository::init_opts(&dir, &opts).map_err(|e| format!("git init: {e}"))?;
+        // libgit2 leaves a `.git` file in the working tree pointing back at the
+        // repository; on this device's path, it means nothing on another device.
+        let link = root.join(".git");
+        if link.is_file() {
+            fs::remove_file(&link).map_err(|e| format!("git init: {e}"))?;
+        }
+    } else {
+        git2::Repository::init(root).map_err(|e| format!("git init: {e}"))?;
+    }
     let gitignore = root.join(".gitignore");
     if !gitignore.exists() {
         fs::write(&gitignore, GITIGNORE).map_err(|e| format!("write .gitignore: {e}"))?;
@@ -128,7 +167,7 @@ impl Status {
 /// from `HEAD` (added, modified, deleted, or untracked). Stat-based via libgit2,
 /// so it's cheap enough to refresh on idle, not per keystroke.
 pub fn status(root: &Path) -> Result<Status, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let changed = changed_paths(&repo)?;
     Ok(Status { changed })
 }
@@ -164,7 +203,7 @@ pub(super) fn is_dirty(repo: &git2::Repository) -> Result<bool, String> {
 /// config when set, else a generic default — so an author who has never used git
 /// can still commit without configuring anything.
 pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
 
     let mut index = repo.index().map_err(|e| e.to_string())?;
     index
@@ -240,7 +279,7 @@ pub fn commit_findings(
     if !is_repo(root) {
         return Ok(None);
     }
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
 
     // Stage only the findings path — the rest of the index still mirrors HEAD, so
     // the tree we build is HEAD's tree with just this file updated. Uncommitted

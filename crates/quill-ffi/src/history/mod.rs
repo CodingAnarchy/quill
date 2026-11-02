@@ -185,3 +185,54 @@ impl QuillProject {
 
 #[cfg(test)]
 mod tests;
+
+/// A chapter that changed on two devices before they synced (#1298): the
+/// chapter, and the copy holding the other device's version.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ConflictCopy {
+    pub chapter_title: String,
+    /// The copy's path, relative to the book's folder.
+    pub copy: String,
+}
+
+#[uniffi::export]
+impl QuillProject {
+    /// The conflict copies beside the active book's chapters (#1298): the
+    /// other device's version of a chapter that changed on both.
+    pub fn conflict_copies(&self) -> Result<Vec<ConflictCopy>, QuillError> {
+        let guard = self.lock();
+        let p = guard.get()?;
+        let files: Vec<String> = p.manifest.chapters.iter().map(|c| c.file.clone()).collect();
+        Ok(quill_core::synced::conflict_copies(&p.root, &files)
+            .into_iter()
+            .map(|(file, copy)| ConflictCopy {
+                chapter_title: p
+                    .manifest
+                    .chapters
+                    .iter()
+                    .find(|c| c.file == file)
+                    .map_or_else(|| file.clone(), |c| c.title.clone()),
+                copy,
+            })
+            .collect())
+    }
+
+    /// Snapshot the book into its history as `device`'s ("iPhone"), if it's a
+    /// history Quill started (#1298): the history list then says which device
+    /// each version came from. Returns whether a snapshot was taken.
+    pub fn snapshot_from(&self, device: &str) -> Result<bool, QuillError> {
+        let root = self.lock().get()?.root.clone();
+        if !vcs::is_auto_history(&root) {
+            return Ok(false);
+        }
+        let commit = vcs::snapshot_from(&root, Some(device))
+            .map_err(|message| QuillError::Io { message })?;
+        Ok(commit.is_some())
+    }
+
+    /// Whether the book is in a synced folder (iCloud Drive), where each device
+    /// keeps its own history and editor state (#1298).
+    pub fn is_synced(&self) -> Result<bool, QuillError> {
+        Ok(quill_core::synced::is_synced(&self.lock().get()?.root))
+    }
+}

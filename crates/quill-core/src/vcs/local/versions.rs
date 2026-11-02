@@ -3,6 +3,7 @@
 //! and a word-level comparison of two versions of prose. The desktop's history
 //! view lists the whole project's commits; the phone asks about one chapter.
 
+use super::open_repo;
 use std::path::Path;
 
 use similar::{ChangeTag, TextDiff};
@@ -24,7 +25,7 @@ pub struct FileVersion {
 /// first parent's (or it has no parent and contains the file). Renames aren't
 /// followed: a chapter's history starts where its file name did.
 pub fn file_log(root: &Path, rel_path: &str, limit: usize) -> Result<Vec<FileVersion>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
     if walk.push_head().is_err() {
         return Ok(Vec::new()); // no commits yet

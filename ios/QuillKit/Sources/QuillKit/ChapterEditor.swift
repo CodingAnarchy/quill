@@ -94,6 +94,24 @@ public final class ChapterEditor {
         }
     }
 
+    /// Whether the chapter's file now holds different words than this editor
+    /// (#1298): another device changed it through iCloud, say.
+    public func changedOnDisk() -> Bool {
+        session.changedOnDisk()
+    }
+
+    /// Keep the file's version beside the chapter as `<name> 2.md` (#1298), so
+    /// this editor's unsaved words can be saved over it with nothing lost.
+    /// Returns the copy's file name.
+    public func keepDiskVersion() throws -> String {
+        try session.keepDiskVersion()
+    }
+
+    /// Wraps each save, for a chapter in iCloud, in a file coordinator, so the
+    /// write is one iCloud sees and syncs (#1298). Ordinary chapters save
+    /// directly.
+    public var coordinate: ((() -> Void) -> Void)?
+
     /// Save now if anything changed. Safe to call any time.
     public func save() {
         pendingSave?.cancel()
@@ -103,7 +121,15 @@ public final class ChapterEditor {
             return
         }
         do {
-            try session.save()
+            if let coordinate {
+                var failure: (any Error)?
+                coordinate {
+                    do { try session.save() } catch { failure = error }
+                }
+                if let failure { throw failure }
+            } else {
+                try session.save()
+            }
             dirty = false
             saveError = nil
             onSave()

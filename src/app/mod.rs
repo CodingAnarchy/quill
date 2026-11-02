@@ -54,6 +54,7 @@ mod dispatch;
 mod editing;
 mod export_style;
 mod exporting;
+mod synced_book; // a book written on more than one device: changes on disk, conflict copies (#1298)
 use crate::findings_store;
 mod folds;
 mod fonts;
@@ -257,6 +258,12 @@ impl App {
             auto_snapshots: false,
             auto_history_armed: false,
             snapshot_owed_since: None,
+            active_disk_stamp: None,
+            conflicts_noted: std::collections::HashSet::new(),
+            // Scan a synced book for conflict copies on the first idle pass.
+            last_conflict_scan: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(60))
+                .unwrap_or_else(std::time::Instant::now),
             backup_task: Task::idle(),
             backup_pending: false,
             last_backup_attempt: std::time::Instant::now(),
@@ -530,6 +537,9 @@ impl App {
         self.tally_words();
         self.refresh_vc_status_on_idle();
         self.recheck_instance_lock();
+        // Pick up the open chapter changing on another device (#1298): one stat,
+        // and a read only when it changed.
+        self.notice_changes_on_disk();
         // Poll any in-flight background bible batches (#950) — cheap: a no-op unless
         // the opt-in is on and the durable record has batches to reconcile.
         self.reconcile_batch_update();

@@ -14,6 +14,7 @@
 //! Nothing here touches the network. Pushing anywhere stays the separate,
 //! deliberate step of connecting a remote and turning backups on.
 
+use super::open_repo;
 use std::path::Path;
 
 use time::macros::format_description;
@@ -74,7 +75,7 @@ pub fn start_auto_history(root: &Path) -> Result<AutoHistory, String> {
         return Ok(AutoHistory::Nested);
     }
     init(root)?;
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     repo.config()
         .and_then(|mut config| config.set_bool(MARKER, true))
         .map_err(|e| format!("mark the history as Quill's: {e}"))?;
@@ -87,9 +88,10 @@ pub fn start_auto_history(root: &Path) -> Result<AutoHistory, String> {
 
 /// Whether the book at `root` is a repository Quill started for automatic history.
 pub fn is_auto_history(root: &Path) -> bool {
-    git2::Repository::open(root)
-        .and_then(|repo| repo.config())
-        .and_then(|config| config.get_bool(MARKER))
+    open_repo(root)
+        .ok()
+        .and_then(|repo| repo.config().ok())
+        .and_then(|config| config.get_bool(MARKER).ok())
         .unwrap_or(false)
 }
 
@@ -98,7 +100,18 @@ pub fn is_auto_history(root: &Path) -> bool {
 /// since the last commit. The caller decides whether this book takes snapshots
 /// (see [`AutoHistory::snapshots`]).
 pub fn snapshot(root: &Path) -> Result<Option<String>, String> {
-    commit(root, &snapshot_message(local_now()))
+    snapshot_from(root, None)
+}
+
+/// [`snapshot`], naming the device it was taken on (#1298), for a book written
+/// on more than one: "Snapshot on iPhone, 2 Nov 2026 at 14:05".
+pub fn snapshot_from(root: &Path, device: Option<&str>) -> Result<Option<String>, String> {
+    let message = snapshot_message(local_now());
+    let message = match device.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(device) => message.replacen("Snapshot,", &format!("Snapshot on {device},"), 1),
+        None => message,
+    };
+    commit(root, &message)
 }
 
 /// The author's local time, or UTC when the offset can't be determined.

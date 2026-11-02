@@ -39,11 +39,19 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        # Quill's folder in iCloud Drive (#1298), shown in the Files app and
+        # on the Mac when the app is signed for iCloud (QUILL_ENTITLEMENTS).
+        NSUbiquitousContainers:
+          iCloud.$(QUILL_BUNDLE_ID):
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: Quill
+            NSUbiquitousContainerSupportedFolderLevels: Any
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(QUILL_BUNDLE_ID)
         DEVELOPMENT_TEAM: $(QUILL_TEAM_ID)
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: $(QUILL_ENTITLEMENTS)
         TARGETED_DEVICE_FAMILY: "1"
         # Quill/Assets.xcassets; the artwork's source and shortlist are in
         # ios/App/Artwork.

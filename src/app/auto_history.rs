@@ -91,6 +91,19 @@ impl App {
         }
     }
 
+    /// The device to name in a snapshot's message: for a book in a synced
+    /// folder (#1298), where the history list says which device each version
+    /// came from, this computer's platform; otherwise none.
+    fn snapshot_device(&self) -> Option<&'static str> {
+        crate::synced::is_synced(&self.project.root).then_some(if cfg!(target_os = "macos") {
+            "Mac"
+        } else if cfg!(windows) {
+            "Windows"
+        } else {
+            "Linux"
+        })
+    }
+
     /// Re-read `[history]` after a settings change: turning it off stops the
     /// snapshots at once, and turning it on starts the book's history.
     pub(crate) fn apply_history_config(&mut self) {
@@ -128,7 +141,9 @@ impl App {
         }
         self.snapshot_owed_since = None;
         let root = self.project.root.clone();
-        self.snapshot_task.spawn(move || vcs::snapshot(&root));
+        let device = self.snapshot_device();
+        self.snapshot_task
+            .spawn(move || vcs::snapshot_from(&root, device));
     }
 
     /// Snapshot the book as it's closed (quitting, or opening another book in
@@ -143,7 +158,7 @@ impl App {
         if !self.auto_snapshots || self.project.is_read_only() {
             return;
         }
-        if let Err(cause) = vcs::snapshot(&self.project.root) {
+        if let Err(cause) = vcs::snapshot_from(&self.project.root, self.snapshot_device()) {
             self.message = Some(format!("Couldn't save a version history snapshot: {cause}"));
         }
         self.snapshot_owed_since = None;

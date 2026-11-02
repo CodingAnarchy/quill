@@ -193,7 +193,7 @@ impl App {
     /// pull, a restore) rewrote the file underneath the editor. Returns the read
     /// error so callers can report it; on failure the current buffer is left in
     /// place.
-    fn reload_active_chapter(&mut self) -> Result<(), String> {
+    pub(super) fn reload_active_chapter(&mut self) -> Result<(), String> {
         let path = self.project.active_path();
         let buffer = Buffer::from_path(&path).map_err(|e| e.to_string())?;
         self.buffer = buffer;

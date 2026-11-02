@@ -17,7 +17,7 @@ use crate::vcs;
 
 /// The marker that records a story was offered the novel conversion (#1242), so
 /// the offer is made once per project.
-const NOVELLA_OFFERED: &str = ".quill/novella-offered";
+const NOVELLA_OFFERED: &str = "novella-offered";
 
 use super::App;
 
@@ -210,7 +210,7 @@ impl App {
             return;
         }
         self.novella_checked = true;
-        let marker = self.project.root.join(NOVELLA_OFFERED);
+        let marker = crate::synced::state_dir(&self.project.root).join(NOVELLA_OFFERED);
         if marker.exists() {
             return;
         }

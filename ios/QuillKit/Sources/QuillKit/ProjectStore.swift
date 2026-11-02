@@ -105,12 +105,29 @@ public final class ProjectStore {
     }
 
     /// Snapshot the book's saved chapters into its history (#1297), if it's a
-    /// history Quill started. Returns whether a snapshot was taken. The caller
-    /// saves the open chapter first.
+    /// history Quill started. A book in iCloud names `device` in the snapshot,
+    /// so the history says which device each version came from (#1298).
+    /// Returns whether a snapshot was taken. The caller saves the open chapter
+    /// first.
     @discardableResult
-    public func snapshot() async throws -> Bool {
+    public func snapshot(device: String = "iPhone") async throws -> Bool {
         guard let project else { return false }
-        return try await Task.detached { try project.snapshot() }.value
+        let synced = isSynced
+        return try await Task.detached {
+            synced ? try project.snapshotFrom(device: device) : try project.snapshot()
+        }.value
+    }
+
+    /// Whether the open book is in iCloud Drive (#1298), where each device
+    /// keeps its own history and editor state.
+    public var isSynced: Bool {
+        (try? project?.isSynced()) ?? false
+    }
+
+    /// The conflict copies beside the book's chapters (#1298): the other
+    /// device's version of each chapter changed on both before they synced.
+    public func conflictCopies() -> [ConflictCopy] {
+        (try? project?.conflictCopies()) ?? []
     }
 
     /// Open `chapter` for editing. Each save refreshes the chapter list, so

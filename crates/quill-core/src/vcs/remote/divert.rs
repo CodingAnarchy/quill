@@ -6,6 +6,7 @@
 //! desktop merges the draft later with its conflict resolver (#963). Every word
 //! from both sides stays in history the whole time.
 
+use crate::vcs::local::open_repo;
 use std::path::Path;
 
 use super::super::local::commit;
@@ -33,7 +34,7 @@ pub enum DeviceSync {
 pub fn sync_or_divert(root: &Path, message: &str) -> Result<DeviceSync, String> {
     let had_work = commit(root, message)?.is_some();
     let (outcome, fetched) = sync_fetched(root)?;
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     if !outcome.conflicts.is_empty() {
         return divert(&repo, fetched).map(|draft| DeviceSync::Diverted { draft });
     }

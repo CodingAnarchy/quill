@@ -33,7 +33,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const DIR: &str = ".quill";
 const FILE: &str = "lock";
 
 /// A process-unique counter distinguishing lockfiles this process holds at the
@@ -80,7 +79,7 @@ impl Drop for InstanceLock {
 
 /// The lockfile path under `root`.
 fn path(root: &Path) -> PathBuf {
-    root.join(DIR).join(FILE)
+    crate::synced::state_dir(root).join(FILE)
 }
 
 /// This machine's hostname, used to scope the staleness check: a pid is only
@@ -197,7 +196,7 @@ impl Holder {
 /// so the author is warned but can still read; we never block opening a project
 /// because the lock couldn't be written.
 pub fn acquire(root: &Path) -> LockOutcome {
-    if fs::create_dir_all(root.join(DIR)).is_err() {
+    if fs::create_dir_all(crate::synced::state_dir(root)).is_err() {
         return LockOutcome::Busy {
             holder: "the lock directory couldn't be created".to_string(),
         };
@@ -334,7 +333,7 @@ mod tests {
     #[test]
     fn a_live_other_process_lock_is_busy_not_reclaimed() {
         let root = tmpdir("busy");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         let live_other = Holder {
             pid: 1, // init/launchd — always alive, never our pid
             host: hostname(),
@@ -386,7 +385,7 @@ mod tests {
     #[test]
     fn a_stale_same_host_lock_is_reclaimed() {
         let root = tmpdir("stale");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         // A lock left by a crashed instance: our host, a pid that can't be alive.
         // pid 2^30 is far above any live pid on the test host.
         let dead = Holder {
@@ -412,7 +411,7 @@ mod tests {
     #[test]
     fn a_different_host_lock_is_honored_not_reclaimed() {
         let root = tmpdir("otherhost");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         // A lock owned by another machine (a synced folder). We can't probe its
         // process, so it must be honored (read-only), never reclaimed.
         let other = Holder {
@@ -436,7 +435,7 @@ mod tests {
     #[test]
     fn recheck_reclaims_a_now_stale_lock() {
         let root = tmpdir("recheck-stale");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         // The former holder, now crashed: our host, a pid that can't be alive.
         let dead = Holder {
             pid: 1 << 30,
@@ -463,7 +462,7 @@ mod tests {
     #[test]
     fn recheck_respects_a_live_holder() {
         let root = tmpdir("recheck-live");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         let live_other = Holder {
             pid: 1, // init/launchd — always alive, never our pid
             host: hostname(),
@@ -483,7 +482,7 @@ mod tests {
     #[test]
     fn recheck_honors_a_different_host_lock() {
         let root = tmpdir("recheck-otherhost");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         let other = Holder {
             pid: std::process::id() as i32,
             host: "some-other-machine".to_string(),
@@ -500,7 +499,7 @@ mod tests {
     #[test]
     fn a_torn_lockfile_is_reclaimed() {
         let root = tmpdir("torn");
-        fs::create_dir_all(root.join(DIR)).unwrap();
+        fs::create_dir_all(crate::synced::state_dir(&root)).unwrap();
         // A truncated/garbage lock (an interrupted write): unparseable → stale.
         fs::write(path(&root), "not-a-pid").unwrap();
         assert!(

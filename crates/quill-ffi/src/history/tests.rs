@@ -174,3 +174,38 @@ fn comparing_versions_marks_what_changed() {
     assert_eq!(runs[1].text, "came in.");
     assert_eq!(runs[2].text, "went out.");
 }
+
+#[test]
+fn a_chapter_changed_elsewhere_is_noticed_and_its_version_kept() {
+    let dir = scratch_dir("ffi-synced", "changed");
+    let path = create_project("Tide", ProjectForm::Novel, &dir.to_string_lossy()).expect("create");
+    let project = QuillProject::open(&path).expect("open");
+    let session = project.clone().edit_chapter(0).expect("edit");
+    assert!(!session.changed_on_disk(), "as opened");
+
+    let file = Path::new(&path).join(project.lock().get().expect("open").chapter_file(0));
+    fs::write(&file, "The Mac's words.\n").expect("another device writes");
+    assert!(session.changed_on_disk());
+    let copy = session.keep_disk_version().expect("keep");
+    assert!(copy.ends_with(" 2.md"), "{copy}");
+    let copies = project.conflict_copies().expect("copies");
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].copy, copy);
+}
+
+#[test]
+fn a_snapshot_names_the_device_it_came_from() {
+    let dir = scratch_dir("ffi-synced", "device");
+    let path = create_project("Tide", ProjectForm::Novel, &dir.to_string_lossy()).expect("create");
+    let project = QuillProject::open(&path).expect("open");
+    let file = Path::new(&path).join(project.lock().get().expect("open").chapter_file(0));
+    fs::write(&file, "Words.\n").expect("write");
+    assert!(project.snapshot_from("iPhone").expect("snapshot"));
+    let versions = project.chapter_versions(0).expect("versions");
+    assert!(
+        versions[0].summary.starts_with("Snapshot on iPhone, "),
+        "{}",
+        versions[0].summary
+    );
+    assert!(!project.is_synced().expect("synced"), "a local book");
+}

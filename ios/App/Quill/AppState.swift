@@ -54,6 +54,16 @@ final class AppState {
     func launch() {
         guard !launched else { return }
         launched = true
+        // Quill's iCloud Drive folder, when iCloud is on and the app is signed
+        // to use it (#1298). Looking it up can take a moment the first time, so
+        // it's off the main thread; the library lists those books once it's in.
+        Task {
+            let cloud = await Task.detached {
+                FileManager.default.url(forUbiquityContainerIdentifier: nil)?
+                    .appending(path: "Documents", directoryHint: .isDirectory)
+            }.value
+            library.useCloud(cloud)
+        }
         if let bundled = Bundle.main.url(forResource: "SampleNovel", withExtension: nil) {
             _ = try? SampleNovel.install(from: bundled, into: library.folder)
             library.refresh()
@@ -231,9 +241,57 @@ final class AppState {
             }
             host.onShowMarkers = { [weak self] in self?.showingMarkers = true }
             host.todoMarker = store.todoMarker
+            // A chapter in iCloud saves through a file coordinator, and a file
+            // presenter hears when another device changes it (#1298).
+            if store.isSynced, let folder = store.url {
+                let file = folder.appending(path: chapter.file)
+                let presenter = ChapterFilePresenter(url: file) { [weak self] in
+                    self?.checkForChangesElsewhere()
+                }
+                host.editor.coordinate = { write in presenter.coordinateWrite(write) }
+                host.presenter = presenter
+            }
             prose = host
         } catch {
             chapterError = describe(error)
+        }
+    }
+
+    /// The chapter names already reported as changed on two devices (#1298).
+    @ObservationIgnored private var conflictsNoted: Set<String> = []
+
+    /// Pick up what another device changed (#1298), when the app comes back to
+    /// the foreground or the open chapter's file changes under it: iCloud's
+    /// conflicting versions are kept as copies beside their chapters; the open
+    /// chapter shows the new version, or, with unsaved words in it, keeps the
+    /// other version beside it; and the change is snapshotted into this
+    /// phone's history.
+    func checkForChangesElsewhere() {
+        guard let folder = store.url else { return }
+        if store.isSynced {
+            CloudConflicts.keepCopies(in: folder, chapters: store.chapters.map(\.file))
+        }
+        var changed = false
+        if let editor = prose?.editor, editor.changedOnDisk() {
+            changed = true
+            if editor.dirty {
+                if let copy = try? editor.keepDiskVersion() {
+                    notice =
+                        "\u{201c}\(editor.chapter.title)\u{201d} also changed on another device. Your words are kept here; the other version is in \(copy)."
+                }
+            } else {
+                reopenChapter()
+                syncStatus = "Updated from another device"
+            }
+        }
+        let copies = store.conflictCopies().filter { conflictsNoted.insert($0.copy).inserted }
+        if let first = copies.first, notice == nil {
+            notice =
+                "\u{201c}\(first.chapterTitle)\u{201d} was changed on two devices before they synced. Both versions are kept: the other is in \(first.copy)."
+        }
+        store.refresh()
+        if changed {
+            Task { try? await store.snapshot() }
         }
     }
 

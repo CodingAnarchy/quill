@@ -6,6 +6,7 @@
 //! clean merge lands a two-parent commit and a conflicting one surfaces the same
 //! per-chapter [`ChapterConflict`]s the resolution UI (#963) already resolves.
 
+use super::open_repo;
 use std::collections::BTreeMap;
 
 use super::super::remote::merge::{adopt, blob_text, collect_blobs, index_from_tree, stage_blob};
@@ -17,7 +18,7 @@ use super::{is_dirty, signature};
 /// is committed yet). The mirror of [`super::super::remote`]'s `current_branch`,
 /// exposed here so the drafts overlay can show which draft is active.
 pub fn current_branch(root: &std::path::Path) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let head = repo
         .head()
         .map_err(|_| "No commits yet — commit before working with drafts.".to_string())?;
@@ -30,7 +31,7 @@ pub fn current_branch(root: &std::path::Path) -> Result<String, String> {
 /// nothing is committed yet (no branches exist). The list the drafts overlay
 /// renders, one row per draft, with the current one marked.
 pub fn list_branches(root: &std::path::Path) -> Result<Vec<String>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let branches = repo
         .branches(Some(git2::BranchType::Local))
         .map_err(|e| e.to_string())?;
@@ -56,7 +57,7 @@ pub fn list_branches(root: &std::path::Path) -> Result<Vec<String>, String> {
 /// or a draft by that name already exists, so an existing draft is never silently
 /// moved out from under its own history.
 pub fn create_branch(root: &std::path::Path, name: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let head = repo
         .head()
         .and_then(|h| h.peel_to_commit())
@@ -77,7 +78,7 @@ pub fn create_branch(root: &std::path::Path, name: &str) -> Result<(), String> {
 /// rejected with a clear message rather than a churny re-checkout. The caller
 /// reloads the active chapter afterwards, since the files on disk have changed.
 pub fn checkout_branch(root: &std::path::Path, name: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     if current_branch(root).ok().as_deref() == Some(name) {
         return Err(format!("Already on draft '{name}'."));
     }
@@ -142,7 +143,7 @@ pub fn merge_branch(
     into: &str,
     from: &str,
 ) -> Result<MergeOutcome, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     if into == from {
         return Err("A draft can't merge into itself.".to_string());
     }
@@ -194,7 +195,7 @@ pub fn finalize_branch_merge(
     from: &str,
     resolutions: &BTreeMap<String, String>,
 ) -> Result<usize, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     if is_dirty(&repo)? {
         return Err(SWITCH_DIRTY.to_string());
     }
