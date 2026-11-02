@@ -8,7 +8,7 @@
 #   ios/test-iphones.sh --only pro-max      some phones: base, e, pro, pro-max, air
 #   ios/test-iphones.sh --only base,e,pro   (comma-separated, tested in that order)
 #   ios/test-iphones.sh --no-build ...      test the last build (its .xctestrun)
-#   ios/test-iphones.sh --boot ...          start booting, then return
+#   ios/test-iphones.sh --boot ...          start booting the first phone, then return
 #
 # CI builds once and tests the phones in two jobs (#1310), compact and wide: the
 # build job uploads the simulator build, and each phone job runs
@@ -61,11 +61,11 @@ for kind in "${kinds[@]}"; do
   udids+=("$udid")
 done
 
-# Start every phone booting in the background, so they come up while the app
-# builds or downloads (#1310); each is waited for before its tests.
-for udid in "${udids[@]}"; do
-  xcrun simctl boot "$udid" >/dev/null 2>&1 &
-done
+# Start the first phone booting in the background, so it comes up while the
+# app builds or downloads (#1310). The rest boot one at a time, each as the
+# phone before it finishes: a CI runner booting three at once slowed to a
+# crawl and lost track of one of them.
+xcrun simctl boot "${udids[0]}" >/dev/null 2>&1 &
 [ "$boot_only" = 0 ] || exit 0
 
 if [ "$build" = 1 ]; then
@@ -75,7 +75,11 @@ if [ "$build" = 1 ]; then
     -derivedDataPath "$ROOT/ios/build/DerivedData" CODE_SIGNING_ALLOWED=NO -quiet build-for-testing
 fi
 xctestrun="$(find "$PRODUCTS" -maxdepth 1 -name '*.xctestrun' -print -quit 2>/dev/null || true)"
-[ -n "$xctestrun" ] || { echo "no build in $PRODUCTS; run without --no-build" >&2; exit 1; }
+if [ -z "$xctestrun" ]; then
+  echo "no build in $PRODUCTS; run without --no-build. It holds:" >&2
+  ls -la "$PRODUCTS" >&2 || true
+  exit 1
+fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
@@ -84,11 +88,16 @@ failed=()
 for i in "${!phones[@]}"; do
   phone="${phones[$i]}" udid="${udids[$i]}"
   echo "== $phone"
+  xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
   xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" test-without-building 2>&1 |
     tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  # Free the runner for the next phone.
+  xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
     failed+=("$phone: tests failed")
+    # A failure before any test ran explains itself only in the full output.
+    grep -q "^Test Case " "$log" || tail -25 "$log"
   elif grep -qE "^Test Case .*PhoneLayoutUITests (testUprightShowsOneColumnAtATime|testSidewaysShowsTheLayoutForThePhonesWidth)\]' skipped" "$log"; then
     failed+=("$phone: a layout check skipped instead of running")
   fi

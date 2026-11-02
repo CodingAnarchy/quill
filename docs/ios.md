@@ -133,7 +133,7 @@ touches the terminal UI or the docs skips them. The `ios-build` job builds the
 core, runs the QuillKit tests, builds the app unsigned for a device, and builds
 the app and its UI tests for the simulator once. Two `ios-ui` jobs then test
 that one build at the same time, the compact phones (base, e, Pro) and the wide
-ones (Pro Max, Air), each booting its simulators while the build downloads
+ones (Pro Max, Air), each booting its first simulator while the build downloads
 (`ios/test-iphones.sh --only <phones> --no-build`). Two jobs rather than five,
 because GitHub runs only a few macOS jobs at a time and five mostly queued; one
 simulator per runner, because several at once on a 3-CPU runner made the tests
