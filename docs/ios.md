@@ -71,8 +71,9 @@ simulator: they open the sample, check the chapter list, type into a chapter,
 background and kill the app, and find the words still there after a relaunch.
 
 `ios/test-iphones.sh` runs them on the newest base iPhone, e, Pro, Pro Max,
-and Air simulator the installed Xcode has, building once (#1289). This is what
-CI runs. `PhoneLayoutUITests` checks each phone upright and sideways:
+and Air simulator the installed Xcode has, building once (#1289).
+`--only` runs some of them (`--only pro-max`, `--only base,e,pro`), and
+`--no-build` tests the last build. `PhoneLayoutUITests` checks each phone upright and sideways:
 
 | | Upright | Sideways |
 |---|---|---|
@@ -85,7 +86,8 @@ model in the 17 or 18 line shares one of these screens (the 18 Pro has the
 17 Pro's, the 18 Pro Max the 17 Pro Max's), and the script picks the newest of
 each kind. The tests tell the phone apart by its simulator's name. On these
 phones, a layout check that skips fails the run. The type-then-kill check runs
-sideways as well as upright.
+upright on every phone, and sideways on the base iPhone and the Pro Max: it
+checks saving, not layout, and it's the slowest check (#1310).
 
 The iPhone Duo simulator needs Xcode 27.1 or later. Xcode 27 replaces the
 Simulator app with DeviceHub (Xcode → Open Developer Tool → DeviceHub), and
@@ -125,9 +127,17 @@ cd ios/App && xcodegen generate && open Quill.xcodeproj
 Pick an iPhone simulator and run. On first launch the app copies the bundled
 sample novel (`ios/App/SampleNovel`) into its Documents folder and opens it.
 
-CI runs the same steps on every PR (the `ios` job in
-`.github/workflows/ci.yml`): it builds the core, runs the QuillKit tests, and
-builds the app for the simulator and, unsigned, for a device.
+CI runs the same steps on every PR that can affect the app (#1310): a change to
+the core, the bindings, `ios/`, the lockfile, or the workflow. A PR that only
+touches the terminal UI or the docs skips them. The `ios-build` job builds the
+core, runs the QuillKit tests, builds the app unsigned for a device, and builds
+the app and its UI tests for the simulator once. Two `ios-ui` jobs then test
+that one build at the same time, the compact phones (base, e, Pro) and the wide
+ones (Pro Max, Air), each booting its first simulator while the build downloads
+(`ios/test-iphones.sh --only <phones> --no-build`). Two jobs rather than five,
+because GitHub runs only a few macOS jobs at a time and five mostly queued; one
+simulator per runner, because several at once on a 3-CPU runner made the tests
+flaky.
 
 ## Getting a novel onto the phone
 
