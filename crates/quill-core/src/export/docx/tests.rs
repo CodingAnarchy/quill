@@ -828,7 +828,7 @@ fn misordered_paragraph_properties(xml: &str) -> Vec<String> {
         for tag in body.split("<w:").skip(1) {
             let name: String = tag
                 .chars()
-                .take_while(|c| c.is_ascii_alphanumeric())
+                .take_while(char::is_ascii_alphanumeric)
                 .collect();
             let Some(at) = PPR_ORDER.iter().position(|n| *n == name) else {
                 continue; // a child of rPr, or an element this list doesn't order
