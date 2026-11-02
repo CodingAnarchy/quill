@@ -281,7 +281,8 @@ fn mono_run(code: &str) -> String {
 /// An epigraph as set-apart italic paragraphs (single-spaced, indented), the
 /// attribution on its own line.
 fn epigraph_paras(epigraph: &Epigraph) -> String {
-    let ppr = r#"<w:ind w:left="1440"/><w:spacing w:line="240" w:lineRule="auto"/>"#;
+    // Schema order (CT_PPrBase): spacing before ind (#1302).
+    let ppr = r#"<w:spacing w:line="240" w:lineRule="auto"/><w:ind w:left="1440"/>"#;
     render_epigraph(
         epigraph,
         |line| para(ppr, run(line, false, true, None)),
