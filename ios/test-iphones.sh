@@ -32,13 +32,19 @@ xcodebuild "${build[@]}" -destination 'generic/platform=iOS Simulator' -quiet bu
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
+# Every phone runs even after one fails, so one run shows them all.
+failed=()
 for phone in "${phones[@]}"; do
   echo "== $phone"
   xcodebuild "${build[@]}" -destination "platform=iOS Simulator,name=$phone" test-without-building 2>&1 |
-    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|TEST EXECUTE (SUCCEEDED|FAILED)" || true
-  grep -q "TEST EXECUTE SUCCEEDED" "$log" || exit 1
-  if grep -qE "^Test Case .*PhoneLayoutUITests.* skipped" "$log"; then
-    echo "$phone: a layout check skipped instead of running" >&2
-    exit 1
+    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
+    failed+=("$phone: tests failed")
+  elif grep -qE "^Test Case .*PhoneLayoutUITests.* skipped" "$log"; then
+    failed+=("$phone: a layout check skipped instead of running")
   fi
 done
+if [ "${#failed[@]}" -gt 0 ]; then
+  printf '%s\n' "${failed[@]}" >&2
+  exit 1
+fi

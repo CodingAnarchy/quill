@@ -82,7 +82,7 @@ run() {
   shift 2
   echo "== iPhone Duo, $pose"
   TEST_RUNNER_QUILL_DUO_POSE="$pose" xcodebuild "${build[@]}" "$@" test-without-building 2>&1 | tee "$log" |
-    grep -E "^Test Case .*(passed|failed|skipped)|Test skipped|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+    grep -E "^Test Case .*(passed|failed|skipped)|Test skipped|: error: |TEST EXECUTE (SUCCEEDED|FAILED)" || true
   grep -q "TEST EXECUTE SUCCEEDED" "$log" || exit 1
   if grep -qE "^Test Case .*$must_run.* skipped" "$log"; then
     echo "$pose: $must_run skipped instead of running" >&2
