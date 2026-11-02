@@ -52,8 +52,11 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue(
             text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should be ready to type in")
         text.typeText("The tide was out.")
-        XCTAssertTrue(
-            (text.value as? String ?? "").contains("The tide was out."), "the words should be in the chapter")
+        let typed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS %@", "The tide was out."), object: text)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [typed], timeout: UITest.patience), .completed,
+            "the words should be in the chapter")
         attach(app, "new book")
     }
 
