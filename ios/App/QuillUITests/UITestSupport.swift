@@ -32,7 +32,12 @@ extension XCUIApplication {
         openChapter("Low Tide")
         let text = textViews.firstMatch
         XCTAssertTrue(text.waitForExistence(timeout: 10), file: file, line: line)
+        // On a slow runner a tap can land before the text view takes the
+        // keyboard, and typing then has nowhere to go: wait for focus, and
+        // tap once more if it doesn't come.
         text.tap()
+        if !text.waitForKeyboardFocus(timeout: 5) { text.tap() }
+        XCTAssertTrue(text.waitForKeyboardFocus(timeout: 10), "the chapter should take the keyboard", file: file, line: line)
         text.typeText(" \(word).")
 
         XCUIDevice.shared.press(.home)
@@ -57,6 +62,12 @@ extension XCTestCase {
 }
 
 extension XCUIElement {
+    /// Wait for the element to have the keyboard, so typing reaches it.
+    func waitForKeyboardFocus(timeout: TimeInterval) -> Bool {
+        let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: self)
+        return XCTWaiter().wait(for: [focused], timeout: timeout) == .completed
+    }
+
     /// Wait for the element to be on screen and tappable, not just present.
     func waitForHittable(timeout: TimeInterval) -> Bool {
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
