@@ -35,6 +35,9 @@ final class AppState {
 
     private static let lastProjectKey = "lastProject"
     private var launched = false
+    /// The background tasks keeping the app awake for a save and sync (one
+    /// per trip to the background), each ended once.
+    @ObservationIgnored private var backgroundSyncs: Set<UIBackgroundTaskIdentifier> = []
 
     init() {
         let support = URL.applicationSupportDirectory.appending(path: "Quill", directoryHint: .isDirectory)
@@ -115,16 +118,29 @@ final class AppState {
     /// task so iOS gives the work time to finish. If time runs out first,
     /// the edits are already committed here and go out on the next sync.
     func saveAndSyncForBackground() {
-        let app = UIApplication.shared
-        var task = UIBackgroundTaskIdentifier.invalid
-        task = app.beginBackgroundTask(withName: "Save and sync") {
-            app.endBackgroundTask(task)
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Save and sync") { [weak self] in
+            // iOS calls this on the main thread when the app's time is up.
+            MainActor.assumeIsolated { self?.endBackgroundSyncs() }
         }
+        if task != .invalid { backgroundSyncs.insert(task) }
         save()
         Task {
             await sync(.background)
-            app.endBackgroundTask(task)
+            endBackgroundSync(task)
         }
+    }
+
+    /// End a background save and sync's task, once: the sync finishing and
+    /// iOS running out of time can both try.
+    private func endBackgroundSync(_ task: UIBackgroundTaskIdentifier) {
+        guard backgroundSyncs.remove(task) != nil else { return }
+        UIApplication.shared.endBackgroundTask(task)
+    }
+
+    /// Time's up for the whole app, so every sync still running gives up its
+    /// task. Their edits are committed; they go out on the next sync.
+    private func endBackgroundSyncs() {
+        backgroundSyncs.forEach(endBackgroundSync)
     }
 
     /// Open a finding's chapter at the passage it cites (#1236), selected and
