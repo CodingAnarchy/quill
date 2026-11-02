@@ -112,6 +112,13 @@ it never licenses editing the surrounding prose.
   then `count_words(...)` — not `std::fs::write(...)` / `crate::buffer::count_words(...)`
   inline. (Disambiguate with a partial path or `as` alias only when two names
   would otherwise collide.)
+- **No `unwrap()` or `expect()` outside tests.** Clippy denies both
+  (`unwrap_used` and `expect_used` in the workspace lints; `clippy.toml`
+  allows them only in tests), so production code handles the error: `?`, a
+  typed error, or a sensible fallback. In tests, prefer `.expect("what should
+  have held")` to a bare `.unwrap()`, so a failure says what broke rather than
+  `called Option::unwrap() on a None value`. Tests may also return `Result`
+  and use `?`.
 - **Keep source files under ~1,000 lines.** When a module approaches that,
   extract a cohesive group of types/traits into its own file (e.g. the editor
   modes out of `app.rs` into a `mode.rs`) rather than letting one file sprawl.
