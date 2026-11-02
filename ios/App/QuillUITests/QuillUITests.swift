@@ -108,6 +108,18 @@ final class QuillUITests: XCTestCase {
         XCTAssertEqual(text.value as? String, version, "exactly the old version, quotes and all")
     }
 
+    /// Exporting the book opens the share sheet with the file (#1300).
+    func testExportingTheBookOpensTheShareSheet() {
+        app.openSample()
+        let export = app.buttons["Export"]
+        XCTAssertTrue(export.waitForHittable(timeout: UITest.patience), "the book offers an export")
+        export.tap()
+        app.buttons["Manuscript (Word)"].tap()
+        let sheet = app.otherElements["ActivityListView"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: UITest.patience), "the share sheet should open")
+        attach(app, "share sheet")
+    }
+
     // MARK: - The iPhone Duo (#1234, #1284, #1285)
 
     /// Unfolded and upright, the Duo keeps the chapter list beside the

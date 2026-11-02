@@ -160,6 +160,21 @@ public final class ProjectStore {
         return NSRange(location: Int(span.start), length: Int(span.length))
     }
 
+    /// True while an export is running.
+    public private(set) var exporting = false
+
+    /// Export the open book as `kind` into `folder` (#1300), off the main
+    /// thread, and return the file and any warnings. The caller saves the open
+    /// chapter first. Throws with a message that says what to fix (a chapter
+    /// whose file is missing, say).
+    public func export(_ kind: ExportKind, to folder: URL) async throws -> ExportResult {
+        guard let project else { throw QuillError.Io(message: "No book is open.") }
+        exporting = true
+        defer { exporting = false }
+        let dest = folder.path
+        return try await Task.detached { try project.export(kind: kind, destDir: dest) }.value
+    }
+
     /// A chapter's earlier versions, newest first (#1299). Empty for a book
     /// with no history of its own.
     public func versions(of chapter: ChapterInfo) async throws -> [VersionInfo] {

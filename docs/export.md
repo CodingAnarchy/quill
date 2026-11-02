@@ -94,6 +94,18 @@ which is what a publisher expects for a collection; the short story submission
 layout is for sending one story out. A story whose folder is missing is left out,
 and the export message says how many were.
 
+## Exporting from the iPhone
+
+The phone app exports the open book too (#1300): **Export** in the book's
+toolbar offers a Word manuscript, an EPUB, a PDF, or a print PDF, and hands the
+file to the share sheet (Mail, Files, AirDrop, another app). It compiles and
+renders through the same core code as the desktop (`export::assemble`: the
+document assembly, `[style]` resolution, the print geometry, and the format
+writers), so the same book and settings give the same file. A short story or a
+collection exports as itself; a series exports its open book. Before it starts,
+the export checks every chapter's file can be read, and names any that can't
+rather than leave a hole in the book.
+
 ## The design system
 
 Two per-project tables shape the designed exports — the EPUB and the print PDF.

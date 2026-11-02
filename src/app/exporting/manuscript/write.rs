@@ -6,6 +6,7 @@
 use super::super::super::*;
 
 use crate::ai::bible;
+use crate::export::assemble::Format;
 use crate::export::{self, Document};
 use crate::mode::ExportFormat;
 
@@ -58,52 +59,15 @@ impl App {
             ExportFormat::Markdown => {
                 self.write_export(name, "md", export::to_markdown(doc).as_bytes());
             }
-            ExportFormat::Docx => self.write_built(
-                export::docx::to_docx(doc, export::docx::Profile::Manuscript),
-                name,
-                "docx",
-            ),
+            ExportFormat::Docx => self.write_rendered(doc, Format::Manuscript, name),
             ExportFormat::Vellum => self.write_built(
                 export::docx::to_docx(doc, export::docx::Profile::Vellum),
                 name,
                 "vellum.docx",
             ),
-            ExportFormat::Epub => {
-                let (style, warnings) = self.export_style();
-                self.write_built(
-                    export::epub::to_epub(doc, &crate::date::utc_timestamp(), &style),
-                    name,
-                    "epub",
-                );
-                self.note_export_warnings(&warnings);
-            }
-            ExportFormat::Pdf => {
-                let (style, mut warnings) = self.export_style();
-                warnings.extend(export::pdf::pdf_style_warnings(&style));
-                warnings.extend(export::pdf::pdf_dpi_warnings(
-                    &style,
-                    export::pdf::SCREEN_MEDIA_W,
-                ));
-                self.write_built(export::pdf::to_pdf(doc, &style), name, "pdf");
-                self.note_export_warnings(&warnings);
-            }
-            ExportFormat::PdfPrint => {
-                let (style, mut warnings) = self.export_style();
-                let ((w, h), trim_warning) = self.print_trim();
-                warnings.extend(trim_warning);
-                warnings.extend(export::pdf::pdf_style_warnings(&style));
-                let bleed = self.print_bleed();
-                warnings.extend(export::pdf::pdf_dpi_warnings(
-                    &style,
-                    2.0f32.mul_add(bleed, w),
-                ));
-                self.write_built(
-                    export::pdf::to_pdf_print(doc, w, h, bleed, &style),
-                    name,
-                    "print.pdf",
-                );
-                self.note_export_warnings(&warnings);
-            }
+            ExportFormat::Epub => self.write_rendered(doc, Format::Epub, name),
+            ExportFormat::Pdf => self.write_rendered(doc, Format::Pdf, name),
+            ExportFormat::PdfPrint => self.write_rendered(doc, Format::PrintPdf, name),
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
@@ -111,6 +75,15 @@ impl App {
                 self.report_export(&path, result);
             }
         }
+    }
+
+    /// Render one book in a format the phone shares (#1300), through the core's
+    /// [`render`](crate::export::assemble::render), and write it to
+    /// `export/<name>.<ext>` with any styling warnings noted.
+    fn write_rendered(&mut self, doc: &Document, format: Format, name: &str) {
+        let (built, warnings) = export::assemble::render(&self.project, doc, format);
+        self.write_built(built, name, format.extension());
+        self.note_export_warnings(&warnings);
     }
 
     /// Write the whole series (one book per [`Document`], in order) in `format` to

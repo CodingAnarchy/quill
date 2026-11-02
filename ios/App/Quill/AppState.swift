@@ -29,6 +29,8 @@ final class AppState {
     var posture = Posture.flat
     /// The word lookup in progress (#1235), and the range it replaces.
     var lookup: (lookup: WordLookup, range: NSRange)?
+    /// A finished export waiting for the share sheet (#1300).
+    var exported: ExportedFile?
     /// A message the author must see (work parked on a draft, a failed manual
     /// sync), shown as an alert.
     var notice: String?
@@ -86,6 +88,20 @@ final class AppState {
             selectedChapter = store.chapters.first?.index
         }
         prose?.textView.typeOnShow()
+    }
+
+    /// Export the open book as `kind` (#1300) and hand it to the share sheet.
+    /// The open chapter is saved first, so the export has every word.
+    func export(_ kind: ExportKind) async {
+        save()
+        let folder = URL.temporaryDirectory.appending(path: "Exports", directoryHint: .isDirectory)
+        do {
+            let result = try await store.export(kind, to: folder)
+            exported = ExportedFile(
+                url: URL(fileURLWithPath: result.path), warnings: result.warnings)
+        } catch {
+            notice = describe(error)
+        }
     }
 
     /// Restore the open chapter to an earlier version's `text` (#1299): one
