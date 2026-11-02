@@ -97,7 +97,7 @@ run closed none
 
 devicehubctl "$udid" pose open
 turn upright
-run open testAWideScreenShowsTheListBesideTheChapter
+run open testUnfoldedDuoShowsTheListBesideTheChapter
 
 devicehubctl "$udid" pose partial
 turn upright

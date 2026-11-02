@@ -108,15 +108,11 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath ios/build/DerivedData
           CODE_SIGNING_ALLOWED=NO build
-      - name: UI tests (simulator)
-        run: |
-          # The iPhone Duo (folded) when CI's Xcode has it (27.1 and later),
-          # otherwise the first available iPhone simulator.
-          sims=$(xcrun simctl list devices available | grep -oE 'iPhone [^(]+' | sed 's/ *$//')
-          sim=$(echo "$sims" | grep -m1 -x 'iPhone Duo' || echo "$sims" | head -1)
-          xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill \
-            -destination "platform=iOS Simulator,name=$sim" \
-            -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO test
+      # The newest base iPhone, Pro, and Pro Max, each upright and sideways.
+      # The iPhone Duo's poses need DeviceHub, so ios/test-duo.sh runs them
+      # locally.
+      - name: UI tests (iPhone, Pro, Pro Max)
+        run: ios/test-iphones.sh
       - name: Build the app (device, unsigned)
         run: >-
           xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
