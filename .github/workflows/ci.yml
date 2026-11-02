@@ -85,6 +85,12 @@ jobs:
           unzip -q epubcheck.zip -d "$RUNNER_TEMP"
           echo "EPUBCHECK=java -jar $RUNNER_TEMP/epubcheck-5.3.0/epubcheck.jar" >> "$GITHUB_ENV"
           npm install -g @daisy/ace@1.3.3
+          # Ace drives Electron, whose Chromium sandbox helper must be setuid
+          # root, and which needs a display (xvfb-run gives it one below).
+          sandbox="$(npm root -g)/@daisy/ace/node_modules/electron/dist/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          echo "ACE=xvfb-run -a ace" >> "$GITHUB_ENV"
       - name: Validate the exports
         run: REQUIRE_ALL=1 scripts/check-exports.sh
 
