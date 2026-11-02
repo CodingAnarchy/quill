@@ -14,9 +14,28 @@ enum UITest {
 }
 
 extension XCUIApplication {
+    /// Open the sample novel from the library, wherever the app opened: the
+    /// app reopens the last book, which another test may have created.
     func openSample() {
+        openLibrary()
         let sample = buttons["SampleNovel"]
-        if sample.waitForExistence(timeout: 5) { sample.tap() }
+        XCTAssertTrue(sample.waitForExistence(timeout: UITest.patience), "the library should list the sample")
+        sample.tap()
+    }
+
+    /// Back to the library from wherever the last test left the app: a
+    /// chapter, or a project's chapter list.
+    func openLibrary() {
+        let newBook = buttons["New Book…"]
+        for _ in 0..<3 where !newBook.waitForExistence(timeout: 3) {
+            let projects = buttons["Projects"]
+            if projects.exists && projects.isHittable {
+                projects.tap()
+            } else {
+                navigationBars.buttons.element(boundBy: 0).tap()
+            }
+        }
+        XCTAssertTrue(newBook.waitForExistence(timeout: UITest.patience), "the library should show")
     }
 
     func openChapter(_ title: String) {

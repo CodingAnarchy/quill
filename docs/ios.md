@@ -125,7 +125,8 @@ cd ios/App && xcodegen generate && open Quill.xcodeproj
 ```
 
 Pick an iPhone simulator and run. On first launch the app copies the bundled
-sample novel (`ios/App/SampleNovel`) into its Documents folder and opens it.
+sample novel (`ios/App/SampleNovel`) into its Documents folder, and the library
+offers it alongside starting a new book and cloning one from git.
 
 CI runs the same steps on every PR that can affect the app (#1310): a change to
 the core, the bindings, `ios/`, the lockfile, or the workflow. A PR that only
@@ -139,10 +140,28 @@ because GitHub runs only a few macOS jobs at a time and five mostly queued; one
 simulator per runner, because several at once on a 3-CPU runner made the tests
 flaky.
 
+## Starting a book on the phone
+
+The library's **New Book…** starts a novel or a short story right on the phone
+(#1297), with no desktop app, account, or server, and works offline. Give it a
+title and pick the kind; the book opens on its first chapter (or the story)
+with the keyboard up. It's created by the same core code as the desktop's
+projects (`create_project` in `quill-ffi`, over `Project::create_with_template`),
+in `Documents/Projects/<title>`, so it's an ordinary Quill project: copy the
+folder to a Mac and desktop Quill opens it, history and all.
+
+Every book on the phone keeps version history, as on the desktop (#1296). A
+new book's history starts with its first commit; any other book gets one the
+first time the phone opens it, unless it's a repository the author made (a
+clone, say) or sits inside one. When the app leaves the foreground it saves the
+open chapter and takes a snapshot, a commit dated like "Snapshot, 2 Nov 2026 at
+14:05". Nothing is sent anywhere: a snapshot is local, and only a book with a
+remote syncs.
+
 ## Getting a novel onto the phone
 
-The phone reaches the author's novel through the same git remote the desktop
-pushes to. HTTPS only: iOS has no ssh-agent. To keep the novel off hosted
+For a power user, the phone can also reach the author's novel through the same
+git remote the desktop pushes to. HTTPS only: iOS has no ssh-agent. To keep the novel off hosted
 services, `docs/self-hosting.md` sets up a private Forgejo server reachable
 only by your own devices.
 

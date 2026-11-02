@@ -216,6 +216,17 @@ final class ProseUITextView: UITextView {
         scrollRangeToVisible(selection)
     }
 
+    /// Bring up the keyboard with the cursor at the end of the text as soon as
+    /// the view is on screen: a book just created opens ready to type (#1297).
+    func typeOnShow() {
+        selectedRange = NSRange(location: textStorage.length, length: 0)
+        if window != nil {
+            becomeFirstResponder()
+        } else {
+            wasEditing = true
+        }
+    }
+
     /// Put the cursor at `location` with its line at the top of the view, as
     /// soon as the view is on screen at its size. The author was reading, so
     /// the keyboard stays down.

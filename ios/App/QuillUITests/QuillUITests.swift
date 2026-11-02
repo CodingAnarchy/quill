@@ -35,6 +35,28 @@ final class QuillUITests: XCTestCase {
         app.checkTypedWordsSurviveAKill()
     }
 
+    /// A book started on the phone opens on its first chapter with the
+    /// keyboard up, ready to type (#1297).
+    func testANewBookOpensReadyToType() {
+        let title = "Harbor \(Int.random(in: 1000...9999))"
+        app.openLibrary()
+        app.buttons["New Book…"].tap()
+        let field = app.textFields["NewBookTitle"]
+        XCTAssertTrue(field.waitForExistence(timeout: UITest.patience), "the new book form should open")
+        field.tap()
+        field.typeText(title)
+        app.buttons["Create"].tap()
+
+        let text = app.textViews.firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "the first chapter should open")
+        XCTAssertTrue(
+            text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should be ready to type in")
+        text.typeText("The tide was out.")
+        XCTAssertTrue(
+            (text.value as? String ?? "").contains("The tide was out."), "the words should be in the chapter")
+        attach(app, "new book")
+    }
+
     // MARK: - The iPhone Duo (#1234, #1284, #1285)
 
     /// Unfolded and upright, the Duo keeps the chapter list beside the

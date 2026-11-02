@@ -3,6 +3,9 @@ import Foundation
 /// The sample novel the app ships with (#1230), so a fresh install opens a
 /// real project before any git remote is set up.
 public enum SampleNovel {
+    /// The sample's folder name, as it shows in the library.
+    public static let folderName = "SampleNovel"
+
     /// Copy the bundled sample at `bundled` into `projects` (once) and return
     /// the copy. The bundle is read-only and opening a project writes to it
     /// (its lock file, caches), so the app always opens the copy.
