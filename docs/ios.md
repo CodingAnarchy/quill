@@ -81,8 +81,11 @@ whichever state the Duo is in. Folded (466 points wide), the wide check
 skips. Unfolded (about 950 by 670, wider than tall), it runs.
 
 `ios/test-duo.sh` runs the suite in each pose: folded, unfolded (where the
-wide check must run, not skip), and half open and upright (where the book
-check must run). It sets the pose for the tests through
+wide check must run, not skip), half open and upright (where the book check
+must run), and half open and sideways (where the laptop check must run). For
+the laptop check it turns off DeviceHub's Device → Keyboard → Simulate
+Hardware Keyboard, which otherwise keeps the on-screen keyboard away, and
+puts the setting back afterwards. It sets the pose for the tests through
 `TEST_RUNNER_QUILL_DUO_POSE`, and it turns the phone by checking the inner
 screen's shape, because XCTest's idea of portrait isn't upright on the Duo's
 inner screen. It presses DeviceHub's fold buttons with
@@ -220,11 +223,20 @@ for a series) and the open chapter.
   undoable, saved, and listed with the other markers. Open the phone fully
   and the editor is back at the page you were reading. With no chapter open,
   the half-open phone shows the list as usual.
+- **Half open and sideways, like a laptop** (#1285): the lower half rests on
+  the table and holds the keyboard, and the chapter stays on the upper half.
+  Choosing a chapter puts the list away, so it doesn't cover the writing; the
+  sidebar button brings it back. With the on-screen keyboard up, the editor
+  ends at the crease, so neither the text nor the line being typed sits on
+  the fold. The stock keyboard, with Quill's marker bar above it, already
+  reaches above the crease (the text ends about 70 points short of it in the
+  simulator); the padding is for shorter keyboards. With a hardware keyboard,
+  or the keyboard put away, the chapter uses the whole screen.
 
 Quill reads the posture from the hinge (`UIHingeInteraction`, iOS 27.1) and
 the screen's shape. Upright is wider than tall; sideways is taller than wide.
 iOS has no API for where the crease is, so Quill takes the middle of the
-screen's long side. The hinge reads as half open all the way through opening
+screen's long side, in the window's coordinates. The hinge reads as half open all the way through opening
 and closing the phone, so half open counts only once the hinge has held still
 for a moment, and the spread never flashes up mid-fold. Built with an Xcode
 older than 27.1, or run on an older iOS, the phone always reads as flat.

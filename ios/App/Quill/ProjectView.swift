@@ -36,6 +36,10 @@ struct ProjectView: View {
         }
     }
 
+    private var isLaptop: Bool {
+        if case .laptop = app.posture { true } else { false }
+    }
+
     /// The chapter list beside (or, compact, before) the chapter.
     private var split: some View {
         @Bindable var app = app
@@ -65,6 +69,17 @@ struct ProjectView: View {
         // Unfolding shows the list again even if it was hidden before.
         .onChange(of: sizeClass) { _, size in
             if size == .regular { columns = .all }
+        }
+        // Half open like a laptop (#1285), the list would slide over the
+        // writing: put it away once a chapter is open, and again after one
+        // is chosen from it (also when turning from the book spread, which
+        // brings the split view back already sideways). It's back when the
+        // phone opens flat.
+        .onChange(of: isLaptop, initial: true) { _, laptop in
+            columns = laptop && app.prose != nil ? .detailOnly : .all
+        }
+        .onChange(of: app.selectedChapter) {
+            if isLaptop { columns = .detailOnly }
         }
         .task(id: store.url) {
             compactColumn = isStory ? .detail : .sidebar
@@ -234,6 +249,7 @@ struct ChapterEditorView: View {
 
     var body: some View {
         ProseTextView(host: host)
+            .aboveTheFold()
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.editor.chapter.title)
             .navigationBarTitleDisplayMode(.inline)

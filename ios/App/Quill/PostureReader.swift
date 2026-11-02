@@ -2,10 +2,10 @@ import QuillKit
 import SwiftUI
 import UIKit
 
-/// Reports the iPhone Duo's ``Posture`` to `onChange`, from its hinge and
-/// from where its screen sits under this view. Place it as a full-size
-/// background of the view whose layout depends on the posture, so the crease
-/// comes back in that view's coordinates.
+/// Reports the iPhone Duo's ``Posture`` to `onChange`, from its hinge and its
+/// screen. The crease comes back in the window's coordinates, which are
+/// SwiftUI's `.global` space; this view's own frame (inside the safe area or
+/// not) doesn't move it.
 ///
 /// The hinge API is new in iOS 27.1 (and its SDK). Built with an older SDK,
 /// or run on an older iOS, every device reads as `.flat`.
@@ -96,8 +96,9 @@ final class PostureReaderView: UIView {
     }
 
     private func report() {
-        guard let screen = window?.windowScene?.screen else { return }
-        let next = Posture(partiallyOpen: halfOpen, screen: convert(screen.bounds, from: screen.coordinateSpace))
+        guard let window, let screen = window.windowScene?.screen else { return }
+        let next = Posture(
+            partiallyOpen: halfOpen, screen: window.convert(screen.bounds, from: screen.coordinateSpace))
         guard next != posture else { return }
         posture = next
         onChange(next)
