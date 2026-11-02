@@ -227,6 +227,8 @@ final class BookSpread: UIView, UIScrollViewDelegate, UITextViewDelegate {
 
     /// Hand the reading position back to the editor as the spread goes away.
     func returnToEditor() {
+        // A spread that never laid out its pages has no reading position.
+        guard !pages.isEmpty else { return }
         host.textView.revealOnShow(at: firstShowing)
     }
 }
