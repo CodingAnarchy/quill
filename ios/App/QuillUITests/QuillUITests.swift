@@ -102,7 +102,9 @@ final class QuillUITests: XCTestCase {
         attach(app, "comparison")
 
         app.buttons["Restore This Version"].tap()
-        app.buttons["Restore"].tap()
+        let confirm = app.buttons["Restore"]
+        XCTAssertTrue(confirm.waitForHittable(timeout: UITest.patience), "the restore asks to confirm")
+        confirm.tap()
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "back at the chapter")
         let restored = NSPredicate(format: "NOT (value CONTAINS %@)", word)
         XCTAssertEqual(
