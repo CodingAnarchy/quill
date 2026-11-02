@@ -46,8 +46,14 @@ order, or just the active book.
   your part/chapter structure, book metadata (title, subtitle, author, series),
   a cover and other embedded images, epigraphs set apart, and `*`/`**` emphasis
   as italic and bold. It is EPUB 3 with an EPUB 2 NCX fallback for older readers,
-  full structural semantics and accessibility metadata, and it is structured to
-  validate against [epubcheck](https://www.w3.org/publishing/epubcheck/).
+  full structural semantics and accessibility metadata. It is **validated**, not
+  just structured to be: CI exports the sample books in `tests/export-corpus`
+  (a novel with parts, front and back matter, epigraphs, scene breaks, a cover,
+  and French, Greek, and Japanese text; a series and its omnibus; two short
+  stories; and a collection) on every pull request, and each EPUB must pass
+  [EPUBCheck](https://www.w3.org/publishing/epubcheck/) 5.3 with no errors or
+  warnings, and the [Ace](https://daisy.github.io/ace/) accessibility checker
+  with no violations (#1301). Run `scripts/check-exports.sh` to check locally.
 
 - **PDF** — two variants. *PDF (screen)* is a paginated, fixed-layout proof for
   beta readers and submissions. *PDF (print interior)* is the book block for

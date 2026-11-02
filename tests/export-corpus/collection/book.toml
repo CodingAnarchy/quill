@@ -1,0 +1,15 @@
+form = "collection"
+title = "Harbor Stories"
+author = "Mara Vey"
+language = "en"
+
+[[stories]]
+path = "../story"
+credit = "First published in The Coast Review, 2025."
+
+[[stories]]
+path = "../story-two"
+
+[[chapters]]
+title = "Introduction"
+file = "introduction.md"
