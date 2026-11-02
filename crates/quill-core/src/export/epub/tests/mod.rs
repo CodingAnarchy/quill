@@ -80,7 +80,12 @@ fn part(bytes: &[u8], name: &str) -> String {
 
 fn names(bytes: &[u8]) -> Vec<String> {
     let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid zip");
-    zip.file_names().map(str::to_string).collect()
+    zip.file_names()
+        .map(|n| {
+            n.expect("an archive Quill wrote has valid entry names")
+                .into_owned()
+        })
+        .collect()
 }
 
 /// A lightweight well-formedness assertion for a rendered XHTML string, without

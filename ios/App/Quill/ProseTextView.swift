@@ -108,6 +108,16 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
         return UIMenu(children: [lookUp] + suggestedActions)
     }
 
+    // Scrolling or typing takes over from a reading position the book spread
+    // handed back (#1284).
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        textView.endReveal()
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        self.textView.endReveal()
+    }
+
     /// Put `word` in place of the looked-up selection, if that text is still
     /// there. It goes through the text view, so it's one undoable edit and
     /// reaches the core like typing.
@@ -182,9 +192,12 @@ final class ProseUITextView: UITextView {
     /// which takes it out of the window for a moment and drops the keyboard;
     /// it comes straight back with the cursor where it was (#1234).
     private var wasEditing = false
-    /// Where to put the cursor and the top of the view when it's next on
-    /// screen: the reading position the book spread hands back (#1284).
-    private var pendingReveal: Int?
+    /// The reading position the book spread handed back (#1284), and the
+    /// width it was last put at the top for (0 until it's on screen). The
+    /// next layout at any other width places it: the first one in the new
+    /// layout, and again as the split view settles its columns and the text
+    /// re-wraps. Scrolling or typing ends it.
+    private var revealed: (location: Int, width: CGFloat)?
 
     override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
@@ -195,14 +208,7 @@ final class ProseUITextView: UITextView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil else { return }
-        if let location = pendingReveal {
-            pendingReveal = nil
-            // After this pass, once the view has its size in the new layout.
-            DispatchQueue.main.async { self.showAtTop(location) }
-            return
-        }
-        guard wasEditing else { return }
+        guard window != nil, wasEditing else { return }
         wasEditing = false
         let selection = selectedRange
         becomeFirstResponder()
@@ -210,16 +216,13 @@ final class ProseUITextView: UITextView {
         scrollRangeToVisible(selection)
     }
 
-    /// Put the cursor at `location` with its line at the top of the view, now
-    /// if the view is on screen, or when it next is. The author was reading,
-    /// so the keyboard stays down.
+    /// Put the cursor at `location` with its line at the top of the view, as
+    /// soon as the view is on screen at its size. The author was reading, so
+    /// the keyboard stays down.
     func revealOnShow(at location: Int) {
         wasEditing = false
-        if window == nil {
-            pendingReveal = location
-        } else {
-            showAtTop(location)
-        }
+        revealed = (location, 0)
+        setNeedsLayout()
     }
 
     private func showAtTop(_ location: Int) {
@@ -240,6 +243,16 @@ final class ProseUITextView: UITextView {
         if textContainerInset != inset {
             textContainerInset = inset
         }
+        if window != nil, bounds.width > 0, let revealed, revealed.width != bounds.width {
+            self.revealed = (revealed.location, bounds.width)
+            showAtTop(revealed.location)
+        }
+    }
+
+    /// The author has taken over (scrolled or started typing): leave the
+    /// reading position where it is from now on.
+    func endReveal() {
+        revealed = nil
     }
 
     /// Insert `text` at the cursor (replacing any selection) as if typed, so it

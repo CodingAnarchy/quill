@@ -88,8 +88,39 @@ jobs:
   # QuillKit's Swift tests against the macOS slice, and build the app for both
   # the simulator and a device (unsigned). A core change that breaks the phone
   # build fails here. The Rust targets come from rust-toolchain.toml.
-  ios:
+  # Whether this change can affect the iPhone app (#1310): the core, the Swift
+  # bindings, the iOS project, the lockfile, or this workflow. A change to only
+  # the terminal UI or the docs skips the iOS jobs, which are the slowest here.
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ios:
+              - 'crates/quill-core/**'
+              - 'crates/quill-ffi/**'
+              - 'ios/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+
+  # Build the core and the app once (#1310): the QuillKit tests, an unsigned
+  # device build, and `build-for-testing` for the simulator, whose products the
+  # per-phone jobs below test without building again.
+  ios-build:
     name: ios (core + app)
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,23 +133,56 @@ jobs:
         run: ios/test-kit.sh --no-build
       - name: Generate the Xcode project
         run: cd ios/App && xcodegen generate
-      - name: Build the app (simulator)
+      - name: Build the app and its UI tests (simulator)
         run: >-
           xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath ios/build/DerivedData
-          CODE_SIGNING_ALLOWED=NO build
-      # The newest base iPhone, Pro, and Pro Max, each upright and sideways.
-      # The iPhone Duo's poses need DeviceHub, so ios/test-duo.sh runs them
-      # locally.
-      - name: UI tests (iPhone, Pro, Pro Max)
-        run: ios/test-iphones.sh
+          CODE_SIGNING_ALLOWED=NO build-for-testing
       - name: Build the app (device, unsigned)
         run: >-
           xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill
           -destination 'generic/platform=iOS'
           -derivedDataPath ios/build/DerivedData
           CODE_SIGNING_ALLOWED=NO build
+      # Just what the phone jobs run: the simulator build and its .xctestrun.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-tests
+          path: |
+            ios/build/DerivedData/Build/Products/Debug-iphonesimulator/
+            ios/build/DerivedData/Build/Products/*.xctestrun
+          retention-days: 1
+
+  # The UI tests in two jobs at once (#1310), the compact phones and the wide
+  # ones: the newest base iPhone, e, and Pro, then the Pro Max and Air, each
+  # upright and sideways (#1289), one phone after another within a job. Two
+  # jobs, not five: GitHub runs only a few macOS jobs at a time, and five phone
+  # jobs mostly queued behind each other and the other macOS jobs. One
+  # simulator per runner: several on one 3-CPU runner made the tests flaky. The
+  # iPhone Duo's poses need DeviceHub, so ios/test-duo.sh runs them locally.
+  ios-ui:
+    name: ios ui (${{ matrix.group }})
+    needs: ios-build
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: compact
+            phones: base,e,pro
+          - group: wide
+            phones: pro-max,air
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the simulator
+        run: ios/test-iphones.sh --only ${{ matrix.phones }} --boot
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-ui-tests
+          path: ios/build/DerivedData/Build/Products/
+      - name: UI tests
+        run: ios/test-iphones.sh --only ${{ matrix.phones }} --no-build
 
   # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
   # single-threaded). Timing thresholds are tuned for a real machine; a shared CI

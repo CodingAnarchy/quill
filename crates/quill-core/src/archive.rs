@@ -329,7 +329,14 @@ mod tests {
         let bytes = fs::read(&zip).unwrap();
         let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
         let names: Vec<String> = (0..archive.len())
-            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .map(|i| {
+                archive
+                    .by_index(i)
+                    .unwrap()
+                    .name()
+                    .expect("an archive Quill wrote has valid entry names")
+                    .into_owned()
+            })
             .collect();
         assert!(names.contains(&"book.toml".to_string()));
         assert!(names.contains(&"chapter-1.md".to_string()));
@@ -360,7 +367,14 @@ mod tests {
         let bytes = fs::read(&zip).unwrap();
         let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
         let names: Vec<String> = (0..archive.len())
-            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .map(|i| {
+                archive
+                    .by_index(i)
+                    .unwrap()
+                    .name()
+                    .expect("an archive Quill wrote has valid entry names")
+                    .into_owned()
+            })
             .collect();
         assert!(!names.iter().any(|n| n.starts_with(".quill/")));
         assert!(!names.iter().any(|n| n.starts_with("unused/")));
