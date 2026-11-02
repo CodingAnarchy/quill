@@ -37,7 +37,7 @@ failed=()
 for phone in "${phones[@]}"; do
   echo "== $phone"
   xcodebuild "${build[@]}" -destination "platform=iOS Simulator,name=$phone" test-without-building 2>&1 |
-    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |TEST EXECUTE (SUCCEEDED|FAILED)" || true
+    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
     failed+=("$phone: tests failed")
   elif grep -qE "^Test Case .*PhoneLayoutUITests.* skipped" "$log"; then
