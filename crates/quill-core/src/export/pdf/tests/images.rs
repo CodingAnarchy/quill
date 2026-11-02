@@ -70,7 +70,7 @@ fn a_print_pdf_emits_the_cover_full_page() {
     style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
     let (w, h) = trim_points("6x9").unwrap();
     let bytes = to_pdf_print(&doc(), w, h, 0.0, &style).unwrap();
-    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert!(bytes.starts_with(b"%PDF-1.6") && bytes.ends_with(b"%%EOF\n"));
     assert!(
         content(&bytes).contains("/ImCover Do"),
         "cover drawn in the print PDF"

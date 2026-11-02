@@ -3,7 +3,7 @@
 //! compressed grayscale samples plus a grayscale `/SMask` for alpha, #696/#817).
 //! Placement lives in the layout module; this is the decode + object emission.
 //!
-//! Samples are DeviceGray, not DeviceRGB (#817): the print interior is PDF/X-3
+//! Samples are DeviceGray, not DeviceRGB (#817): the print interior is PDF/X-4
 //! conformant (calibrated grayscale + a bundled ICC output intent), which forbids
 //! uncalibrated DeviceRGB. A novel interior is grayscale anyway — the ornaments the
 //! author supplies (scene breaks, chapter marks) render the same in gray as they did
@@ -82,12 +82,13 @@ pub(super) fn decode_images(style: &ExportStyle) -> Vec<PdfImage> {
 /// Emit each decoded image as a PDF image XObject (FlateDecode-compressed DeviceGray
 /// samples, #696/#817), returning the (resource name, object id) pairs for the
 /// page-tree `/Resources /XObject` dictionary. DeviceGray keeps the print interior
-/// PDF/X-3 conformant (no uncalibrated RGB).
+/// PDF/X-4 conformant (no uncalibrated RGB).
 ///
 /// When `flatten` (the PDF/X print interior, #817), a transparent source is composited
-/// over white — the paper — and emitted opaque, with no `/SMask`: PDF/X-3:2003 (a PDF
-/// 1.3 base) forbids soft-mask transparency, and on a white page the composite renders
-/// identically. The screen proof passes `flatten = false` and keeps the `/SMask`, which
+/// over white — the paper — and emitted opaque, with no `/SMask`. PDF/X-4 allows
+/// transparency, but a flattened image is what every press RIP handles the same way
+/// (PDF/X-1a and X-3 forbid soft masks outright), and on a white page the composite
+/// renders identically. The screen proof passes `flatten = false` and keeps the `/SMask`, which
 /// composites correctly against any background a viewer shows.
 pub(super) fn emit_images(
     images: &[PdfImage],

@@ -324,7 +324,7 @@ fn a_long_contents_flows_onto_a_second_page() {
     );
     // And the whole book still serializes to a well-formed PDF.
     let bytes = to_pdf_print(&d, w, h, 0.0, &plain()).unwrap();
-    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert!(bytes.starts_with(b"%PDF-1.6") && bytes.ends_with(b"%%EOF\n"));
 }
 #[test]
 fn roman_numerals_render_the_conventional_forms() {

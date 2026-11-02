@@ -22,7 +22,7 @@
 //! safe zone (a light rectangle in the lower-outside corner the retailer's barcode
 //! sits in) and thin spine fold guides drawn at the panel seams, so a designer can see
 //! where the panels meet. No text — the wrap stays DeviceGray strokes + the one image,
-//! which keeps it PDF/X-3 conformant like the interior (#817), with no fonts to embed.
+//! which keeps it PDF/X-4 conformant like the interior (#817), with no fonts to embed.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -116,7 +116,7 @@ impl WrapGeometry {
 }
 
 /// The wrap-cover builder (#819): lays the front/back/spine onto one page and
-/// serializes it to a PDF/X-3 grayscale PDF, mirroring the interior writer's object
+/// serializes it to a PDF/X-4 grayscale PDF, mirroring the interior writer's object
 /// model (catalog, page tree, media/trim/bleed boxes, output intent, `/Info`).
 pub struct Cover<'a> {
     geo: WrapGeometry,
@@ -205,7 +205,7 @@ impl<'a> Cover<'a> {
         s
     }
 
-    /// Render the wrap cover to a PDF/X-3 grayscale PDF (#817/#819): one page at the
+    /// Render the wrap cover to a PDF/X-4 grayscale PDF (#817/#819): one page at the
     /// wrap media box, the front-cover image XObject, the trim/bleed boxes a print shop
     /// reads, a grayscale output intent, and an `/Info` dictionary.
     pub fn render(&self) -> Vec<u8> {
@@ -266,28 +266,14 @@ impl<'a> Cover<'a> {
             .into_bytes(),
         );
 
-        // The PDF/X output intent (#817): a grayscale intent naming the bundled ICC
-        // destination profile, referenced from the catalog — the wrap is a press
-        // artifact like the interior, so it carries the same conformance.
-        let icc_id = take(&mut next);
-        objects.insert(icc_id, flate_stream(icc::GRAY_ICC, " /N 1"));
-        let intent_id = take(&mut next);
-        objects.insert(
-            intent_id,
-            format!(
-                "<< /Type /OutputIntent /S /GTS_PDFX \
-                 /OutputConditionIdentifier {ident} /OutputCondition {cond} \
-                 /Info {ident} /DestOutputProfile {icc_id} 0 R >>",
-                ident = pdf_text_string(icc::OUTPUT_CONDITION),
-                cond = pdf_text_string(icc::OUTPUT_CONDITION),
-            )
-            .into_bytes(),
-        );
+        // PDF/X-4 (#817, #1303): the wrap is a press artifact like the interior, so
+        // it carries the same output intent, metadata, and `/Info` entries.
+        let pdfx = icc::add_pdfx(&mut objects, &mut next, &self.title, &self.author);
         objects.insert(
             1,
             format!(
-                "<< /Type /Catalog /Pages 2 0 R /PageMode /UseNone \
-                 /OutputIntents [{intent_id} 0 R] >>"
+                "<< /Type /Catalog /Pages 2 0 R /PageMode /UseNone{} >>",
+                pdfx.catalog
             )
             .into_bytes(),
         );
@@ -303,14 +289,10 @@ impl<'a> Cover<'a> {
             let _ = write!(info, " /Author {}", pdf_text_string(&self.author));
         }
         let _ = write!(info, " /Producer {}", pdf_text_string("Quill"));
-        let _ = write!(
-            info,
-            " /GTS_PDFXVersion {ver} /GTS_PDFXConformance {ver}",
-            ver = pdf_text_string(icc::PDFX_VERSION)
-        );
+        info.push_str(&pdfx.info);
         info.push_str(" >>");
         objects.insert(info_id, info.into_bytes());
-        serialize(&objects, Some(info_id))
+        serialize(&objects, Some(info_id), true)
     }
 }
 

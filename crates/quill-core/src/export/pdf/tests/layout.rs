@@ -128,8 +128,16 @@ fn trim_points_resolves_known_sizes_only() {
     assert_eq!(trim_points("6x9"), Some((432.0, 648.0)));
     assert_eq!(trim_points("5x8"), Some((360.0, 576.0)));
     assert_eq!(trim_points("5.5x8.5"), Some((396.0, 612.0)));
-    assert_eq!(trim_points("7x10"), None);
+    // The other common KDP / IngramSpark paperback trims (#1303).
+    assert_eq!(trim_points("7x10"), Some((504.0, 720.0)));
+    let (w, h) = trim_points("6.14x9.21").expect("the Royal trim");
+    assert!((w - 442.08).abs() < 0.01 && (h - 663.12).abs() < 0.01);
+    assert_eq!(trim_points("12x12"), None);
+    assert_eq!(trim_points("A4"), None);
     assert_eq!(DEFAULT_TRIM, "6x9");
+    for name in super::super::TRIM_NAMES {
+        assert!(trim_points(name).is_some(), "{name} resolves");
+    }
 }
 #[test]
 fn print_pdf_embeds_fonts_at_the_chosen_trim() {
@@ -637,10 +645,42 @@ fn the_print_interior_is_pdf_x_conformant() {
         has(&bytes, "/OutputConditionIdentifier "),
         "the intent identifies its output condition"
     );
+    // PDF/X-4 (#1303), which IngramSpark and KDP both accept: the version in
+    // /Info and in the XMP metadata, which the catalog points at; /Trapped and
+    // the dates in /Info; a PDF 1.6 header; and a trailer /ID.
     assert!(
-        has(&bytes, "/GTS_PDFXVersion (PDF/X-3:2003)"),
+        has(&bytes, "/GTS_PDFXVersion (PDF/X-4)"),
         "/Info stamps the PDF/X version"
     );
+    assert!(
+        bytes.starts_with(b"%PDF-1.6"),
+        "PDF/X-4 is built on PDF 1.6"
+    );
+    assert!(
+        has(&bytes, "/Metadata "),
+        "the catalog points at the XMP metadata"
+    );
+    assert!(
+        has(
+            &bytes,
+            "<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>"
+        ),
+        "the XMP names the version"
+    );
+    assert!(
+        has(&bytes, "<pdf:Trapped>False</pdf:Trapped>"),
+        "XMP Trapped"
+    );
+    assert!(
+        has(&bytes, "/Trapped /False"),
+        "/Info Trapped, matching the XMP"
+    );
+    assert!(
+        has(&bytes, "/CreationDate (D:") && has(&bytes, "/ModDate (D:"),
+        "/Info dates"
+    );
+    assert!(has(&bytes, "<xmp:CreateDate>"), "XMP dates");
+    assert!(has(&bytes, "/ID [<"), "a trailer /ID");
     // The embedded ICC profile is a 1-component (grayscale) space, flagged /N 1.
     assert!(has(&bytes, "/N 1"), "the destination profile is grayscale");
 }
@@ -654,6 +694,7 @@ fn the_screen_proof_is_not_pdf_x() {
         !has(&bytes, "/GTS_PDFXVersion"),
         "no PDF/X version on screen"
     );
+    assert!(bytes.starts_with(b"%PDF-1.7"), "an ordinary PDF 1.7");
 }
 #[test]
 fn print_images_are_devicegray_not_devicergb() {

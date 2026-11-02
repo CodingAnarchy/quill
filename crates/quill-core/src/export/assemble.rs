@@ -375,7 +375,8 @@ pub fn print_trim(project: &Project) -> ((f32, f32), Option<String>) {
             (
                 default,
                 Some(format!(
-                    "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
+                    "print: unknown trim '{name}' (use {}) — using {}",
+                    pdf::TRIM_NAMES.join(", "),
                     pdf::DEFAULT_TRIM
                 )),
             )

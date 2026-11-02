@@ -231,19 +231,46 @@ The print interior is built from a `[print]` table:
 
 ```toml
 [print]
-trim    = "6x9"     # also "5x8" and "5.5x8.5"; default "6x9"
+trim    = "6x9"     # any of the sizes below; default "6x9"
 bleed   = 0.125     # inches past the trim edge for full-bleed art; default 0 (none)
 caliper = 0.0025    # per-page paper thickness in inches; feeds the spine width
 ```
 
-Three trim sizes are supported — `6x9`, `5x8`, and `5.5x8.5` — and that is the
-one current limitation. Margins are mirrored by page parity: the default 6×9
+The trim sizes are the common paperback trims KDP and IngramSpark both print
+(#1303): `6x9`, `5x8`, `5.5x8.5`, `4.25x6.87` (mass market), `5.06x7.81`, `5.25x8`, `5.83x8.27` (A5), `6.14x9.21` (Royal), `6.69x9.61`, `7x10`, `7.5x9.25`, `8x10`, and `8.5x11`, in inches, width by height. Margins are mirrored by page parity: the default 6×9
 interior uses 0.875″ inside (a 0.5″ outer margin plus a 0.375″ gutter for the
 binding), 0.5″ outside, and 0.75″ top and bottom. `bleed` runs art past the trim
 edge for covers and full-bleed pages; leave it unset for a clean trim, or set the
 0.125″ that print-on-demand stores want. `caliper` is the per-page paper
 thickness — the wrap cover's spine width is `interior page count × caliper` — and
 defaults to a sane value when unset; set it to match your printer's stock.
+
+The margins meet both services' minimums at any page count: KDP asks for an
+inside margin of 0.375″ to 0.875″ depending on the page count (0.875″ only past
+700 pages) and 0.25″ outside (0.375″ with bleed), and IngramSpark for 0.5″ all
+round. A full-bleed image under 300 DPI at its printed size gets a warning on
+the export, since both services flag it.
+
+### PDF/X-4
+
+The print interior and the wrap cover are **PDF/X-4** files (#1303), the
+standard IngramSpark's file guide asks for (alongside PDF/X-1a) and KDP accepts.
+Each carries a grayscale output intent with its ICC profile embedded, XMP
+metadata naming the version, `/Trapped` and creation dates, a trailer `/ID`, a
+trim box and bleed box on every page, and every font embedded and subset, with
+no uncalibrated RGB and every image flattened. CI exports the sample books in
+`tests/export-corpus` on every pull request and runs a PDF/X-4 preflight over
+them (`scripts/pdfx-preflight.py`, which checks each of those), `qpdf --check`
+for structure, and `pdffonts` for embedding. (The writer declared PDF/X-3 until
+then, without the dates, `/Trapped`, or `/ID` that X-3 also requires.)
+
+Uploading to the services' own previewers is the last check, done by hand once
+and again when the PDF writer changes:
+
+| Service | Interior | Wrap cover | Notes |
+| --- | --- | --- | --- |
+| KDP (paperback previewer) | not yet checked | not yet checked | |
+| IngramSpark | not yet checked | not yet checked | |
 
 
 ## Preflight
@@ -297,7 +324,7 @@ kept distinct for the label and for any future per-store defaults.
 
 For the cover, the **PDF wrap cover** export (offered for standalone books)
 writes the press-ready single-sheet wrap — back cover, spine, and front cover
-flattened onto one page at `2 × trim + spine + 2 × bleed`, a PDF/X-3 grayscale
+flattened onto one page at `2 × trim + spine + 2 × bleed`, a PDF/X-4 grayscale
 file with the ISBN/barcode safe zone marked on the back and fold guides on the
 spine. The spine width is sized from *this book's* interior page count at the
 same trim and bleed as the print interior, so the cover matches the block that

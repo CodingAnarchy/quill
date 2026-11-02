@@ -11,10 +11,36 @@ use super::{ExportStyle, FontStyle};
 /// The default print trim, used when a project sets no `[print] trim`.
 pub const DEFAULT_TRIM: &str = "6x9";
 
-/// The print trim sizes the writer supports (#464), in the order the in-app
-/// picker (#569) and the unknown-trim warning list them. The single source of
-/// truth: every name here resolves through [`trim_points`] (a test asserts it).
-pub const TRIM_NAMES: [&str; 3] = ["6x9", "5x8", "5.5x8.5"];
+/// The print trim sizes the writer supports (#464, #1303), as `(name, width,
+/// height)` in inches, in the order the in-app picker (#569) and the unknown-trim
+/// warning list them: the three classic novel sizes first, then the other common
+/// paperback trims KDP and IngramSpark both print, smallest to largest.
+pub const TRIMS: [(&str, f32, f32); 13] = [
+    ("6x9", 6.0, 9.0),
+    ("5x8", 5.0, 8.0),
+    ("5.5x8.5", 5.5, 8.5),
+    ("4.25x6.87", 4.25, 6.87),
+    ("5.06x7.81", 5.06, 7.81),
+    ("5.25x8", 5.25, 8.0),
+    ("5.83x8.27", 5.83, 8.27),
+    ("6.14x9.21", 6.14, 9.21),
+    ("6.69x9.61", 6.69, 9.61),
+    ("7x10", 7.0, 10.0),
+    ("7.5x9.25", 7.5, 9.25),
+    ("8x10", 8.0, 10.0),
+    ("8.5x11", 8.5, 11.0),
+];
+
+/// The trim names alone, in [`TRIMS`] order: what `[print] trim` accepts.
+pub const TRIM_NAMES: [&str; TRIMS.len()] = {
+    let mut names = [""; TRIMS.len()];
+    let mut i = 0;
+    while i < TRIMS.len() {
+        names[i] = TRIMS[i].0;
+        i += 1;
+    }
+    names
+};
 
 /// Opt-in print-interior settings (#464), read from the manifest `[print]` table.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -51,15 +77,13 @@ impl PrintConfig {
     }
 }
 
-/// A named trim size in PDF points (1/72"), or `None` if unrecognized.
+/// A named trim size (one of [`TRIMS`]) in PDF points (1/72"), or `None` if
+/// unrecognized.
 pub fn trim_points(name: &str) -> Option<(f32, f32)> {
-    let (w, h) = match name {
-        "6x9" => (6.0, 9.0),
-        "5x8" => (5.0, 8.0),
-        "5.5x8.5" => (5.5, 8.5),
-        _ => return None,
-    };
-    Some((w * 72.0, h * 72.0))
+    TRIMS
+        .iter()
+        .find(|(n, _, _)| *n == name.trim())
+        .map(|&(_, w, h)| (w * 72.0, h * 72.0))
 }
 
 /// The page geometry and font plan of one render — the only difference between the
