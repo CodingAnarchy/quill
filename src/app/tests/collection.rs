@@ -220,7 +220,10 @@ fn the_word_and_epub_exports_list_every_story() {
     let mut zip = zip::ZipArchive::new(Cursor::new(epub)).unwrap();
     let nav_name = zip
         .file_names()
-        .map(|n| n.unwrap().into_owned())
+        .map(|n| {
+            n.expect("an archive Quill wrote has valid entry names")
+                .into_owned()
+        })
         .find(|n| n.contains("nav"))
         .unwrap();
     let mut nav = String::new();

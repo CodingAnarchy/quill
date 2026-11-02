@@ -10,7 +10,9 @@ fn mimetype_is_first_and_stored() {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let first = zip.by_index(0).unwrap();
     assert_eq!(
-        first.name().unwrap(),
+        first
+            .name()
+            .expect("an archive Quill wrote has valid entry names"),
         "mimetype",
         "mimetype is the first entry"
     );

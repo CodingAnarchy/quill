@@ -552,7 +552,10 @@ mod tests {
         let names: Vec<String> = zip::ZipArchive::new(Cursor::new(plain))
             .unwrap()
             .file_names()
-            .map(|n| n.unwrap().into_owned())
+            .map(|n| {
+                n.expect("an archive Quill wrote has valid entry names")
+                    .into_owned()
+            })
             .collect();
         assert!(
             !names.iter().any(|n| n.contains("copyright")),
@@ -596,7 +599,8 @@ mod tests {
         let zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         assert!(
             zip.file_names()
-                .any(|n| n.unwrap() == "OEBPS/images/cover.png"),
+                .any(|n| n.expect("an archive Quill wrote has valid entry names")
+                    == "OEBPS/images/cover.png"),
             "cover image embedded"
         );
         drop(zip);
@@ -823,7 +827,10 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
-                .map(|n| n.unwrap().into_owned())
+                .map(|n| {
+                    n.expect("an archive Quill wrote has valid entry names")
+                        .into_owned()
+                })
                 .filter(|n| {
                     n.contains("/book")
                         && Path::new(n)
@@ -863,7 +870,10 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(plain.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
-                .map(|n| n.unwrap().into_owned())
+                .map(|n| {
+                    n.expect("an archive Quill wrote has valid entry names")
+                        .into_owned()
+                })
                 .filter(|n| {
                     n.contains("/book")
                         && Path::new(n)
