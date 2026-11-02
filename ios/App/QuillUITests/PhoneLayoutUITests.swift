@@ -53,7 +53,7 @@ final class PhoneLayoutUITests: XCTestCase {
     private func turn(_ orientation: UIDeviceOrientation) {
         XCUIDevice.shared.orientation = orientation
         let window = app.windows.firstMatch
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertTrue(window.waitForExistence(timeout: UITest.patience), "the app's window should appear")
         XCTAssertEqual(
             window.frame.width > window.frame.height, orientation.isLandscape,
             "the phone should be \(orientation.isLandscape ? "sideways" : "upright"), not \(window.frame.size)")
@@ -64,22 +64,22 @@ final class PhoneLayoutUITests: XCTestCase {
         app.openSample()
         let lampRoom = app.staticTexts["The Lamp Room"]
         let lowTide = app.staticTexts["Low Tide"]
-        XCTAssertTrue(lampRoom.waitForHittable(timeout: 10), "the chapter list should show first")
+        XCTAssertTrue(lampRoom.waitForHittable(timeout: UITest.patience), "the chapter list should show first")
         lampRoom.tap()
-        XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: 10), "the chapter should open")
+        XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: UITest.patience), "the chapter should open")
         attach(app, "\(phone) \(orientation.isLandscape ? "sideways" : "upright")")
 
         if phone.split(orientation) {
             XCTAssertTrue(app.shows(lowTide), "\(phone) sideways should keep the list beside the chapter")
             // Choosing another chapter keeps the split.
             lowTide.tap()
-            XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: 10))
+            XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: UITest.patience), "the other chapter should open")
             XCTAssertTrue(app.shows(lampRoom), "the list should stay after choosing a chapter")
         } else {
             XCTAssertFalse(app.shows(lowTide), "\(phone) should show the chapter alone, not beside the list")
             // Back to the list.
             app.navigationBars.buttons.element(boundBy: 0).tap()
-            XCTAssertTrue(lowTide.waitForHittable(timeout: 5), "back should return to the chapter list")
+            XCTAssertTrue(lowTide.waitForHittable(timeout: UITest.patience), "back should return to the chapter list")
             XCTAssertFalse(app.shows(app.textViews.firstMatch), "the list should be alone again")
         }
     }

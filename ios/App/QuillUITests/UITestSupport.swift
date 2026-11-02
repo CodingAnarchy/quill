@@ -2,6 +2,17 @@ import XCTest
 
 /// Steps the UI tests share: opening the sample novel and its chapters, and
 /// the type-then-kill check.
+///
+/// The waits are long because CI's runners are slow (steps take three to five
+/// times as long as on a Mac), and a wait returns as soon as its condition
+/// holds, so a long one costs nothing when things are quick. Every assertion
+/// says what it was waiting for, so a CI failure explains itself.
+enum UITest {
+    /// How long a step that has to happen may take: a screen appearing, the
+    /// keyboard arriving.
+    static let patience: TimeInterval = 30
+}
+
 extension XCUIApplication {
     func openSample() {
         let sample = buttons["SampleNovel"]
@@ -14,7 +25,7 @@ extension XCUIApplication {
             // Compact layout already showing a chapter: go back to the list.
             navigationBars.buttons.element(boundBy: 0).tap()
         }
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the chapter list should show \"\(title)\"")
         row.tap()
     }
 
@@ -31,13 +42,16 @@ extension XCUIApplication {
         openSample()
         openChapter("Low Tide")
         let text = textViews.firstMatch
-        XCTAssertTrue(text.waitForExistence(timeout: 10), file: file, line: line)
+        XCTAssertTrue(
+            text.waitForExistence(timeout: UITest.patience), "the chapter should open", file: file, line: line)
         // On a slow runner a tap can land before the text view takes the
         // keyboard, and typing then has nowhere to go: wait for focus, and
         // tap once more if it doesn't come.
         text.tap()
         if !text.waitForKeyboardFocus(timeout: 5) { text.tap() }
-        XCTAssertTrue(text.waitForKeyboardFocus(timeout: 10), "the chapter should take the keyboard", file: file, line: line)
+        XCTAssertTrue(
+            text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should take the keyboard", file: file,
+            line: line)
         text.typeText(" \(word).")
 
         XCUIDevice.shared.press(.home)
@@ -46,7 +60,9 @@ extension XCUIApplication {
         openSample()
         openChapter("Low Tide")
         let reopened = textViews.firstMatch
-        XCTAssertTrue(reopened.waitForExistence(timeout: 10), file: file, line: line)
+        XCTAssertTrue(
+            reopened.waitForExistence(timeout: UITest.patience), "the chapter should open again after relaunch",
+            file: file, line: line)
         XCTAssertTrue((reopened.value as? String ?? "").contains(word), "lost the typed word", file: file, line: line)
     }
 }
