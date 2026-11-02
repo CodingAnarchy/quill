@@ -552,7 +552,7 @@ mod tests {
         let names: Vec<String> = zip::ZipArchive::new(Cursor::new(plain))
             .unwrap()
             .file_names()
-            .map(str::to_string)
+            .map(|n| n.unwrap().into_owned())
             .collect();
         assert!(
             !names.iter().any(|n| n.contains("copyright")),
@@ -595,7 +595,8 @@ mod tests {
         // The image file is embedded and declared with the cover-image property.
         let zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         assert!(
-            zip.file_names().any(|n| n == "OEBPS/images/cover.png"),
+            zip.file_names()
+                .any(|n| n.unwrap() == "OEBPS/images/cover.png"),
             "cover image embedded"
         );
         drop(zip);
@@ -822,13 +823,13 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
+                .map(|n| n.unwrap().into_owned())
                 .filter(|n| {
                     n.contains("/book")
                         && Path::new(n)
                             .extension()
                             .is_some_and(|e| e.eq_ignore_ascii_case("xhtml"))
                 })
-                .map(str::to_string)
                 .collect();
             names.iter().map(|n| part(&bytes, n)).collect()
         };
@@ -862,13 +863,13 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(plain.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
+                .map(|n| n.unwrap().into_owned())
                 .filter(|n| {
                     n.contains("/book")
                         && Path::new(n)
                             .extension()
                             .is_some_and(|e| e.eq_ignore_ascii_case("xhtml"))
                 })
-                .map(str::to_string)
                 .collect();
             names.iter().map(|n| part(&plain, n)).collect()
         };

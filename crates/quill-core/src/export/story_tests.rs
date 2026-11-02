@@ -65,7 +65,7 @@ fn zip_part(bytes: &[u8], name: &str) -> String {
 /// Every part name in a zip.
 fn zip_names(bytes: &[u8]) -> Vec<String> {
     let zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    zip.file_names().map(str::to_string).collect()
+    zip.file_names().map(|n| n.unwrap().into_owned()).collect()
 }
 
 #[test]

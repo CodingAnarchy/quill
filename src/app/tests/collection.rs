@@ -220,9 +220,9 @@ fn the_word_and_epub_exports_list_every_story() {
     let mut zip = zip::ZipArchive::new(Cursor::new(epub)).unwrap();
     let nav_name = zip
         .file_names()
+        .map(|n| n.unwrap().into_owned())
         .find(|n| n.contains("nav"))
-        .unwrap()
-        .to_string();
+        .unwrap();
     let mut nav = String::new();
     zip.by_name(&nav_name)
         .unwrap()

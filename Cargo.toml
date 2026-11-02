@@ -6,6 +6,12 @@
 members = [".", "crates/*"]
 default-members = [".", "crates/quill-core", "crates/quill-ffi"]
 
+# Shared by the editor and quill-core, declared once so a bump (or a security
+# update) moves both together. zip 9.0.5 is the floor: 8.x has open advisories,
+# the critical one fixed only in 9.0.5.
+[workspace.dependencies]
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
+
 [package]
 name = "quill"
 version = "1.3.0"
@@ -45,7 +51,7 @@ serde_json = "1.0.150"
 time = { version = "0.3.49", features = ["local-offset", "macros", "parsing", "formatting"] }
 ureq = { version = "3.3.0", features = ["json"] }
 similar = "3.1.1"
-zip = { version = "9.0", default-features = false, features = ["deflate"] }
+zip.workspace = true
 git2 = { version = "0.20", default-features = false, features = ["https", "ssh", "vendored-openssl"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 hf-hub = { version = "0.4", optional = true }

@@ -426,7 +426,7 @@ fn vellum_profile_uses_heading1_and_no_title_page() {
 /// Whether the produced .docx zip contains a part by name.
 fn has_part(bytes: &[u8], name: &str) -> bool {
     let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid zip");
-    let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+    let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
     names.iter().any(|n| n == name)
 }
 
