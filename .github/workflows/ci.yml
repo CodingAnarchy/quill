@@ -145,34 +145,44 @@ jobs:
           -destination 'generic/platform=iOS'
           -derivedDataPath ios/build/DerivedData
           CODE_SIGNING_ALLOWED=NO build
+      # Just what the phone jobs run: the simulator build and its .xctestrun.
       - uses: actions/upload-artifact@v4
         with:
           name: ios-ui-tests
-          path: ios/build/DerivedData/Build/Products/
+          path: |
+            ios/build/DerivedData/Build/Products/Debug-iphonesimulator/
+            ios/build/DerivedData/Build/Products/*.xctestrun
           retention-days: 1
 
-  # The UI tests, one phone per job, all at once (#1310): the newest base
-  # iPhone, e, Pro, Pro Max, and Air, each upright and sideways (#1289). One
+  # The UI tests in two jobs at once (#1310), the compact phones and the wide
+  # ones: the newest base iPhone, e, and Pro, then the Pro Max and Air, each
+  # upright and sideways (#1289), one phone after another within a job. Two
+  # jobs, not five: GitHub runs only a few macOS jobs at a time, and five phone
+  # jobs mostly queued behind each other and the other macOS jobs. One
   # simulator per runner: several on one 3-CPU runner made the tests flaky. The
   # iPhone Duo's poses need DeviceHub, so ios/test-duo.sh runs them locally.
   ios-ui:
-    name: ios ui (${{ matrix.phone }})
+    name: ios ui (${{ matrix.group }})
     needs: ios-build
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        phone: [base, e, pro, pro-max, air]
+        include:
+          - group: compact
+            phones: base,e,pro
+          - group: wide
+            phones: pro-max,air
     steps:
       - uses: actions/checkout@v4
       - name: Start the simulator
-        run: ios/test-iphones.sh --only ${{ matrix.phone }} --boot
+        run: ios/test-iphones.sh --only ${{ matrix.phones }} --boot
       - uses: actions/download-artifact@v4
         with:
           name: ios-ui-tests
           path: ios/build/DerivedData/Build/Products/
       - name: UI tests
-        run: ios/test-iphones.sh --only ${{ matrix.phone }} --no-build
+        run: ios/test-iphones.sh --only ${{ matrix.phones }} --no-build
 
   # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
   # single-threaded). Timing thresholds are tuned for a real machine; a shared CI

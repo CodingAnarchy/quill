@@ -5,13 +5,14 @@
 # built core (ios/build-core.sh) and XcodeGen.
 #
 #   ios/test-iphones.sh                     build once, then test every phone
-#   ios/test-iphones.sh --only pro-max      one phone: base, e, pro, pro-max, air
+#   ios/test-iphones.sh --only pro-max      some phones: base, e, pro, pro-max, air
+#   ios/test-iphones.sh --only base,e,pro   (comma-separated, tested in that order)
 #   ios/test-iphones.sh --no-build ...      test the last build (its .xctestrun)
 #   ios/test-iphones.sh --boot ...          start booting, then return
 #
-# CI builds once and tests each phone in its own job (#1310): the build job
-# uploads ios/build/DerivedData/Build/Products, and each phone's job runs
-# `--only <phone> --boot` early, then `--only <phone> --no-build`.
+# CI builds once and tests the phones in two jobs (#1310), compact and wide: the
+# build job uploads the simulator build, and each phone job runs
+# `--only <phones> --boot` early, then `--only <phones> --no-build`.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PRODUCTS="$ROOT/ios/build/DerivedData/Build/Products"
@@ -22,7 +23,7 @@ while [ $# -gt 0 ]; do
     --only) only="$2"; shift 2 ;;
     --no-build) build=0; shift ;;
     --boot) boot_only=1; shift ;;
-    *) echo "usage: $0 [--only base|e|pro|pro-max|air] [--no-build] [--boot]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--only base,e,pro,pro-max,air] [--no-build] [--boot]" >&2; exit 2 ;;
   esac
 done
 
@@ -43,8 +44,10 @@ pattern() {
 }
 kinds=(base e pro pro-max air)
 if [ -n "$only" ]; then
-  pattern "$only" >/dev/null || { echo "no such phone: $only" >&2; exit 2; }
-  kinds=("$only")
+  IFS=, read -r -a kinds <<<"$only"
+  for kind in "${kinds[@]}"; do
+    pattern "$kind" >/dev/null || { echo "no such phone: $kind" >&2; exit 2; }
+  done
 fi
 phones=() udids=()
 for kind in "${kinds[@]}"; do

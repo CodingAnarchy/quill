@@ -72,8 +72,8 @@ background and kill the app, and find the words still there after a relaunch.
 
 `ios/test-iphones.sh` runs them on the newest base iPhone, e, Pro, Pro Max,
 and Air simulator the installed Xcode has, building once (#1289).
-`--only base|e|pro|pro-max|air` runs one phone, and `--no-build` tests the last
-build. `PhoneLayoutUITests` checks each phone upright and sideways:
+`--only` runs some of them (`--only pro-max`, `--only base,e,pro`), and
+`--no-build` tests the last build. `PhoneLayoutUITests` checks each phone upright and sideways:
 
 | | Upright | Sideways |
 |---|---|---|
@@ -131,10 +131,13 @@ CI runs the same steps on every PR that can affect the app (#1310): a change to
 the core, the bindings, `ios/`, the lockfile, or the workflow. A PR that only
 touches the terminal UI or the docs skips them. The `ios-build` job builds the
 core, runs the QuillKit tests, builds the app unsigned for a device, and builds
-the app and its UI tests for the simulator once. Five `ios-ui` jobs then test
-that one build in parallel, a phone each (`ios/test-iphones.sh --only <phone>
---no-build`), each booting its simulator while the build downloads. One
-simulator per runner: several at once on a 3-CPU runner made the tests flaky.
+the app and its UI tests for the simulator once. Two `ios-ui` jobs then test
+that one build at the same time, the compact phones (base, e, Pro) and the wide
+ones (Pro Max, Air), each booting its simulators while the build downloads
+(`ios/test-iphones.sh --only <phones> --no-build`). Two jobs rather than five,
+because GitHub runs only a few macOS jobs at a time and five mostly queued; one
+simulator per runner, because several at once on a 3-CPU runner made the tests
+flaky.
 
 ## Getting a novel onto the phone
 
