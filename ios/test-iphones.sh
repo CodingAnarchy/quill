@@ -51,15 +51,20 @@ if [ -n "$only" ]; then
 fi
 phones=() udids=()
 for kind in "${kinds[@]}"; do
-  phone="$(echo "$names" | grep -E "^$(pattern "$kind")\$" | sort -V | tail -1)"
+  phone="$(echo "$names" | grep -E "^$(pattern "$kind")\$" | sort -V | tail -1 || true)"
   [ -n "$phone" ] || { echo "this Xcode has no $kind iPhone simulator" >&2; exit 1; }
   phones+=("$phone")
-  udids+=("$(echo "$devices" | grep -m1 "    $phone (" | grep -oE '[0-9A-F-]{36}')")
+  # awk reads the whole list: `echo | grep -m1` under pipefail fails when grep
+  # quits before echo finishes writing, which a runner's long list makes likely.
+  udid="$(awk -v p="    $phone (" 'index($0, p) == 1 { match($0, /[0-9A-F-]{36}/); print substr($0, RSTART, RLENGTH); exit }' <<<"$devices")"
+  [ -n "$udid" ] || { echo "no simulator id for $phone" >&2; exit 1; }
+  udids+=("$udid")
 done
 
-# Boot every phone now, so they come up while the app builds (#1310).
+# Start every phone booting in the background, so they come up while the app
+# builds or downloads (#1310); each is waited for before its tests.
 for udid in "${udids[@]}"; do
-  xcrun simctl boot "$udid" 2>/dev/null || true
+  xcrun simctl boot "$udid" >/dev/null 2>&1 &
 done
 [ "$boot_only" = 0 ] || exit 0
 
@@ -69,7 +74,7 @@ if [ "$build" = 1 ]; then
   xcodebuild -project Quill.xcodeproj -scheme Quill -destination 'generic/platform=iOS Simulator' \
     -derivedDataPath "$ROOT/ios/build/DerivedData" CODE_SIGNING_ALLOWED=NO -quiet build-for-testing
 fi
-xctestrun="$(ls "$PRODUCTS"/*.xctestrun 2>/dev/null | head -1)"
+xctestrun="$(find "$PRODUCTS" -maxdepth 1 -name '*.xctestrun' -print -quit 2>/dev/null || true)"
 [ -n "$xctestrun" ] || { echo "no build in $PRODUCTS; run without --no-build" >&2; exit 1; }
 
 log="$(mktemp)"
