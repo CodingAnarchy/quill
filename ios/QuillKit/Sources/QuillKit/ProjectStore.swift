@@ -160,6 +160,21 @@ public final class ProjectStore {
         return NSRange(location: Int(span.start), length: Int(span.length))
     }
 
+    /// A chapter's earlier versions, newest first (#1299). Empty for a book
+    /// with no history of its own.
+    public func versions(of chapter: ChapterInfo) async throws -> [VersionInfo] {
+        guard let project else { return [] }
+        let index = chapter.index
+        return try await Task.detached { try project.chapterVersions(index: index) }.value
+    }
+
+    /// A chapter's prose as it was at `version`, front matter hidden.
+    public func text(of chapter: ChapterInfo, at version: VersionInfo) async throws -> String {
+        guard let project else { return "" }
+        let (index, rev) = (chapter.index, version.rev)
+        return try await Task.detached { try project.chapterTextAt(index: index, rev: rev) }.value
+    }
+
     /// A chapter's prose, with its front matter hidden.
     public func text(of chapter: ChapterInfo) throws -> String {
         guard let project else { return "" }

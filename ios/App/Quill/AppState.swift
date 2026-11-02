@@ -88,6 +88,16 @@ final class AppState {
         prose?.textView.typeOnShow()
     }
 
+    /// Restore the open chapter to an earlier version's `text` (#1299): one
+    /// edit in the editor, so Undo brings the chapter back, then saved and
+    /// snapshotted, so the restore is the newest version and nothing in the
+    /// history is lost.
+    func restore(_ host: ProseHost, to text: String) {
+        host.replaceAll(with: text)
+        host.editor.save()
+        Task { try? await store.snapshot() }
+    }
+
     /// Move the cursor to the start of a story's scene (#1247).
     func reveal(_ scene: SceneInfo) {
         prose?.textView.reveal(NSRange(location: Int(scene.start), length: 0))

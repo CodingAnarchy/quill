@@ -7,6 +7,7 @@ struct LibraryView: View {
     @Environment(Library.self) private var library
     @State private var showingClone = false
     @State private var showingNewBook = false
+    @State private var deleting: Library.Entry?
     @State private var showingSettings = false
 
     var body: some View {
@@ -25,6 +26,9 @@ struct LibraryView: View {
                     Section {
                         ForEach(library.projects) { entry in
                             Button(entry.name) { app.open(entry.url) }
+                                .swipeActions {
+                                    Button("Delete", role: .destructive) { deleting = entry }
+                                }
                         }
                     } header: {
                         Text("On this iPhone")
@@ -53,6 +57,24 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $showingNewBook) {
                 NewBookView()
+            }
+            .confirmationDialog(
+                "Delete \u{201c}\(deleting?.name ?? "")\u{201d}?",
+                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Book", role: .destructive) {
+                    if let deleting {
+                        do {
+                            try library.delete(deleting)
+                        } catch {
+                            app.notice = describe(error)
+                        }
+                    }
+                    deleting = nil
+                }
+            } message: {
+                Text("The book and its version history are removed from this iPhone. Copies on other devices aren't touched.")
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()

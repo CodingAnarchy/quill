@@ -1,13 +1,15 @@
-//! Starting a book on the phone, and its version history (#1297). A book
-//! created here is an ordinary Quill project, laid out by the same core code
-//! the desktop uses, and gets the same automatic history (#1296): a local Git
-//! repository from the first word, with snapshots at the phone's save points.
-//! Nothing here touches the network.
+//! Starting a book on the phone, and its version history (#1297, #1299). A
+//! book created here is an ordinary Quill project, laid out by the same core
+//! code the desktop uses, and gets the same automatic history (#1296): a local
+//! Git repository from the first word, with snapshots at the phone's save
+//! points. A chapter's earlier versions can be listed, read, and compared with
+//! the chapter as it is now. Nothing here touches the network.
 
 use std::path::Path;
 
+use quill_core::frontmatter;
 use quill_core::project::{sanitize_dir_name, Project, ProjectTemplate};
-use quill_core::vcs::{self, AutoHistory};
+use quill_core::vcs::{self, AutoHistory, Change};
 
 use crate::{ProjectForm, QuillError, QuillProject};
 
@@ -61,8 +63,86 @@ pub fn create_project(
     Ok(root.to_string_lossy().into_owned())
 }
 
+/// The most versions of one chapter the history list shows.
+const VERSION_LIMIT: usize = 500;
+
+/// One earlier version of a chapter: a commit that changed it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct VersionInfo {
+    /// The commit, to read the chapter back at this version.
+    pub rev: String,
+    /// Where it came from, in the commit's words: "Snapshot, 2 Nov 2026 at
+    /// 14:05", "Edits on iPhone", or the author's own message.
+    pub summary: String,
+    /// When, in seconds since the Unix epoch.
+    pub seconds: i64,
+}
+
+/// How a run of text changed between two versions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ChangeKind {
+    Same,
+    Added,
+    Removed,
+}
+
+/// A run of text in a comparison, in reading order.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ChangeRun {
+    pub kind: ChangeKind,
+    pub text: String,
+}
+
+/// Compare an earlier version of a chapter (`old`) with the chapter now
+/// (`new`), word by word: what was kept, added since, and cut since.
+#[uniffi::export]
+pub fn compare_versions(old: &str, new: &str) -> Vec<ChangeRun> {
+    vcs::compare_prose(old, new)
+        .into_iter()
+        .map(|(change, text)| ChangeRun {
+            kind: match change {
+                Change::Same => ChangeKind::Same,
+                Change::Added => ChangeKind::Added,
+                Change::Removed => ChangeKind::Removed,
+            },
+            text,
+        })
+        .collect()
+}
+
 #[uniffi::export]
 impl QuillProject {
+    /// Chapter `index`'s earlier versions, newest first (#1299): every commit
+    /// that changed its file. Empty for a book with no history of its own.
+    pub fn chapter_versions(&self, index: u32) -> Result<Vec<VersionInfo>, QuillError> {
+        let (root, file) = self.chapter_file(index)?;
+        if !vcs::is_repo(&root) {
+            return Ok(Vec::new());
+        }
+        let versions = vcs::file_log(&root, &file, VERSION_LIMIT)
+            .map_err(|message| QuillError::Io { message })?;
+        Ok(versions
+            .into_iter()
+            .map(|v| VersionInfo {
+                rev: v.rev,
+                summary: v.summary,
+                seconds: v.seconds,
+            })
+            .collect())
+    }
+
+    /// Chapter `index`'s prose as it was at version `rev`, with its front
+    /// matter split off as the editor shows it.
+    pub fn chapter_text_at(&self, index: u32, rev: &str) -> Result<String, QuillError> {
+        let (root, file) = self.chapter_file(index)?;
+        let text = vcs::show_file_at(&root, rev, &file)
+            .map_err(|message| QuillError::Io { message })?
+            .ok_or_else(|| QuillError::NotFound {
+                message: "That version doesn't have this chapter.".into(),
+            })?;
+        Ok(frontmatter::split(&text).1.to_string())
+    }
+
     /// Give the book version history if it has none (#1296): the same as the
     /// desktop does on open. Returns whether a history was started just now.
     /// It commits the whole book the first time, so call it off the main
@@ -85,6 +165,21 @@ impl QuillProject {
         }
         let commit = vcs::snapshot(&root).map_err(|message| QuillError::Io { message })?;
         Ok(commit.is_some())
+    }
+}
+
+impl QuillProject {
+    /// The project's folder and chapter `index`'s file, relative to it.
+    fn chapter_file(&self, index: u32) -> Result<(std::path::PathBuf, String), QuillError> {
+        let guard = self.lock();
+        let p = guard.get()?;
+        let index = index as usize;
+        if index >= p.manifest.chapters.len() {
+            return Err(QuillError::NotFound {
+                message: format!("There's no chapter {}.", index + 1),
+            });
+        }
+        Ok((p.root.clone(), p.chapter_file(index).to_string()))
     }
 }
 

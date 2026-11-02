@@ -131,6 +131,29 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
         textView.replace(target, withText: word)
     }
 
+    /// Replace the whole chapter with `text` as one edit (#1299), so a restore
+    /// reaches the core like typing and one Undo brings the chapter back.
+    ///
+    /// It edits the text storage directly rather than going through the
+    /// keyboard's path (`replace(_:withText:)`), which applies smart
+    /// punctuation and would curl the old version's straight quotes: a restore
+    /// brings back exactly what was there. The undo is registered here, and
+    /// undoing it registers the redo the same way.
+    func replaceAll(with text: String) {
+        let storage = textView.textStorage
+        let current = storage.string
+        guard current != text else { return }
+        textView.undoManager?.registerUndo(withTarget: self) { host in
+            MainActor.assumeIsolated { host.replaceAll(with: current) }
+        }
+        textView.undoManager?.setActionName("Restore")
+        storage.replaceCharacters(
+            in: NSRange(location: 0, length: storage.length),
+            with: NSAttributedString(string: text, attributes: ProseStyle.base))
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        textView.scrollRangeToVisible(textView.selectedRange)
+    }
+
     nonisolated func textStorage(
         _ storage: NSTextStorage, didProcessEditing mask: NSTextStorage.EditActions,
         range edited: NSRange, changeInLength delta: Int
