@@ -10,7 +10,8 @@ import SwiftUI
 /// the way it would on an iPad in portrait. Folding mid-sentence doesn't
 /// rebuild the chapter: its text view belongs to ``AppState`` (see
 /// ``ProseHost``), so it moves between layouts with its text, cursor,
-/// selection, undo history, and keyboard intact.
+/// selection, undo history, and keyboard intact. Half open and upright, the
+/// chapter is a two-page spread instead (``BookSpreadView``, #1284).
 struct ProjectView: View {
     @Environment(AppState.self) private var app
     @Environment(ProjectStore.self) private var store
@@ -22,9 +23,24 @@ struct ProjectView: View {
     @State private var compactColumn = NavigationSplitViewColumn.sidebar
 
     var body: some View {
+        // The reader sits under both layouts, so swapping them doesn't
+        // restart it (it would read the hinge as moving again).
+        ZStack {
+            PostureReader { app.posture = $0 }
+            if case .book = app.posture, let prose = app.prose {
+                BookSpreadView(host: prose, bookTitle: store.info?.title ?? "")
+                    .ignoresSafeArea(.container)
+            } else {
+                split
+            }
+        }
+    }
+
+    /// The chapter list beside (or, compact, before) the chapter.
+    private var split: some View {
         @Bindable var app = app
         let isStory = store.info?.form == .shortStory
-        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
+        return NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
             Group {
                 if isStory {
                     SceneSidebar(editor: app.prose?.editor)

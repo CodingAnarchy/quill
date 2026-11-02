@@ -8,7 +8,11 @@ final class QuillUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        XCUIDevice.shared.orientation = .portrait
+        // A half-open Duo is turned by ios/test-duo.sh, which knows which way
+        // is upright; XCTest's portrait isn't, on the Duo's inner screen.
+        if ProcessInfo.processInfo.environment["QUILL_DUO_POSE"] == nil {
+            XCUIDevice.shared.orientation = .portrait
+        }
         app.launch()  // a fresh launch: the last test may have left a chapter open
     }
 
@@ -67,7 +71,66 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["The Lamp Room"].isHittable)
     }
 
+    // MARK: - The iPhone Duo half open (#1284, #1285)
+
+    /// Half open and upright, the chapter is a two-page spread, one page on
+    /// each side of the crease; a swipe turns it, and "Add TODO" on a
+    /// selection marks the chapter (#1284).
+    func testHalfOpenAndUprightShowsTheChapterAsABook() throws {
+        try requirePose("book")
+        // Large type, so the sample's short chapter runs to several spreads.
+        app.terminate()
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        openSample()
+        let spread = app.scrollViews["BookSpread"]
+        if !spread.waitForExistence(timeout: 5) { openChapter("The Lamp Room") }
+        XCTAssertTrue(spread.waitForExistence(timeout: 10), "half open and upright should show the spread")
+        attach("book")
+
+        let crease = app.windows.firstMatch.frame.midX
+        let pages = app.textViews.matching(identifier: "BookPage")
+        let left = pages.element(boundBy: 0).frame
+        let right = pages.element(boundBy: 1).frame
+        XCTAssertLessThan(left.maxX, crease, "the left page should end before the crease")
+        XCTAssertGreaterThan(right.minX, crease, "the right page should start after the crease")
+        XCTAssertEqual(left.width, right.width, accuracy: 1)
+
+        // Turn to the second spread. Only the spread on screen is visible to
+        // accessibility, so page 3 appears once it's turned to.
+        let numbers = app.staticTexts.matching(identifier: "PageNumber")
+        let first = numbers.element(boundBy: 0).label
+        XCTAssertTrue(first.hasPrefix("Page 1 of "), "the first spread should start at page 1, not \(first)")
+        XCTAssertGreaterThan(Int(first.dropFirst("Page 1 of ".count)) ?? 0, 2, "large type should run past a spread")
+        spread.swipeLeft()
+        let pageThree = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Page 3 of'")).firstMatch
+        XCTAssertTrue(pageThree.waitForHittable(timeout: 5), "a swipe should turn to pages 3 and 4")
+        attach("turned")
+
+        // Mark a word on the left-hand page, which now holds only its own text.
+        let page = pages.element(boundBy: 0)
+        XCTAssertFalse((page.value as? String ?? "").hasPrefix("The stairs"), "page 3 shouldn't read as page 1")
+        // A long press selects a word; XCTest's double tap doesn't, on a page.
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).press(forDuration: 1.2)
+        let add = app.descendants(matching: .any)["Add TODO"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "a selection should offer Add TODO")
+        add.tap()
+        let marked = pages.matching(NSPredicate(format: "value CONTAINS 'xxx '")).firstMatch
+        XCTAssertTrue(marked.waitForExistence(timeout: 5), "the marker should be on the page")
+        XCTAssertTrue(marked.isHittable, "the spread should stay where the marker went")
+        attach("marked")
+    }
+
     // MARK: - Helpers
+
+    /// Skip unless `ios/test-duo.sh` put the Duo in `pose` for this run. No
+    /// API can fold the simulator, so the script does it and says so.
+    private func requirePose(_ pose: String) throws {
+        let current = ProcessInfo.processInfo.environment["QUILL_DUO_POSE"]
+        guard current == pose else {
+            throw XCTSkip("needs the iPhone Duo half open as a \(pose); ios/test-duo.sh runs it")
+        }
+    }
 
     /// Wide enough for a regular width, where the list sits beside the
     /// chapter: a Pro Max in landscape (about 950pt) or the unfolded Duo
@@ -96,5 +159,13 @@ final class QuillUITests: XCTestCase {
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
+    }
+}
+
+extension XCUIElement {
+    /// Wait for the element to be on screen and tappable, not just present.
+    func waitForHittable(timeout: TimeInterval) -> Bool {
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
+        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
 }

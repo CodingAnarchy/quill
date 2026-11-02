@@ -24,6 +24,9 @@ final class AppState {
     private(set) var syncStatus: String?
     /// Whether the TODO markers list is showing (#1237).
     var showingMarkers = false
+    /// How the iPhone Duo is held: open flat (or folded), or half open as a
+    /// book or a laptop.
+    var posture = Posture.flat
     /// The word lookup in progress (#1235), and the range it replaces.
     var lookup: (lookup: WordLookup, range: NSRange)?
     /// A message the author must see (work parked on a draft, a failed manual
