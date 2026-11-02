@@ -54,7 +54,13 @@ extension XCUIApplication {
             line: line)
         text.typeText(" \(word).")
 
+        // The app saves as it leaves the foreground. Kill it only once iOS
+        // has suspended it, which waits for that save's background task, or
+        // after 10 seconds, as the simulator doesn't always suspend. On a slow
+        // runner, killing right after Home can beat the save, which no person
+        // switching apps could do.
         XCUIDevice.shared.press(.home)
+        _ = wait(for: .runningBackgroundSuspended, timeout: 10)
         terminate()
         launch()
         openSample()
@@ -63,7 +69,10 @@ extension XCUIApplication {
         XCTAssertTrue(
             reopened.waitForExistence(timeout: UITest.patience), "the chapter should open again after relaunch",
             file: file, line: line)
-        XCTAssertTrue((reopened.value as? String ?? "").contains(word), "lost the typed word", file: file, line: line)
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", word), object: reopened)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [saved], timeout: UITest.patience), .completed, "lost the typed word", file: file,
+            line: line)
     }
 }
 
