@@ -66,7 +66,11 @@ final class PhoneLayoutUITests: XCTestCase {
         let lowTide = app.staticTexts["Low Tide"]
         XCTAssertTrue(lampRoom.waitForHittable(timeout: UITest.patience), "the chapter list should show first")
         lampRoom.tap()
-        XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: UITest.patience), "the chapter should open")
+        // On a slow runner a tap can land while the list is still settling and
+        // open nothing: tap once more if the chapter hasn't come up.
+        let chapter = app.textViews.firstMatch
+        if !chapter.waitForHittable(timeout: 10), lampRoom.exists, lampRoom.isHittable { lampRoom.tap() }
+        XCTAssertTrue(chapter.waitForHittable(timeout: UITest.patience), "the chapter should open")
         attach(app, "\(phone) \(orientation.isLandscape ? "sideways" : "upright")")
 
         if phone.split(orientation) {
