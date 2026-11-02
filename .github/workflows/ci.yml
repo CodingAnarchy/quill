@@ -214,6 +214,15 @@ jobs:
           path: ios/build/DerivedData/Build/Products/
       - name: UI tests
         run: ios/test-iphones.sh --only ${{ matrix.phones }} --no-build
+      # A failing phone's result bundle: its screenshots, the accessibility
+      # tree at the failure, and a screen recording. Open it in Xcode.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ios-ui-results-${{ matrix.group }}
+          path: ios/build/results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
   # single-threaded). Timing thresholds are tuned for a real machine; a shared CI
