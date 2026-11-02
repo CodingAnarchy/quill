@@ -90,8 +90,19 @@ for i in "${!phones[@]}"; do
   echo "== $phone"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
-  xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" test-without-building 2>&1 |
-    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  run_tests() {
+    xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" test-without-building 2>&1 |
+      tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  }
+  run_tests
+  # A simulator that hasn't settled can fail to launch the app or hand it a
+  # background assertion, failing tests that never ran. That's the runner, not
+  # the app: run the phone once more.
+  if ! grep -q "TEST EXECUTE SUCCEEDED" "$log" &&
+    grep -qE "Failed to launch|Failed to get background assertion|Timed out while launching" "$log"; then
+    echo "== $phone again (the simulator failed to launch the app)"
+    run_tests
+  fi
   # Free the runner for the next phone.
   xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
