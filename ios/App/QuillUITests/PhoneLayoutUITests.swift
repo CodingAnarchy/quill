@@ -36,8 +36,13 @@ final class PhoneLayoutUITests: XCTestCase {
     }
 
     /// Typing sideways is where the keyboard takes the most room; the words
-    /// are saved all the same.
-    func testTypedWordsSurviveAKillSideways() {
+    /// are saved all the same. It checks saving, not layout, and it's the
+    /// slowest check here, so it runs on one compact phone and one wide one
+    /// (the base iPhone and the Pro Max), not all five (#1310).
+    func testTypedWordsSurviveAKillSideways() throws {
+        guard phone.checksTypingSideways else {
+            throw XCTSkip("the sideways typing check runs on the base iPhone and the Pro Max")
+        }
         turn(.landscapeLeft)
         app.checkTypedWordsSurviveAKill()
     }
@@ -103,6 +108,12 @@ private struct Phone: CustomStringConvertible {
             return Phone(name: name, wide: false)
         }
         throw XCTSkip("no expected layout for \"\(name)\"")
+    }
+
+    /// The base iPhone and the Pro Max: one of each width for the sideways
+    /// typing check.
+    var checksTypingSideways: Bool {
+        name.hasSuffix(" Pro Max") || name.range(of: #"^iPhone \d+$"#, options: .regularExpression) != nil
     }
 
     /// Whether the list stays beside the chapter in `orientation`.
