@@ -49,24 +49,32 @@ final class QuillUITests: XCTestCase {
     /// On a wide screen the chapter list stays beside the chapter (#1234).
     func testAWideScreenShowsTheListBesideTheChapter() throws {
         openSample()
-        XCUIDevice.shared.orientation = .landscapeLeft
+        // The unfolded Duo is wide as it stands; a Pro Max gets there in
+        // landscape. The folded Duo doesn't rotate, so it stays narrow.
+        if !isWide { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
         openChapter("The Lamp Room")
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
-        // A regular width (a Pro Max in landscape, the unfolded Duo) keeps the
-        // list beside the chapter; a compact one shows one column.
-        let wide = app.windows.firstMatch.frame.width >= 900
-        if wide {
-            XCTAssertTrue(app.staticTexts["Low Tide"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.staticTexts["Low Tide"].isHittable, "the list should stay visible")
-            // Choosing another chapter keeps the split.
-            app.staticTexts["Low Tide"].tap()
-            XCTAssertTrue(app.staticTexts["The Lamp Room"].isHittable)
+        attach("wide")
+        guard isWide else {
+            let width = Int(app.windows.firstMatch.frame.width)
+            throw XCTSkip("a \(width)pt window shows one column: unfold the Duo, or use a Pro Max")
         }
-        attach("landscape")
-        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.staticTexts["Low Tide"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Low Tide"].isHittable, "the list should stay visible")
+        // Choosing another chapter keeps the split.
+        app.staticTexts["Low Tide"].tap()
+        XCTAssertTrue(app.staticTexts["The Lamp Room"].isHittable)
     }
 
     // MARK: - Helpers
+
+    /// Wide enough for a regular width, where the list sits beside the
+    /// chapter: a Pro Max in landscape (about 950pt) or the unfolded Duo
+    /// (about 950 by 670).
+    private var isWide: Bool {
+        app.windows.firstMatch.frame.width >= 900
+    }
 
     private func openSample() {
         let sample = app.buttons["SampleNovel"]

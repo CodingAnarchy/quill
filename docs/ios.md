@@ -71,9 +71,28 @@ simulator: they open the sample, check the chapter list, type into a chapter,
 background and kill the app, and find the words still there after a relaunch.
 On a wide screen they check that the list stays beside the chapter. Run them
 with
-`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone 17' test`
-(use an iPhone 17 Pro Max for the wide check, rotated to landscape by the
-test).
+`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone Duo' test`
+
+The iPhone Duo simulator needs Xcode 27.1 or later. Xcode 27 replaces the
+Simulator app with DeviceHub (Xcode → Open Developer Tool → DeviceHub), and
+the fold buttons appear when you hover over the device in DeviceHub's window.
+Neither `simctl` nor XCTest can fold it, so a plain `xcodebuild test` runs in
+whichever state the Duo is in. Folded (466 points wide), the wide check
+skips. Unfolded (about 950 by 670, wider than tall), it runs.
+
+`ios/test-duo.sh` runs the suite both ways: folded, then unfolded, failing if
+the wide check skips while unfolded. It presses DeviceHub's fold buttons with
+[devicehubctl](https://github.com/ChrisThoma/devicehubctl), a separate MIT
+tool. Build it with `swift build -c release`, put `.build/release/devicehubctl`
+on your `PATH`, and allow your terminal under System Settings → Privacy &
+Security → Accessibility. Keep the screen unlocked while it runs. DeviceHub
+can't be scripted on CI, so CI runs the Duo folded only, when its Xcode has
+one. On an older Xcode, use an iPhone 17 Pro Max for the wide check; the
+test rotates it to landscape.
+
+Don't fake a fold with `simctl io … screenConfig power`. It turns a screen
+off without folding the device, and SpringBoard crashes until the simulator
+is erased.
 
 QuillKit's tests run on macOS against the real Rust core, so they cover the
 whole path from Swift through UniFFI into `quill-core` without a simulator.
@@ -193,8 +212,9 @@ tree, so the new layout places the same view, with its text, cursor,
 selection, and undo history. The view also restores the keyboard when it
 moves. Nothing is reloaded or saved by the fold.
 
-Still to check on the real device: which horizontal size class the unfolded
-Duo reports. The layout assumes regular, as for an iPad.
+The unfolded Duo reports a regular horizontal size class, as an iPad does.
+The simulator confirms it (`ios/test-duo.sh`). What only the real phone can
+show is how typing feels and how the fold looks mid-motion.
 
 ## Sync
 
