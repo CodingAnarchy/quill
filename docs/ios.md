@@ -69,19 +69,32 @@ locally; CI still builds the real iOS app.
 With Xcode, the UI tests (`ios/App/QuillUITests`) drive the real app in a
 simulator: they open the sample, check the chapter list, type into a chapter,
 background and kill the app, and find the words still there after a relaunch.
-On a wide screen they check that the list stays beside the chapter. Run them
-with
-`xcodebuild -project ios/App/Quill.xcodeproj -scheme Quill -destination 'platform=iOS Simulator,name=iPhone Duo' test`
+
+`ios/test-iphones.sh` runs them on the newest base iPhone, e, Pro, Pro Max,
+and Air simulator the installed Xcode has, building once (#1289). This is what
+CI runs. `PhoneLayoutUITests` checks each phone upright and sideways:
+
+| | Upright | Sideways |
+|---|---|---|
+| Base iPhone, e, Pro | one column: the list, then the chapter, with a way back | one column |
+| Pro Max, Air | one column | the list beside the chapter |
+
+That follows iOS: only the widest phones get a regular width, and only
+sideways. The Air's split was measured in the simulator, not assumed. A new
+model in the 17 or 18 line shares one of these screens (the 18 Pro has the
+17 Pro's, the 18 Pro Max the 17 Pro Max's), and the script picks the newest of
+each kind. The tests tell the phone apart by its simulator's name. On these
+phones, a layout check that skips fails the run. The type-then-kill check runs
+sideways as well as upright.
 
 The iPhone Duo simulator needs Xcode 27.1 or later. Xcode 27 replaces the
 Simulator app with DeviceHub (Xcode → Open Developer Tool → DeviceHub), and
 the fold buttons appear when you hover over the device in DeviceHub's window.
-Neither `simctl` nor XCTest can fold it, so a plain `xcodebuild test` runs in
-whichever state the Duo is in. Folded (466 points wide), the wide check
-skips. Unfolded (about 950 by 670, wider than tall), it runs.
+Neither `simctl` nor XCTest can fold it, so the Duo's checks run only under
+`ios/test-duo.sh`, which tells them the pose.
 
 `ios/test-duo.sh` runs the suite in each pose: folded, unfolded (where the
-wide check must run, not skip), half open and upright (where the book check
+unfolded check must run, not skip), half open and upright (where the book check
 must run), and half open and sideways (where the laptop check must run). For
 the laptop check it turns off DeviceHub's Device → Keyboard → Simulate
 Hardware Keyboard, which otherwise keeps the on-screen keyboard away, and
@@ -93,9 +106,7 @@ inner screen. It presses DeviceHub's fold buttons with
 tool. Build it with `swift build -c release`, put `.build/release/devicehubctl`
 on your `PATH`, and allow your terminal under System Settings → Privacy &
 Security → Accessibility. Keep the screen unlocked while it runs. DeviceHub
-can't be scripted on CI, so CI runs the Duo folded only, when its Xcode has
-one. On an older Xcode, use an iPhone 17 Pro Max for the wide check; the
-test rotates it to landscape.
+can't be scripted on CI, so CI doesn't cover the Duo.
 
 Don't fake a fold with `simctl io … screenConfig power`. It turns a screen
 off without folding the device, and SpringBoard crashes until the simulator

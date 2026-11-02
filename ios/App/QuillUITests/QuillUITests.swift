@@ -1,7 +1,9 @@
 import XCTest
 
 /// End-to-end checks of the app in a simulator, against the bundled sample
-/// novel and the real Rust core.
+/// novel and the real Rust core. The layout on each iPhone size, upright and
+/// sideways, is checked in ``PhoneLayoutUITests``; the iPhone Duo's poses are
+/// checked here, with `ios/test-duo.sh` folding the phone.
 final class QuillUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -18,60 +20,38 @@ final class QuillUITests: XCTestCase {
 
     /// The sample opens with its chapters and the desktop's word counts.
     func testTheSampleNovelListsItsChapters() {
-        openSample()
+        app.openSample()
         XCTAssertTrue(app.staticTexts["The Lamp Room"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Low Tide"].exists)
         XCTAssertTrue(app.staticTexts["What the Fog Kept"].exists)
         let counts = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' words'"))
         XCTAssertGreaterThan(counts.count, 0)
-        attach("chapter list")
+        attach(app, "chapter list")
     }
 
     /// Words typed and then left by backgrounding and killing the app are there
     /// on the next launch (#1232).
     func testTypedWordsSurviveBackgroundingAndAKill() {
-        let word = "Zephyr\(Int.random(in: 1000...9999))"
-        openSample()
-        openChapter("Low Tide")
-        let text = app.textViews.firstMatch
-        XCTAssertTrue(text.waitForExistence(timeout: 10))
-        text.tap()
-        text.typeText(" \(word).")
-        attach("editing")
-
-        XCUIDevice.shared.press(.home)
-        app.terminate()
-        app.launch()
-        openSample()
-        openChapter("Low Tide")
-        let reopened = app.textViews.firstMatch
-        XCTAssertTrue(reopened.waitForExistence(timeout: 10))
-        let value = reopened.value as? String ?? ""
-        XCTAssertTrue(value.contains(word), "lost the typed word")
+        app.checkTypedWordsSurviveAKill()
     }
 
-    /// On a wide screen the chapter list stays beside the chapter (#1234).
-    func testAWideScreenShowsTheListBesideTheChapter() throws {
-        openSample()
-        // The unfolded Duo is wide as it stands; a Pro Max gets there in
-        // landscape. The folded Duo doesn't rotate, so it stays narrow.
-        if !isWide { XCUIDevice.shared.orientation = .landscapeLeft }
-        defer { XCUIDevice.shared.orientation = .portrait }
-        openChapter("The Lamp Room")
+    // MARK: - The iPhone Duo (#1234, #1284, #1285)
+
+    /// Unfolded and upright, the Duo keeps the chapter list beside the
+    /// chapter (#1234).
+    func testUnfoldedDuoShowsTheListBesideTheChapter() throws {
+        try requirePose("open")
+        app.openSample()
+        app.openChapter("The Lamp Room")
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
-        attach("wide")
-        guard isWide else {
-            let width = Int(app.windows.firstMatch.frame.width)
-            throw XCTSkip("a \(width)pt window shows one column: unfold the Duo, or use a Pro Max")
-        }
+        attach(app, "unfolded")
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, 900, "unfolded and upright is wide")
         XCTAssertTrue(app.staticTexts["Low Tide"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Low Tide"].isHittable, "the list should stay visible")
         // Choosing another chapter keeps the split.
         app.staticTexts["Low Tide"].tap()
         XCTAssertTrue(app.staticTexts["The Lamp Room"].isHittable)
     }
-
-    // MARK: - The iPhone Duo half open (#1284, #1285)
 
     /// Half open and upright, the chapter is a two-page spread, one page on
     /// each side of the crease; a swipe turns it, and "Add TODO" on a
@@ -82,11 +62,11 @@ final class QuillUITests: XCTestCase {
         app.terminate()
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        openSample()
+        app.openSample()
         let spread = app.scrollViews["BookSpread"]
-        if !spread.waitForExistence(timeout: 5) { openChapter("The Lamp Room") }
+        if !spread.waitForExistence(timeout: 5) { app.openChapter("The Lamp Room") }
         XCTAssertTrue(spread.waitForExistence(timeout: 10), "half open and upright should show the spread")
-        attach("book")
+        attach(app, "book")
 
         let crease = app.windows.firstMatch.frame.midX
         let pages = app.textViews.matching(identifier: "BookPage")
@@ -105,7 +85,7 @@ final class QuillUITests: XCTestCase {
         spread.swipeLeft()
         let pageThree = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Page 3 of'")).firstMatch
         XCTAssertTrue(pageThree.waitForHittable(timeout: 5), "a swipe should turn to pages 3 and 4")
-        attach("turned")
+        attach(app, "turned")
 
         // Mark a word on the left-hand page, which now holds only its own text.
         let page = pages.element(boundBy: 0)
@@ -118,7 +98,7 @@ final class QuillUITests: XCTestCase {
         let marked = pages.matching(NSPredicate(format: "value CONTAINS 'xxx '")).firstMatch
         XCTAssertTrue(marked.waitForExistence(timeout: 5), "the marker should be on the page")
         XCTAssertTrue(marked.isHittable, "the spread should stay where the marker went")
-        attach("marked")
+        attach(app, "marked")
     }
 
     /// Half open and sideways like a laptop, with the on-screen keyboard up,
@@ -126,13 +106,13 @@ final class QuillUITests: XCTestCase {
     /// it uses the whole screen again (#1285).
     func testHalfOpenAndSidewaysKeepsTheWritingAboveTheKeyboard() throws {
         try requirePose("laptop")
-        openSample()
+        app.openSample()
         let text = app.textViews.firstMatch
         if !text.waitForExistence(timeout: 5) {
             // The list slides over the chapter here: show it, then choose.
             let sidebar = app.buttons["Show Sidebar"]
             if sidebar.waitForExistence(timeout: 5) { sidebar.tap() }
-            openChapter("The Lamp Room")
+            app.openChapter("The Lamp Room")
         }
         XCTAssertTrue(text.waitForExistence(timeout: 10))
         let crease = app.windows.firstMatch.frame.midY
@@ -155,7 +135,7 @@ final class QuillUITests: XCTestCase {
         XCTAssertNotEqual(text.value as? String ?? "", before, "the keys should type into the chapter")
         XCTAssertTrue(keyboard.exists, "the on-screen keyboard should still be up")
         XCTAssertLessThanOrEqual(text.frame.maxY, crease + 1, "typing shouldn't push the writing onto the fold")
-        attach("laptop")
+        attach(app, "laptop")
 
         // With the keyboard put away, the chapter has the whole screen again.
         app.buttons["Hide the keyboard"].tap()
@@ -171,44 +151,7 @@ final class QuillUITests: XCTestCase {
     private func requirePose(_ pose: String) throws {
         let current = ProcessInfo.processInfo.environment["QUILL_DUO_POSE"]
         guard current == pose else {
-            throw XCTSkip("needs the iPhone Duo half open as a \(pose); ios/test-duo.sh runs it")
+            throw XCTSkip("needs the iPhone Duo in its \(pose) pose; ios/test-duo.sh runs it")
         }
-    }
-
-    /// Wide enough for a regular width, where the list sits beside the
-    /// chapter: a Pro Max in landscape (about 950pt) or the unfolded Duo
-    /// (about 950 by 670).
-    private var isWide: Bool {
-        app.windows.firstMatch.frame.width >= 900
-    }
-
-    private func openSample() {
-        let sample = app.buttons["SampleNovel"]
-        if sample.waitForExistence(timeout: 5) { sample.tap() }
-    }
-
-    private func openChapter(_ title: String) {
-        let row = app.staticTexts[title]
-        if !row.waitForExistence(timeout: 5) {
-            // Compact layout already showing a chapter: go back to the list.
-            app.navigationBars.buttons.element(boundBy: 0).tap()
-        }
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
-    }
-
-    private func attach(_ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-}
-
-extension XCUIElement {
-    /// Wait for the element to be on screen and tappable, not just present.
-    func waitForHittable(timeout: TimeInterval) -> Bool {
-        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
-        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
 }
