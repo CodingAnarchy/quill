@@ -29,8 +29,13 @@ enum TouchTrace {
     }
 
     /// Sees touches without taking part: it never recognizes, cancels, or
-    /// delays them, so the app behaves exactly as it does untraced.
+    /// delays them, so the app behaves exactly as it does untraced. It follows
+    /// each touch to its end, so the log shows how long it was held, whether
+    /// it ended or was cancelled, and which of the app's gestures were acting
+    /// on it then.
     private final class Recognizer: UIGestureRecognizer {
+        private var downAt: [ObjectIdentifier: TimeInterval] = [:]
+
         override init(target: Any? = nil, action: Selector? = nil) {
             super.init(target: target, action: action)
             cancelsTouchesInView = false
@@ -39,27 +44,45 @@ enum TouchTrace {
         }
 
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-            trace("began", touches)
-            state = .failed
+            for touch in touches {
+                downAt[ObjectIdentifier(touch)] = touch.timestamp
+                trace("began", touch)
+            }
         }
 
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-            trace("ended", touches)
+            finish("ended", touches)
         }
 
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-            trace("cancelled", touches)
+            finish("cancelled", touches)
+        }
+
+        override func reset() {
+            super.reset()
+            downAt = [:]
         }
 
         override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 
-        private func trace(_ phase: String, _ touches: Set<UITouch>) {
+        private func finish(_ phase: String, _ touches: Set<UITouch>) {
             for touch in touches {
-                let point = touch.location(in: nil)
-                let hit = touch.view.map { String(describing: type(of: $0)) } ?? "nothing"
-                TouchTrace.log.notice(
-                    "touch \(phase, privacy: .public) at \(Int(point.x)),\(Int(point.y)) on \(hit, privacy: .public)")
+                let held = downAt.removeValue(forKey: ObjectIdentifier(touch)).map { touch.timestamp - $0 } ?? -1
+                let acting = (touch.gestureRecognizers ?? [])
+                    .filter { $0 !== self && $0.state != .possible && $0.state != .failed }
+                    .map { "\(type(of: $0))(\($0.state.rawValue))" }
+                    .joined(separator: " ")
+                trace("\(phase) after \(Int(held * 1000))ms [\(acting)]", touch)
             }
+            if downAt.isEmpty { state = .failed }
+        }
+
+        private func trace(_ phase: String, _ touch: UITouch) {
+            let point = touch.location(in: nil)
+            let hit = touch.view.map { String(describing: type(of: $0)) } ?? "nothing"
+            TouchTrace.log.notice(
+                "touch \(phase, privacy: .public) at \(Int(point.x)),\(Int(point.y)) on \(hit, privacy: .public)")
         }
     }
 }
