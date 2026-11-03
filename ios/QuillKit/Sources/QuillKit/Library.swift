@@ -77,6 +77,13 @@ public final class Library {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
+    /// Delete the book in `entry` from this phone: its folder, chapters,
+    /// and history. A copy elsewhere (a Mac, a git remote) is untouched.
+    public func delete(_ entry: Entry) throws {
+        try FileManager.default.removeItem(at: entry.url)
+        refresh()
+    }
+
     /// Hand the core the saved token for `remote`'s host before a pull or sync.
     public func useToken(for remote: String?) {
         let token = remote.flatMap(tokenHost(for:)).flatMap(tokens.token(forHost:))

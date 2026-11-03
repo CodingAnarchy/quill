@@ -58,6 +58,15 @@ final class QuillUITests: XCTestCase {
             XCTWaiter().wait(for: [typed], timeout: UITest.patience), .completed,
             "the words should be in the chapter")
         attach(app, "new book")
+
+        // Delete it again, so the next test's launch doesn't reopen it.
+        app.openLibrary()
+        let row = app.buttons[title]
+        XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
+        row.swipeLeft()
+        app.buttons["Delete"].tap()
+        app.buttons["Delete Book"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
 
     // MARK: - The iPhone Duo (#1234, #1284, #1285)
