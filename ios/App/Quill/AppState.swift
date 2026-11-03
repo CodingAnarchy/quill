@@ -65,6 +65,7 @@ final class AppState {
     }
 
     func open(_ folder: URL) {
+        TouchTrace.note("open \(folder.lastPathComponent)")
         selectedChapter = nil
         prose = nil
         store.open(folder)
@@ -121,6 +122,7 @@ final class AppState {
 
     /// Back to the library.
     func closeProject() {
+        TouchTrace.note("close the project")
         selectedChapter = nil
         prose = nil
         store.close()
