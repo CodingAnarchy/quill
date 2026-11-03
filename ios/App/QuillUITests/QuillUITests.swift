@@ -41,14 +41,13 @@ final class QuillUITests: XCTestCase {
     func testANewBookOpensReadyToType() {
         let title = "Harbor \(Int.random(in: 1000...9999))"
         app.openLibrary()
-        app.buttons["New Book…"].tap()
         let field = app.textFields["NewBookTitle"]
+        app.buttons["New Book…"].tap(expecting: field)
         XCTAssertTrue(field.waitForExistence(timeout: UITest.patience), "the new book form should open")
         field.tap()
         field.typeText(title)
-        app.buttons["Create"].tap()
-
         let text = app.textViews.firstMatch
+        app.buttons["Create"].tap(expecting: text)
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "the first chapter should open")
         XCTAssertTrue(
             text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should be ready to type in")
@@ -65,7 +64,7 @@ final class QuillUITests: XCTestCase {
         let row = app.buttons[title]
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
         row.swipeLeft()
-        app.buttons["Delete"].tap()
+        app.buttons["Delete"].tap(expecting: app.buttons["Delete Book"])
         app.buttons["Delete Book"].tap()
         XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
@@ -89,12 +88,12 @@ final class QuillUITests: XCTestCase {
 
         let history = app.buttons["History"]
         XCTAssertTrue(history.waitForHittable(timeout: UITest.patience), "the chapter offers its history")
-        history.tap()
         let versions = app.cells
+        history.tap(expecting: versions.firstMatch)
         XCTAssertTrue(versions.element(boundBy: 1).waitForExistence(timeout: UITest.patience), "two versions at least")
         // The oldest version is the sample as it came, without the word.
-        versions.element(boundBy: versions.count - 1).tap()
         let old = app.textViews["VersionText"]
+        versions.element(boundBy: versions.count - 1).tap(expecting: old)
         XCTAssertTrue(old.waitForExistence(timeout: UITest.patience), "the version should open")
         let version = old.value as? String ?? ""
         XCTAssertFalse(version.contains(word), "the old version is from before the word")
@@ -102,10 +101,10 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue((old.value as? String ?? "").contains(word), "the comparison shows the word added since")
         attach(app, "comparison")
 
-        app.buttons["Restore This Version"].tap()
         let confirm = app.buttons["Restore"]
+        app.buttons["Restore This Version"].tap(expecting: confirm)
         XCTAssertTrue(confirm.waitForHittable(timeout: UITest.patience), "the restore asks to confirm")
-        confirm.tap()
+        confirm.tap(expecting: text)
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "back at the chapter")
         let restored = NSPredicate(format: "NOT (value CONTAINS %@)", word)
         XCTAssertEqual(
@@ -119,9 +118,10 @@ final class QuillUITests: XCTestCase {
         app.openSample()
         let export = app.buttons["Export"]
         XCTAssertTrue(export.waitForHittable(timeout: UITest.patience), "the book offers an export")
-        export.tap()
-        app.buttons["Manuscript (Word)"].tap()
+        let word = app.buttons["Manuscript (Word)"]
+        export.tap(expecting: word)
         let sheet = app.otherElements["ActivityListView"]
+        word.tap(expecting: sheet)
         XCTAssertTrue(sheet.waitForExistence(timeout: UITest.patience), "the share sheet should open")
         attach(app, "share sheet")
     }
