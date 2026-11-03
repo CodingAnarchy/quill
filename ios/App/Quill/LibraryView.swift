@@ -17,6 +17,7 @@ struct LibraryView: View {
                 // (for a power user) clone one from git.
                 Section {
                     Button("New Book…", systemImage: "square.and.pencil") {
+                        TouchTrace.note("new book")
                         showingNewBook = true
                     }
                 } footer: {
