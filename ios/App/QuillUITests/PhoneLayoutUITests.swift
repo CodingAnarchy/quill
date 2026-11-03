@@ -19,6 +19,7 @@ final class PhoneLayoutUITests: XCTestCase {
         phone = try Phone.current()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
+        app.launchEnvironment["QUILL_TRACE_TOUCHES"] = "1"  // see TouchTrace
         app.launch()
     }
 
