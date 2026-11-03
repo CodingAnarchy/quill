@@ -62,9 +62,13 @@ for kind in "${kinds[@]}"; do
 done
 
 # Start the first phone booting in the background, so it comes up while the
-# app builds or downloads (#1310). The rest boot one at a time, each as the
-# phone before it finishes: a CI runner booting three at once slowed to a
-# crawl and lost track of one of them.
+# app builds or downloads (#1310). Each of the rest starts booting as the
+# phone before it starts its tests, so no more than two are up at once: a CI
+# runner booting three at once slowed to a crawl and lost track of one of
+# them. A phone tested the moment it reports booted is still doing its first
+# boot's setup (search, the home screen, launch images) for minutes after,
+# and on CI that ran its tests at half speed and dropped its first test's
+# taps and queries (#1319, #1320, #1321).
 xcrun simctl boot "${udids[0]}" >/dev/null 2>&1 &
 [ "$boot_only" = 0 ] || exit 0
 
@@ -95,6 +99,9 @@ for i in "${!phones[@]}"; do
   echo "== $phone"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
+  if [ $((i + 1)) -lt "${#udids[@]}" ]; then
+    xcrun simctl boot "${udids[$((i + 1))]}" >/dev/null 2>&1 &
+  fi
   bundle="$RESULTS/${phone// /-}.xcresult"
   run_tests() {
     rm -rf "$bundle"
