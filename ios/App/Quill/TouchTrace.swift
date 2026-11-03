@@ -10,15 +10,43 @@ enum TouchTrace {
     static let log = Logger(subsystem: "dev.quill.Quill", category: "trace")
     static let isOn = ProcessInfo.processInfo.environment["QUILL_TRACE_TOUCHES"] == "1"
 
-    /// Watch the touches on every window the app has now.
+    @MainActor private static var watching = false
+
+    /// Watch the touches on every window the app has now, and the main
+    /// thread for stalls.
     @MainActor static func install() {
         guard isOn else { return }
+        if !watching {
+            watching = true
+            watchMainThread()
+        }
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             for window in scene.windows
             where !(window.gestureRecognizers ?? []).contains(where: { $0 is Recognizer }) {
                 window.addGestureRecognizer(Recognizer())
             }
         }
+    }
+
+    /// Log each time the main thread takes longer than a quarter second to
+    /// answer, and for how long, so a dropped touch can be told apart from a
+    /// busy app.
+    private static func watchMainThread() {
+        let watcher = Thread {
+            while true {
+                let sent = DispatchTime.now()
+                let answered = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { answered.signal() }
+                if answered.wait(timeout: sent + .milliseconds(250)) == .timedOut {
+                    answered.wait()
+                    let stalled = (DispatchTime.now().uptimeNanoseconds - sent.uptimeNanoseconds) / 1_000_000
+                    log.notice("main thread stalled for \(stalled)ms")
+                }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+        }
+        watcher.name = "TouchTrace main-thread watcher"
+        watcher.start()
     }
 
     /// Note an action the app took, so the log shows whether a tap that
@@ -73,7 +101,8 @@ enum TouchTrace {
                     .filter { $0 !== self && $0.state != .possible && $0.state != .failed }
                     .map { "\(type(of: $0))(\($0.state.rawValue))" }
                     .joined(separator: " ")
-                trace("\(phase) after \(Int(held * 1000))ms [\(acting)]", touch)
+                let shown = touch.view?.window == nil ? ", its view gone from the window" : ""
+                trace("\(phase) after \(Int(held * 1000))ms [\(acting)]\(shown)", touch)
             }
             if downAt.isEmpty { state = .failed }
         }

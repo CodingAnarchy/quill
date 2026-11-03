@@ -114,10 +114,12 @@ for i in "${!phones[@]}"; do
   fi
   # A failing phone's log goes beside its bundle: every touch the app
   # received and what it did (TouchTrace, which the UI tests turn on), and
-  # the app's errors, to tell a tap the app never got from one it ignored.
+  # the app's errors and the system's (SpringBoard and backboardd decide
+  # whether a touch is the system's), to tell a tap the app never got, or
+  # that the system took back, from one it ignored.
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
     xcrun simctl spawn "$udid" log show --start "$started" --style compact --info \
-      --predicate 'subsystem == "dev.quill.Quill" OR (process == "Quill" AND messageType >= 16)' \
+      --predicate 'subsystem == "dev.quill.Quill" OR (process IN {"Quill", "SpringBoard", "backboardd"} AND messageType >= 16 AND NOT eventMessage BEGINSWITH "IOSurfaceQuery")' \
       >"$RESULTS/${phone// /-}.log" 2>&1 || true
   fi
   # Free the runner for the next phone.
