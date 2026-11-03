@@ -158,6 +158,9 @@ open chapter and takes a snapshot, a commit dated like "Snapshot, 2 Nov 2026 at
 14:05". Nothing is sent anywhere: a snapshot is local, and only a book with a
 remote syncs.
 
+A book can be deleted from the library by swiping its row. That removes it, and
+its history, from this iPhone only.
+
 ## Version history on the phone
 
 From an open chapter, **History** (the clock button) lists the chapter's
@@ -180,9 +183,6 @@ The core does the work (`file_log`, `show_file_at`, and `compare_prose` in
 and `compare_versions`); the Swift side only lists and draws. A restore edits
 the text view's storage directly, not through the keyboard's path, so smart
 punctuation can't curl the old version's quotes.
-
-A book can be deleted from the library by swiping its row. That removes it, and
-its history, from this iPhone only.
 
 ## Getting a novel onto the phone
 
