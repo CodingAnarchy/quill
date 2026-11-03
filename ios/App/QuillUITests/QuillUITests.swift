@@ -65,7 +65,7 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
         row.swipeLeft()
         app.buttons["Delete"].tap(expecting: app.buttons["Delete Book"])
-        app.buttons["Delete Book"].tap()
+        app.buttons["Delete Book"].tapUntilGone()
         XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
 
