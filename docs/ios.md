@@ -158,6 +158,9 @@ open chapter and takes a snapshot, a commit dated like "Snapshot, 2 Nov 2026 at
 14:05". Nothing is sent anywhere: a snapshot is local, and only a book with a
 remote syncs.
 
+A book can be deleted from the library by swiping its row. That removes it, and
+its history, from this iPhone only.
+
 ## Getting a novel onto the phone
 
 For a power user, the phone can also reach the author's novel through the same

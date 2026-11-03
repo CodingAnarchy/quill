@@ -19,6 +19,11 @@ extension XCUIApplication {
     func openSample() {
         openLibrary()
         let sample = buttons["SampleNovel"]
+        // Books of the author's (or a test's) may push it down the list.
+        let list = collectionViews.firstMatch
+        for _ in 0..<5 where !(sample.waitForExistence(timeout: 2) && sample.isHittable) && list.exists {
+            list.swipeUp()
+        }
         XCTAssertTrue(sample.waitForExistence(timeout: UITest.patience), "the library should list the sample")
         sample.tap()
     }
