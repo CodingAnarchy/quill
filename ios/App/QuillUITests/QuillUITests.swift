@@ -59,7 +59,7 @@ final class QuillUITests: XCTestCase {
             "the words should be in the chapter")
         attach(app, "new book")
 
-        // Delete it again, so the library stays as the other tests expect.
+        // Delete it again, so the next test's launch doesn't reopen it.
         app.openLibrary()
         let row = app.buttons[title]
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
