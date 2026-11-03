@@ -147,8 +147,19 @@ extension XCUIElement {
     }
 
     /// Wait for the element to be on screen and tappable, not just present.
+    ///
+    /// It asks whether the element is hittable only once it has a frame:
+    /// XCTest fails the test outright when asked about one without
+    /// (`{{inf, inf}, {0, 0}}`), as a view coming back from under a closing
+    /// sheet briefly is (#1319).
     func waitForHittable(timeout: TimeInterval) -> Bool {
-        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
+        let hittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { element, _ in
+                guard let element = element as? XCUIElement, let frame = try? element.snapshot().frame,
+                    frame.origin.x.isFinite, frame.origin.y.isFinite, !frame.isEmpty
+                else { return false }
+                return element.isHittable
+            }, object: self)
         return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
 }
