@@ -65,7 +65,7 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
         row.swipeLeft()
         app.buttons["Delete"].tap(expecting: app.buttons["Delete Book"])
-        app.buttons["Delete Book"].tap()
+        app.buttons["Delete Book"].tapUntilGone()
         XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
 
@@ -104,7 +104,7 @@ final class QuillUITests: XCTestCase {
         let confirm = app.buttons["Restore"]
         app.buttons["Restore This Version"].tap(expecting: confirm)
         XCTAssertTrue(confirm.waitForHittable(timeout: UITest.patience), "the restore asks to confirm")
-        confirm.tap(expecting: text)
+        confirm.tapUntilGone()
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "back at the chapter")
         let restored = NSPredicate(format: "NOT (value CONTAINS %@)", word)
         XCTAssertEqual(
