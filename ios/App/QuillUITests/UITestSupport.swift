@@ -26,7 +26,7 @@ extension XCUIApplication {
             list.swipeUp()
         }
         XCTAssertTrue(sample.waitForExistence(timeout: UITest.patience), "the library should list the sample")
-        sample.tap()
+        sample.tap(expecting: buttons["Projects"])
     }
 
     /// Back to the library from wherever the last test left the app: a
@@ -51,7 +51,7 @@ extension XCUIApplication {
             navigationBars.buttons.element(boundBy: 0).tap()
         }
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the chapter list should show \"\(title)\"")
-        row.tap()
+        row.tap(expecting: textViews.firstMatch)
     }
 
     /// Whether `element` is on screen and tappable, without failing the
@@ -116,6 +116,22 @@ extension XCUIElement {
     func waitForKeyboardFocus(timeout: TimeInterval) -> Bool {
         let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: self)
         return XCTWaiter().wait(for: [focused], timeout: timeout) == .completed
+    }
+
+    /// Tap the element, and tap it once more if `result` doesn't come.
+    ///
+    /// The simulator sometimes drops a test's tap. XCTest sends each one
+    /// through a virtual touch screen, and when backboardd registers that
+    /// screen late it lets the touch down through ("unknown digitizer"), then
+    /// skips the rest ("didn't see a previous touch down"), and UIKit cancels
+    /// the touch. In the CI run that showed it (#1319), the app had the row on
+    /// screen and an idle main thread, and nothing happened. The second tap
+    /// comes only after the full wait, so a tap that was only slow isn't
+    /// doubled. Use it for a tap that opens something `result` shows.
+    func tap(expecting result: XCUIElement, timeout: TimeInterval = UITest.patience) {
+        tap()
+        if result.waitForHittable(timeout: timeout) || !(exists && isHittable) { return }
+        tap()
     }
 
     /// Wait for the element to be on screen and tappable, not just present.
