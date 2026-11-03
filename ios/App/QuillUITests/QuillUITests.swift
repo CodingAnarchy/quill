@@ -41,14 +41,13 @@ final class QuillUITests: XCTestCase {
     func testANewBookOpensReadyToType() {
         let title = "Harbor \(Int.random(in: 1000...9999))"
         app.openLibrary()
-        app.buttons["New Book…"].tap()
         let field = app.textFields["NewBookTitle"]
+        app.buttons["New Book…"].tap(expecting: field)
         XCTAssertTrue(field.waitForExistence(timeout: UITest.patience), "the new book form should open")
         field.tap()
         field.typeText(title)
-        app.buttons["Create"].tap()
-
         let text = app.textViews.firstMatch
+        app.buttons["Create"].tap(expecting: text)
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "the first chapter should open")
         XCTAssertTrue(
             text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should be ready to type in")
@@ -65,7 +64,7 @@ final class QuillUITests: XCTestCase {
         let row = app.buttons[title]
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
         row.swipeLeft()
-        app.buttons["Delete"].tap()
+        app.buttons["Delete"].tap(expecting: app.buttons["Delete Book"])
         app.buttons["Delete Book"].tap()
         XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
