@@ -10,6 +10,7 @@ final class QuillUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchEnvironment["QUILL_TRACE_TOUCHES"] = "1"  // see TouchTrace
         // A half-open Duo is turned by ios/test-duo.sh, which knows which way
         // is upright; XCTest's portrait isn't, on the Duo's inner screen.
         if ProcessInfo.processInfo.environment["QUILL_DUO_POSE"] == nil {

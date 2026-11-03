@@ -102,6 +102,7 @@ for i in "${!phones[@]}"; do
       -resultBundlePath "$bundle" test-without-building 2>&1 |
       tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
   }
+  started="$(date '+%Y-%m-%d %H:%M:%S')"
   run_tests
   # A simulator that hasn't settled can fail to launch the app or hand it a
   # background assertion, failing tests that never ran. That's the runner, not
@@ -111,10 +112,18 @@ for i in "${!phones[@]}"; do
     echo "== $phone again (the simulator failed to launch the app)"
     run_tests
   fi
+  # A failing phone's log goes beside its bundle: every touch the app
+  # received and what it did (TouchTrace, which the UI tests turn on), and
+  # the app's errors, to tell a tap the app never got from one it ignored.
+  if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
+    xcrun simctl spawn "$udid" log show --start "$started" --style compact --info \
+      --predicate 'subsystem == "dev.quill.Quill" OR (process == "Quill" AND messageType >= 16)' \
+      >"$RESULTS/${phone// /-}.log" 2>&1 || true
+  fi
   # Free the runner for the next phone.
   xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
   if grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
-    rm -rf "$bundle" # keep only what explains a failure
+    rm -rf "$bundle" "$RESULTS/${phone// /-}.log" # keep only what explains a failure
   else
     echo "   results: $bundle"
   fi
