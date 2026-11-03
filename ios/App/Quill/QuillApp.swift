@@ -12,7 +12,10 @@ struct QuillApp: App {
                 .environment(app)
                 .environment(app.store)
                 .environment(app.library)
-                .task { app.launch() }
+                .task {
+                    app.launch()
+                    TouchTrace.install()
+                }
         }
     }
 }
