@@ -34,6 +34,7 @@ struct ExportMenu: View {
     }
 
     private func run(_ kind: ExportKind) {
+        TouchTrace.note("export \(kind)")
         Task { await app.export(kind) }
     }
 }

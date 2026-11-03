@@ -126,7 +126,10 @@ struct VersionView: View {
                 .accessibilityIdentifier("VersionMode")
             }
             ToolbarItem(placement: .bottomBar) {
-                Button("Restore This Version") { confirmingRestore = true }
+                Button("Restore This Version") {
+                    TouchTrace.note("ask to restore")
+                    confirmingRestore = true
+                }
                     .disabled(text == nil)
             }
         }
