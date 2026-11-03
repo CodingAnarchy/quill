@@ -63,7 +63,7 @@ done
 
 # Start the first phone booting in the background, so it comes up while the
 # app builds or downloads (#1310). Each of the rest starts booting as the
-# phone before it starts its tests, so no more than two are up at once: a CI
+# phone before it starts running its tests, so no more than two are up at once: a CI
 # runner booting three at once slowed to a crawl and lost track of one of
 # them. A phone tested the moment it reports booted is still doing its first
 # boot's setup (search, the home screen, launch images) for minutes after,
@@ -86,7 +86,7 @@ if [ -z "$xctestrun" ]; then
 fi
 
 log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
+trap 'rm -f "$log" "$log.done"' EXIT
 # Each phone's result bundle (screenshots, the accessibility tree at a failure,
 # a screen recording) is kept in ios/build/results when its tests fail, so a CI
 # failure can be looked at rather than guessed at; CI uploads the folder.
@@ -99,9 +99,22 @@ for i in "${!phones[@]}"; do
   echo "== $phone"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
+  # The next phone boots once this one's tests are running: xcodebuild
+  # looking for this phone while another is booting gave up after six
+  # minutes, "Unable to find a device matching the provided destination".
+  : >"$log"
   if [ $((i + 1)) -lt "${#udids[@]}" ]; then
-    xcrun simctl boot "${udids[$((i + 1))]}" >/dev/null 2>&1 &
+    next="${udids[$((i + 1))]}"
+    (
+      until grep -q "^Test Suite '" "$log" 2>/dev/null; do
+        kill -0 "$$" 2>/dev/null || exit 0
+        [ -e "$log.done" ] && exit 0
+        sleep 2
+      done
+      xcrun simctl boot "$next" >/dev/null 2>&1
+    ) &
   fi
+  rm -f "$log.done"
   bundle="$RESULTS/${phone// /-}.xcresult"
   run_tests() {
     rm -rf "$bundle"
@@ -111,6 +124,7 @@ for i in "${!phones[@]}"; do
   }
   started="$(date '+%Y-%m-%d %H:%M:%S')"
   run_tests
+  touch "$log.done" # the tests never started: the next phone boots in its turn
   # A simulator that hasn't settled can fail to launch the app or hand it a
   # background assertion, failing tests that never ran. That's the runner, not
   # the app: run the phone once more.
