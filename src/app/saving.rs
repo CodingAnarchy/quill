@@ -461,6 +461,8 @@ impl App {
         // (#887). Just sets a flag — the actual push is decided and spawned off the
         // save path by the cadence hook, so a save never touches the network.
         self.mark_backup_on_save();
+        // And an automatic version-history snapshot, once the author pauses (#1296).
+        self.mark_snapshot_owed();
         // Only once nothing is dirty: if the author typed during the write, the
         // sidecar holds (or is getting) that newer text and must stay.
         if !self.edit_dirty() {

@@ -379,6 +379,23 @@ pub struct App {
     /// layered per project. Drives whether a save / the timed cadence transparently
     /// pushes to the remote. Off by default — no behavior change when disabled.
     pub(crate) backup: crate::config::BackupConfig,
+    /// Automatic version history (#1296): the `[history]` section, layered per
+    /// project. On by default.
+    pub(super) history: crate::config::HistoryConfig,
+    /// Starting the open book's history, on its own worker (#1296).
+    pub(super) history_start_task: Task<super::auto_history::StartOutcome>,
+    /// An automatic snapshot in flight, on its own worker (#1296).
+    pub(super) snapshot_task: Task<super::auto_history::SnapshotOutcome>,
+    /// Whether this book takes automatic snapshots: its history is Quill's (or
+    /// the author opted a hand-managed one in). Set once the start lands.
+    pub(super) auto_snapshots: bool,
+    /// Whether the editor starts automatic history for the books it opens, so a
+    /// book opened in place of this one gets it too. Set by
+    /// [`App::start_auto_history`]; tests that never call it never touch git.
+    pub(super) auto_history_armed: bool,
+    /// When the last save landed while a snapshot was owed (#1296); the
+    /// snapshot is taken once `[history] snapshot_after_mins` have passed.
+    pub(super) snapshot_owed_since: Option<std::time::Instant>,
     /// The in-flight automatic backup push (#887), on its own worker task so it
     /// never collides with the author's manual push/pull (`vc_task`). Polled each
     /// loop tick by [`App::poll_backup`].

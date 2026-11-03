@@ -64,6 +64,7 @@ mod analysis;
 mod annotations;
 mod archive;
 mod assistant;
+mod auto_history;
 mod auto_pair;
 mod autosave;
 mod backup;

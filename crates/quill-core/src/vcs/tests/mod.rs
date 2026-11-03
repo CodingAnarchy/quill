@@ -9,6 +9,7 @@
 //! push/pull plumbing, [`sync`] the two-way sync (#962)
 //! and its hand-resolved finalization (#963), and [`drafts`] branch-as-draft (#965).
 
+mod auto;
 mod clone;
 mod divert;
 mod drafts;

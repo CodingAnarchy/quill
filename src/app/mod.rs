@@ -44,6 +44,7 @@ mod api_keys;
 mod archive;
 mod assist;
 mod assistant;
+mod auto_history; // automatic version history: start on open, snapshot as the author works (#1296)
 mod backup;
 mod backup_browser;
 mod batch_update;
@@ -250,6 +251,12 @@ impl App {
             pending_sync_conflicts: false,
             pending_draft_merge: None,
             backup: crate::config::BackupConfig::load(),
+            history: crate::config::HistoryConfig::load(),
+            history_start_task: Task::idle(),
+            snapshot_task: Task::idle(),
+            auto_snapshots: false,
+            auto_history_armed: false,
+            snapshot_owed_since: None,
             backup_task: Task::idle(),
             backup_pending: false,
             last_backup_attempt: std::time::Instant::now(),

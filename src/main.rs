@@ -217,6 +217,9 @@ fn main() -> io::Result<()> {
     // a batch can take hours, so its results are polled and applied at launch (and on
     // idle) rather than in-session. Non-blocking — it just kicks off the poll worker.
     app.reconcile_batch_update();
+    // Give the book version history if it has none, and snapshot it from here on
+    // (#1296). Off the UI thread; the first-time note lands when it's done.
+    app.start_auto_history();
     // On the very first launch, show the dismissible quick-start card (#837).
     // After recovery, so a crash prompt takes precedence and the card waits for a
     // clean slate (it's a no-op when a prompt/overlay is already up).
@@ -254,6 +257,8 @@ fn main() -> io::Result<()> {
     app.persist_position();
     // The snapshot and position go through the background writer too.
     app.settle_saves();
+    // With every save landed, snapshot the book's version history (#1296).
+    app.snapshot_on_close();
     // Drop the TUI (leaving the alternate screen, restoring the terminal) before
     // printing the recap, so it appears on the normal screen the author returns to.
     drop(tui);
@@ -580,6 +585,8 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         app.tick_autosave(); // idle-timer autosave, when enabled (#409) — handed to the writer
         app.tick_backup(); // automatic off-site backup on its cadence, when enabled (#887)
         app.tick_local_backup(); // scheduled local archive on its cadence, when enabled (#888)
+        app.tick_auto_history(); // automatic version-history snapshot after a pause (#1296)
+        app.poll_auto_history(); // land a started history or a finished snapshot (#1296)
         app.poll_assistant(); // advance the assistant pane's tool-use loop (#307)
         app.poll_backup(); // surface a finished automatic backup (worker thread) (#887)
         app.poll_local_backup(); // surface a finished local archive (worker thread) (#888)

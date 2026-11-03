@@ -17,11 +17,31 @@ history / diff / restore / remote), #587 (the history view), #833/#966
 
 ## The model
 
-Version control is **opt-in and per project**. A project is an ordinary folder of
-chapter files until you initialize it; from then on Quill keeps a normal Git
-repository in the project's `.git` directory alongside your chapters, and every
-operation below reads and writes that repository. Nothing leaves your machine
-until you set a remote and push, sync, or turn on automatic backup.
+Every book gets version history automatically (#1296). The first time Quill opens
+a book that has none, it starts one: a normal Git repository in the project's
+`.git` directory, with the book as it stood as the first snapshot, and a one-time
+note in the status bar. From then on Quill takes snapshots on its own, a few
+minutes after you stop writing (5 by default) and whenever you close the book, so
+**History** and **Restore** always have something to offer, though you never
+commit. Snapshots happen off the typing path, so they never slow the editor.
+
+Automatic history is local. Nothing leaves your machine until you deliberately
+**connect a remote** (Set remote) and push, sync, or turn on automatic backup;
+that part is unchanged and stays a step you choose.
+
+Quill only snapshots a history it started:
+
+- **A book you already manage with Git** is left alone. Quill adds no commits to a
+  history it didn't start, unless you set `existing_repos = true` under
+  [`[history]`](configuration.md#history--automatic-version-history).
+- **A book inside a larger repository** (a folder of books under one repo, say)
+  isn't given a second, nested history.
+- **Turning it off**: Settings → **Automatic version history**, or
+  `automatic = false` under `[history]`. The history already taken stays.
+
+Quill marks a history it started with a `quill.autohistory` key in the
+repository's own `.git/config`, which is never committed. Every operation below
+reads and writes the same repository, whether Quill started it or you did.
 
 Where the state lives, in Git terms you don't have to think about:
 
@@ -39,7 +59,8 @@ readable by any Git tool — but you never need one; everything here is in-app.
 Everything starts from one menu. Press **`Ctrl-V`** ("version control") to open
 it. What it lists depends on where the project is:
 
-- **Not under version control** — a single **Initialize** entry. Choose it and
+- **Not under version control** (automatic history is off, or the book is
+  inside another repository) — a single **Initialize** entry. Choose it and
   Quill puts the project under version control with a sensible `.gitignore` (it
   never clobbers an existing repository or ignore file). Editor scratch — the
   `.quill/` recovery state, the `unused/` folder, `export/` — stays out of

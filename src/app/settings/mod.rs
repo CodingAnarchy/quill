@@ -73,6 +73,14 @@ impl App {
                 Command::EditSettingText(SettingTextKnob::Stopwords),
             ),
             PaletteItem::new(
+                "Automatic version history",
+                format!(
+                    "Currently: {}. Snapshots the book as you write; nothing is sent anywhere",
+                    on_off(self.history.automatic)
+                ),
+                Command::OpenSettingPicker(SettingPicker::AutoHistory),
+            ),
+            PaletteItem::new(
                 "Theme colors…",
                 "Override individual [theme] colors, applied live",
                 Command::OpenSettingPicker(SettingPicker::ThemeColors),
@@ -93,6 +101,13 @@ impl App {
             SettingPicker::Bool(knob) => self.open_setting_bool_picker(knob),
             SettingPicker::ThemeColors => self.open_setting_theme_colors(),
             SettingPicker::KeyBindings => self.open_setting_key_bindings(),
+            SettingPicker::AutoHistory => self.open_palette(
+                "Automatic version history",
+                vec![
+                    PaletteItem::new("On", "", Command::SetAutoHistory(true)),
+                    PaletteItem::new("Off", "", Command::SetAutoHistory(false)),
+                ],
+            ),
         }
     }
 
@@ -185,6 +200,17 @@ impl App {
             &literal,
             &format!("{} {}.", knob.label(), on_off(on)),
         );
+    }
+
+    /// Turn automatic version history on or off, `[history] automatic` (#1296).
+    /// Off stops the snapshots at once; the history already taken stays.
+    pub(crate) fn set_auto_history(&mut self, on: bool) {
+        let note = if on {
+            "Automatic version history on."
+        } else {
+            "Automatic version history off. The history so far is kept."
+        };
+        self.persist_config_setting("history", "automatic", &on.to_string(), note);
     }
 
     /// Set the `[theme] name` (#592): `index` indexes [`THEME_NAMES`]. Spliced +

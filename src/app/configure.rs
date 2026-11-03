@@ -161,6 +161,7 @@ impl App {
         let (theme, _) = config::load_theme();
         self.theme = theme;
         theme::set_current(theme);
+        self.apply_history_config();
         // The resting editor mode follows whether Vim mode is now on; the confirm
         // prompt's caller closes to it after this returns.
     }
@@ -205,6 +206,12 @@ pub fn settings_vocab() -> Vec<(String, String)> {
         ));
     }
     v.push((
+        "history.automatic".to_string(),
+        "Automatic version history: snapshot the book as you write, kept on this computer \
+         (true/false)"
+            .to_string(),
+    ));
+    v.push((
         "dictionary.add".to_string(),
         "Add a word — an invented name, place, or coined term — to the project's custom spell-check \
          dictionary so it stops being flagged (one word; repeat the key for several)"
@@ -225,6 +232,9 @@ pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
     match key {
         _ if SettingBool::from_key(key).is_some() => {
+            parse_bool(value).map_or_else(|| bad("expected true/false"), |b| Ok(b.to_string()))
+        }
+        "history.automatic" => {
             parse_bool(value).map_or_else(|| bad("expected true/false"), |b| Ok(b.to_string()))
         }
         "editor.column_width" => match value.trim().parse::<u16>() {
