@@ -134,6 +134,18 @@ extension XCUIElement {
         tap()
     }
 
+    /// Tap a button that closes what it's on (a confirmation's), and tap it
+    /// once more if it's still there after the full wait: the same dropped
+    /// tap as `tap(expecting:)`. What's behind a closing dialog can't be
+    /// waited on instead, as XCTest fails a test that asks whether an element
+    /// is hittable while it has no frame, which a view coming back from
+    /// under a sheet briefly does.
+    func tapUntilGone(timeout: TimeInterval = UITest.patience) {
+        tap()
+        if waitForNonExistence(timeout: timeout) { return }
+        tap()
+    }
+
     /// Wait for the element to be on screen and tappable, not just present.
     func waitForHittable(timeout: TimeInterval) -> Bool {
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
