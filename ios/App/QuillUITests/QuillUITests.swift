@@ -88,12 +88,12 @@ final class QuillUITests: XCTestCase {
 
         let history = app.buttons["History"]
         XCTAssertTrue(history.waitForHittable(timeout: UITest.patience), "the chapter offers its history")
-        history.tap()
         let versions = app.cells
+        history.tap(expecting: versions.firstMatch)
         XCTAssertTrue(versions.element(boundBy: 1).waitForExistence(timeout: UITest.patience), "two versions at least")
         // The oldest version is the sample as it came, without the word.
-        versions.element(boundBy: versions.count - 1).tap()
         let old = app.textViews["VersionText"]
+        versions.element(boundBy: versions.count - 1).tap(expecting: old)
         XCTAssertTrue(old.waitForExistence(timeout: UITest.patience), "the version should open")
         let version = old.value as? String ?? ""
         XCTAssertFalse(version.contains(word), "the old version is from before the word")
@@ -101,10 +101,10 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue((old.value as? String ?? "").contains(word), "the comparison shows the word added since")
         attach(app, "comparison")
 
-        app.buttons["Restore This Version"].tap()
         let confirm = app.buttons["Restore"]
+        app.buttons["Restore This Version"].tap(expecting: confirm)
         XCTAssertTrue(confirm.waitForHittable(timeout: UITest.patience), "the restore asks to confirm")
-        confirm.tap()
+        confirm.tap(expecting: text)
         XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "back at the chapter")
         let restored = NSPredicate(format: "NOT (value CONTAINS %@)", word)
         XCTAssertEqual(
