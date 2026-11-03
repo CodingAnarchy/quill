@@ -183,7 +183,7 @@ jobs:
           -derivedDataPath ios/build/DerivedData
           CODE_SIGNING_ALLOWED=NO build
       # Just what the phone jobs run: the simulator build and its .xctestrun.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: ios-ui-tests
           path: |
@@ -214,7 +214,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Start the simulator
         run: ios/test-iphones.sh --only ${{ matrix.phones }} --boot
-      - uses: actions/download-artifact@v4
+      # v4, forced onto Node 24, stopped partway through the download and
+      # still passed, leaving the build without its .xctestrun (#1315). The
+      # Node 24 releases fail on a hash mismatch instead.
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ios-ui-tests
           path: ios/build/DerivedData/Build/Products/
@@ -222,7 +225,7 @@ jobs:
         run: ios/test-iphones.sh --only ${{ matrix.phones }} --no-build
       # A failing phone's result bundle: its screenshots, the accessibility
       # tree at the failure, and a screen recording. Open it in Xcode.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: failure()
         with:
           name: ios-ui-results-${{ matrix.group }}
