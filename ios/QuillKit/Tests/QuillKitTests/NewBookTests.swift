@@ -56,6 +56,16 @@ import Testing
         let log = try git("log", "--format=%s", in: folder)
         #expect(log.hasPrefix("Snapshot, "))
     }
+
+    @Test func aBookIsDeletedFromThePhone() async throws {
+        let root = try scratch("delete")
+        let library = Library(folder: root, tokens: MemoryTokenStore())
+        _ = try await library.create(title: "Gone", form: .novel)
+        let entry = try #require(library.projects.first)
+        try library.delete(entry)
+        #expect(library.projects.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: entry.url.path))
+    }
 }
 
 /// A chapter's earlier versions on the phone (#1299).
@@ -84,16 +94,6 @@ import Testing
 
         let runs = compareVersions(old: "The sea came in.", new: "The sea went out.")
         #expect(runs.map(\.kind) == [.same, .removed, .added])
-    }
-
-    @Test func aBookIsDeletedFromThePhone() async throws {
-        let root = try scratch("delete")
-        let library = Library(folder: root, tokens: MemoryTokenStore())
-        _ = try await library.create(title: "Gone", form: .novel)
-        let entry = try #require(library.projects.first)
-        try library.delete(entry)
-        #expect(library.projects.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: entry.url.path))
     }
 }
 
