@@ -118,9 +118,10 @@ final class QuillUITests: XCTestCase {
         app.openSample()
         let export = app.buttons["Export"]
         XCTAssertTrue(export.waitForHittable(timeout: UITest.patience), "the book offers an export")
-        export.tap()
-        app.buttons["Manuscript (Word)"].tap()
+        let word = app.buttons["Manuscript (Word)"]
+        export.tap(expecting: word)
         let sheet = app.otherElements["ActivityListView"]
+        word.tap(expecting: sheet)
         XCTAssertTrue(sheet.waitForExistence(timeout: UITest.patience), "the share sheet should open")
         attach(app, "share sheet")
     }
