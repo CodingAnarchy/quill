@@ -1,0 +1,43 @@
+title = "The Lamp Room"
+subtitle = "A Novel"
+author = "Mara Vey"
+epigraph = "We are all in the gutter, but some of us are looking at the stars."
+epigraph_by = "Oscar Wilde"
+isbn = "9781402894626"
+publisher = "Harbor Press"
+pub_date = "2026-11-02"
+language = "en"
+rights = "Copyright 2026 Mara Vey. All rights reserved."
+
+[style]
+cover_image = "cover.png"
+cover_image_alt = "A lighthouse against a dark blue sky"
+scene_break = "* * *"
+
+[[parts]]
+name = "The Shore"
+chapters = [1, 2]
+
+[[parts]]
+name = "The Sea"
+chapters = [3, 3]
+
+[[chapters]]
+title = "Dedication"
+file = "dedication.md"
+
+[[chapters]]
+title = "Low Tide"
+file = "low-tide.md"
+
+[[chapters]]
+title = "The Ledger"
+file = "ledger.md"
+
+[[chapters]]
+title = "Letters from Abroad"
+file = "abroad.md"
+
+[[chapters]]
+title = "Acknowledgments"
+file = "acknowledgments.md"

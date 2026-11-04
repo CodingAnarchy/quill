@@ -1,0 +1,8 @@
+form = "short-story"
+title = "Salt Wind"
+author = "Mara Vey"
+language = "en"
+
+[[chapters]]
+title = "Salt Wind"
+file = "salt-wind.md"

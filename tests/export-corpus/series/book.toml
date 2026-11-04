@@ -1,0 +1,22 @@
+title = "The Harbor Books"
+author = "Mara Vey"
+language = "en"
+
+[[books]]
+title = "The Lamp Room"
+
+[[books.chapters]]
+title = "Low Tide"
+file = "one/low-tide.md"
+
+[[books.chapters]]
+title = "The Ledger"
+file = "one/ledger.md"
+
+[[books]]
+title = "The Far Light"
+subtitle = "Book Two"
+
+[[books.chapters]]
+title = "Kobe"
+file = "two/kobe.md"
