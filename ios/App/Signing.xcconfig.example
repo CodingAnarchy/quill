@@ -2,3 +2,7 @@
 // docs/ios.md, "Signing and TestFlight".
 QUILL_BUNDLE_ID = com.yourname.quill
 QUILL_TEAM_ID = ABCDE12345
+// With a paid Apple Developer Program team, sync books with the Mac through
+// iCloud Drive (#1298). Leave unset with the free personal team, which can't
+// sign iCloud.
+// QUILL_ENTITLEMENTS = Quill/Quill.entitlements

@@ -197,6 +197,63 @@ missing, the export stops and names the chapter, with what to do about it.
 It's the desktop's own export code (see `docs/export.md`), so the file is the
 same as the desktop's for the same book and settings.
 
+## iPhone and Mac through iCloud Drive
+
+With iCloud on, a book started on the phone goes in Quill's iCloud Drive folder
+(#1298), which the Files app shows as **Quill** and the Mac shows at
+`~/Library/Mobile Documents/iCloud~<bundle id>/Documents`. Desktop Quill opens
+the book from there like any other folder: `quill "~/Library/Mobile
+Documents/iCloud~dev~quill~Quill/Documents/The Lamp Room"`. With iCloud off,
+books stay on the phone. The library lists both.
+
+**Edits reach the other device on their own.** On the phone, the open chapter
+has a file presenter that hears iCloud deliver a change, and the app also checks
+when it comes back to the foreground. The desktop checks the open chapter on
+its idle pass. Either way, an open chapter with no unsaved words shows the new
+version at once, with a note.
+
+**No words are lost on a conflict.** If the same chapter changed on both
+devices before they synced, both versions are kept: the other one is written
+beside the chapter as `<name> 2.md` (iCloud's own naming, which the desktop and
+the phone also use when a change arrives under unsaved words), and the app
+names the chapter that needs a look. Open the copy, take what you want from it,
+and delete it.
+
+**Each device keeps its own history.** iCloud delivers files one at a time and
+out of order, which corrupts a Git repository, so nothing Git-related goes in
+the shared folder. Each device keeps the book's history in its own storage
+(`<data dir>/histories/<id>.git`, keyed by an `id` Quill writes into
+`book.toml`), with the iCloud folder as its working tree. A change from the
+other device goes into this device's history as a snapshot when it arrives, so
+either side can restore an earlier version, and snapshots name the device they
+came from ("Snapshot on iPhone", "Snapshot on Mac").
+
+**Neither device locks the other out.** The editor's own state (the project
+lock, crash recovery, writing stats) lives in `.quill.nosync/` in a synced book
+rather than `.quill/`; iCloud never syncs a `.nosync` item.
+
+A synced book can still connect a git remote, for a power user who wants both:
+the remote belongs to each device's history.
+
+### Turning iCloud on
+
+iCloud needs a paid Apple Developer Program team; the free personal team can't
+sign it. With one, add `QUILL_ENTITLEMENTS = Quill/Quill.entitlements` to
+`ios/App/Signing.xcconfig` (see `Signing.xcconfig.example`), enable iCloud
+(CloudKit not needed, just iCloud Documents) for the app ID in the developer
+portal, and rebuild. The container is `iCloud.<bundle id>`. Without the
+entitlement, `FileManager.url(forUbiquityContainerIdentifier:)` returns nothing
+and the app keeps books on the phone, so the free team's builds are unchanged.
+
+What's verified without a paid team: the core's separate histories, per-device
+state, conflict copies, and change detection (Rust tests), the phone's handling
+with a plain folder standing in for iCloud (QuillKit tests), and the desktop
+picking up changes (app tests). What needs the paid team, checked by hand once:
+a book created on the phone appearing on the Mac in Finder and in desktop
+Quill; an edit on each side reaching the other with the chapter open; a
+conflicting edit made with both devices offline, kept as a copy on reconnect;
+and the history on each side listing the other's changes.
+
 ## Getting a novel onto the phone
 
 For a power user, the phone can also reach the author's novel through the same

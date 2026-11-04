@@ -7,6 +7,7 @@
 //! conflicting one changes nothing and returns the per-chapter [`ChapterConflict`]s
 //! for the resolution UI to resolve and [`finalize_sync`] to land.
 
+use crate::vcs::local::open_repo;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -89,7 +90,7 @@ pub fn sync(root: &Path) -> Result<SyncOutcome, String> {
 /// [`sync`], also returning the remote commit it fetched, which the phone's
 /// draft diversion (#1233) resets to after parking its own work on a draft.
 pub(super) fn sync_fetched(root: &Path) -> Result<(SyncOutcome, git2::Oid), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
 
     // Same guard as pull: the merge/fast-forward checkout force-writes the tree, so
     // refuse before touching the network if there are uncommitted edits to lose.
@@ -396,7 +397,7 @@ pub fn finalize_sync(
     root: &Path,
     resolutions: &BTreeMap<String, String>,
 ) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     if is_dirty(&repo)? {
         return Err(DIRTY_PULL.to_string());
     }

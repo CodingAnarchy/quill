@@ -40,7 +40,16 @@ Quill only snapshots a history it started:
   `automatic = false` under `[history]`. The history already taken stays.
 
 Quill marks a history it started with a `quill.autohistory` key in the
-repository's own `.git/config`, which is never committed. Every operation below
+repository's own `.git/config`, which is never committed.
+
+A book in **iCloud Drive** (a synced folder, #1298) is different in one way:
+its repository isn't in the book folder, because iCloud would sync the `.git`
+folder file by file and corrupt it. Each device keeps the book's history in its
+own data directory (`~/.local/share/quill/histories/<id>.git` on the desktop),
+keyed by an `id` written into `book.toml`, with the iCloud folder as the
+working tree. Each device's history includes the other's edits, as snapshots
+when they arrive, and names the device each snapshot came from. See
+[`docs/ios.md`](ios.md#iphone-and-mac-through-icloud-drive). Every operation below
 reads and writes the same repository, whether Quill started it or you did.
 
 Where the state lives, in Git terms you don't have to think about:

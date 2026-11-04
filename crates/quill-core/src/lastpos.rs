@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic;
 
-const DIR: &str = ".quill";
 const FILE: &str = "position.json";
 
 /// The last editing position: the active chapter's file (relative to the project
@@ -31,7 +30,7 @@ pub struct Position {
 }
 
 fn path(root: &Path) -> PathBuf {
-    root.join(DIR).join(FILE)
+    crate::synced::state_dir(root).join(FILE)
 }
 
 /// Write the position sidecar (best-effort), creating `.quill/` if needed.
@@ -47,7 +46,7 @@ pub fn write(root: &Path, pos: &Position) -> std::io::Result<()> {
     let json = serde_json::to_string(pos).map_err(std::io::Error::other)?;
     // Only `.quill/` itself: a background write that lands after the project
     // folder was renamed or removed fails instead of recreating it.
-    atomic::create_leaf_dir(&root.join(DIR))?;
+    atomic::create_leaf_dir(&crate::synced::state_dir(root))?;
     atomic::write_hint(&path(root), json.as_bytes())
 }
 
@@ -89,7 +88,7 @@ mod tests {
     #[test]
     fn read_is_none_for_a_corrupt_sidecar() {
         let dir = tmpdir("corrupt");
-        fs::create_dir_all(dir.join(DIR)).unwrap();
+        fs::create_dir_all(dir.join(crate::synced::STATE_DIR)).unwrap();
         fs::write(path(&dir), "{ not json").unwrap();
         assert_eq!(read(&dir), None);
     }

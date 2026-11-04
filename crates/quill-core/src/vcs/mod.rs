@@ -26,7 +26,9 @@ pub use local::{
     set_tag_message, show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
 };
 pub use local::{compare_prose, file_log, Change, FileVersion};
-pub use local::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
+pub use local::{
+    is_auto_history, snapshot, snapshot_from, snapshot_message, start_auto_history, AutoHistory,
+};
 pub use remote::{
     clone, finalize_sync, folder_name, pull, push, remote_url, set_remote, set_token, sync,
     sync_or_divert, ChapterConflict, DeviceSync, RemoteError, RemoteErrorKind, PHONE_DRAFT_PREFIX,

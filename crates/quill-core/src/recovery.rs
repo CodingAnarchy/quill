@@ -20,7 +20,6 @@ use crate::atomic;
 
 pub mod writer;
 
-const DIR: &str = ".quill";
 const FILE: &str = "recovery.json";
 
 /// One chapter's unsaved prose captured for recovery: its file (relative to the
@@ -86,7 +85,7 @@ impl Recovery {
 }
 
 fn path(root: &Path) -> PathBuf {
-    root.join(DIR).join(FILE)
+    crate::synced::state_dir(root).join(FILE)
 }
 
 /// Write the sidecar (best-effort), creating `.quill/` if needed. Goes through
@@ -100,7 +99,7 @@ fn path(root: &Path) -> PathBuf {
 /// renamed or removed fails instead of resurrecting the folder.
 pub fn write(root: &Path, rec: &Recovery) -> io::Result<()> {
     let json = serde_json::to_string(rec).map_err(io::Error::other)?;
-    atomic::create_leaf_dir(&root.join(DIR))?;
+    atomic::create_leaf_dir(&crate::synced::state_dir(root))?;
     atomic::write(&path(root), json.as_bytes())
 }
 
@@ -175,7 +174,7 @@ mod tests {
     #[test]
     fn a_legacy_single_chapter_sidecar_still_parses() {
         let dir = tmpdir("legacy");
-        fs::create_dir_all(dir.join(DIR)).unwrap();
+        fs::create_dir_all(dir.join(crate::synced::STATE_DIR)).unwrap();
         // The exact bytes the pre-#566 sidecar wrote (no `extra` field).
         fs::write(
             path(&dir),
@@ -197,7 +196,7 @@ mod tests {
     #[test]
     fn read_is_none_for_a_corrupt_sidecar() {
         let dir = tmpdir("corrupt");
-        fs::create_dir_all(dir.join(DIR)).unwrap();
+        fs::create_dir_all(dir.join(crate::synced::STATE_DIR)).unwrap();
         fs::write(path(&dir), "{ not json").unwrap();
         assert_eq!(read(&dir), None);
     }
@@ -218,7 +217,7 @@ mod tests {
         // The sidecar itself must be the only file in `.quill/` — no fixed-name
         // (`recovery.json.tmp`) nor PID-keyed (`.recovery.json.<pid>.tmp`) temp
         // staged by the atomic path may linger after a clean write.
-        let strays: Vec<_> = fs::read_dir(dir.join(DIR))
+        let strays: Vec<_> = fs::read_dir(dir.join(crate::synced::STATE_DIR))
             .unwrap()
             .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))

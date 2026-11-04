@@ -38,6 +38,8 @@ final class ProseHost: NSObject, NSTextStorageDelegate, UITextViewDelegate {
     var onShowMarkers: () -> Void = {}
     /// The project's TODO marker, inserted by the keyboard toolbar.
     var todoMarker = "xxx"
+    /// Hears the chapter's file change in iCloud, while it's open (#1298).
+    var presenter: ChapterFilePresenter?
 
     init(editor: ChapterEditor) {
         self.editor = editor

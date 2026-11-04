@@ -16,6 +16,7 @@ mod drafts;
 mod history;
 mod remote;
 mod sync;
+mod synced;
 mod versions;
 
 /// A fresh scratch directory for a hermetic vcs test, namespaced under `vcs`.

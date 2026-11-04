@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic;
 
-const DIR: &str = ".quill";
 const FILE: &str = "history.jsonl";
 const SESSIONS_FILE: &str = "sessions.jsonl";
 
@@ -78,11 +77,11 @@ impl SessionRecord {
 }
 
 fn log_path(root: &Path) -> PathBuf {
-    root.join(DIR).join(FILE)
+    crate::synced::state_dir(root).join(FILE)
 }
 
 fn sessions_path(root: &Path) -> PathBuf {
-    root.join(DIR).join(SESSIONS_FILE)
+    crate::synced::state_dir(root).join(SESSIONS_FILE)
 }
 
 /// Read the recorded snapshots as one logical record per day, newest line for a
@@ -123,7 +122,7 @@ pub fn for_date(root: &Path, date: &str) -> Option<Snapshot> {
 pub fn persist(root: &Path, snap: &Snapshot) -> std::io::Result<()> {
     // Only `.quill/` itself: a background write that lands after the project
     // folder was renamed or removed fails instead of recreating it.
-    atomic::create_leaf_dir(&root.join(DIR))?;
+    atomic::create_leaf_dir(&crate::synced::state_dir(root))?;
     let mut line = serde_json::to_string(snap).map_err(std::io::Error::other)?;
     line.push('\n');
     let mut file = OpenOptions::new()
@@ -163,7 +162,7 @@ pub fn persist_session(root: &Path, session: &SessionRecord) -> std::io::Result<
     }
     // Only `.quill/` itself: a background write that lands after the project
     // folder was renamed or removed fails instead of recreating it.
-    atomic::create_leaf_dir(&root.join(DIR))?;
+    atomic::create_leaf_dir(&crate::synced::state_dir(root))?;
     let mut line = serde_json::to_string(session).map_err(std::io::Error::other)?;
     line.push('\n');
     let mut file = OpenOptions::new()
@@ -300,7 +299,7 @@ mod tests {
         // A line written before parts existed (no part_* keys) must load with
         // empty per-part vecs, not fail.
         let dir = temp_dir("old-line");
-        fs::create_dir_all(dir.join(DIR)).unwrap();
+        fs::create_dir_all(dir.join(crate::synced::STATE_DIR)).unwrap();
         fs::write(
             log_path(&dir),
             "{\"date\":\"2026-06-16\",\"words\":1000,\"added\":5,\"removed\":0,\"todo\":2,\"moved_to_unused\":0}\n",

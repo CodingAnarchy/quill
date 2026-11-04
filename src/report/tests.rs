@@ -11,6 +11,7 @@ use ratatui::style::Color;
 fn manifest() -> Manifest {
     Manifest {
         format_version: None,
+        id: None,
         form: Form::default(),
         title: "Red State Earth".into(),
         subtitle: None,

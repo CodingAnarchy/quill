@@ -123,6 +123,7 @@ mod spell;
 mod sprint;
 mod story_conversion;
 mod style_flags;
+mod synced_book;
 mod typed_passes;
 mod typography;
 mod vcs;

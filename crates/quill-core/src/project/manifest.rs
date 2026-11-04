@@ -260,6 +260,12 @@ pub struct Manifest {
     /// This is bumped only for a change an older reader would misread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format_version: Option<u32>,
+    /// The book's identity across devices (#1298): a UUID written the first time
+    /// a book in a synced folder (iCloud Drive) gets version history. Each device
+    /// keeps that book's history in its own storage, keyed by this id, rather
+    /// than in a `.git` folder the sync would carry. Absent for any other book.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// What kind of work this is (#1239): a novel (the default, never written) or
     /// a short story. A scalar key, so it precedes the tables.
     #[serde(default, skip_serializing_if = "Form::is_novel")]

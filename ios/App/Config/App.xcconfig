@@ -10,5 +10,9 @@ EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
 
 QUILL_BUNDLE_ID = dev.quill.Quill
 QUILL_TEAM_ID =
+// iCloud Drive sync (#1298) needs a paid team; Signing.xcconfig turns it on
+// with QUILL_ENTITLEMENTS = Quill/Quill.entitlements. Off, books stay on the
+// phone.
+QUILL_ENTITLEMENTS =
 
 #include? "../Signing.xcconfig"

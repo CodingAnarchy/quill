@@ -71,7 +71,7 @@ fn is_ignored(rel: &Path) -> bool {
     // Top-level directories that hold only transient / generated content.
     if matches!(
         parts.first(),
-        Some(&".git" | &".quill" | &"unused" | &"export")
+        Some(&".git" | &".quill" | &".quill.nosync" | &"unused" | &"export")
     ) {
         return true;
     }

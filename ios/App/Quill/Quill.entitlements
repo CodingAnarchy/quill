@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- iCloud Drive for syncing books with the Mac (#1298). Needs a paid Apple
+     Developer Program team: the free personal team can't sign iCloud, so the
+     app only uses this file when Signing.xcconfig sets
+     QUILL_ENTITLEMENTS = Quill/Quill.entitlements. See docs/ios.md. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.$(QUILL_BUNDLE_ID)</string>
+	</array>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.$(QUILL_BUNDLE_ID)</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudDocuments</string>
+	</array>
+</dict>
+</plist>

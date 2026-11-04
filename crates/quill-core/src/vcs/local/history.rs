@@ -3,6 +3,7 @@
 //! the file/tree diff helpers (#587/#833), and per-chapter/whole-project restore
 //! (#587/#833). All offline — nothing here touches the network.
 
+use super::open_repo;
 use std::fs;
 use std::path::Path;
 
@@ -41,7 +42,7 @@ pub struct CommitMeta {
 /// history graph as their own lanes — the author sees an alt ending or POV split
 /// standing beside the mainline, not hidden until it merges.
 pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
     // Seed from HEAD *and* every local branch tip, so drafts that have diverged from
     // the current branch still show. `push_glob` silently adds nothing when there are
@@ -126,7 +127,7 @@ pub struct TagMeta {
 /// Fails when there's no commit to tag yet, or a tag by that name already exists,
 /// so an author never silently overwrites an earlier milestone.
 pub fn create_tag(root: &Path, name: &str, message: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let head = repo
         .head()
         .and_then(|h| h.peel(git2::ObjectType::Commit))
@@ -149,7 +150,7 @@ pub fn create_tag(root: &Path, name: &str, message: &str) -> Result<(), String> 
 /// unchanged; only the annotation the author reads changes. Errors when no
 /// milestone by that name exists, rather than creating one silently.
 pub fn set_tag_message(root: &Path, name: &str, message: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     // Resolve the tag to the commit it marks, so the re-tag keeps the same target.
     let target = repo
         .revparse_single(&format!("refs/tags/{name}"))
@@ -172,7 +173,7 @@ pub fn set_tag_message(root: &Path, name: &str, message: &str) -> Result<(), Str
 /// Empty when the project has no milestones. Lightweight tags (created outside
 /// Quill) are skipped — a milestone always carries a name and annotation.
 pub fn list_tags(root: &Path) -> Result<Vec<TagMeta>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let mut out = Vec::new();
     let names = repo.tag_names(None).map_err(|e| e.to_string())?;
     for name in names.iter().flatten() {
@@ -212,7 +213,7 @@ pub fn list_tags(root: &Path) -> Result<Vec<TagMeta>, String> {
 /// uncommitted changes (the palette flow confirms first); `.gitignore`d editor
 /// state is untouched, since it was never part of the tree.
 pub fn restore_all(root: &Path, rev: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let tree = repo
         .revparse_single(rev)
         .and_then(|obj| obj.peel_to_tree())
@@ -238,7 +239,7 @@ pub fn restore_all(root: &Path, rev: &str) -> Result<(), String> {
 /// included; `.gitignore`d paths excluded. Empty string when the tree matches the
 /// revision.
 pub fn diff_tree_to_worktree(root: &Path, rev: &str) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let tree = repo
         .revparse_single(rev)
         .and_then(|obj| obj.peel_to_tree())
@@ -278,7 +279,7 @@ fn format_date(t: git2::Time) -> String {
 /// deleted/untracked). Empty string when clean. For a repo with no commits yet,
 /// everything reads as newly added.
 pub fn diff(root: &Path) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let mut opts = git2::DiffOptions::new();
     opts.include_untracked(true).recurse_untracked_dirs(true);
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
@@ -307,7 +308,7 @@ pub fn diff(root: &Path) -> Result<String, String> {
 /// past commit" (#587), which read a single file out of history without touching
 /// the working tree.
 pub fn show_file_at(root: &Path, rev: &str, rel_path: &str) -> Result<Option<String>, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let commit = repo
         .revparse_single(rev)
         .and_then(|obj| obj.peel_to_commit())
@@ -377,7 +378,7 @@ fn diff_bytes(old: &[u8], new: &[u8], rel_path: &str) -> Result<String, String> 
 /// committed version to restore to (no commits yet, or the file is new). Touches
 /// only that one file.
 pub fn restore(root: &Path, rel_path: &str) -> Result<bool, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let Some(head_tree) = repo.head().ok().and_then(|h| h.peel_to_tree().ok()) else {
         return Ok(false); // no commits → nothing to restore to
     };

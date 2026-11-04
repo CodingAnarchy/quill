@@ -30,7 +30,7 @@ use quill_core::testutil;
 use quill_core::{
     annotation, archive, atomic, bgwrite, buffer, date, export, findings_store, frontmatter,
     history, lastpos, manuscript, manuscript_import, project, recent, recovery, scenes, spell,
-    syntax, text, vcs, wrap,
+    synced, syntax, text, vcs, wrap,
 };
 
 use std::io::{self, Stdout, Write};

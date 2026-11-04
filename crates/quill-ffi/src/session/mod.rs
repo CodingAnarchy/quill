@@ -161,6 +161,38 @@ impl ChapterSession {
         spans
     }
 
+    /// Whether the chapter's file on disk now holds different words than this
+    /// session (#1298): another device changed it through the sync, or an
+    /// editor elsewhere did. False when the file can't be read.
+    pub fn changed_on_disk(&self) -> bool {
+        let s = self.lock();
+        let Some(path) = s.buffer.path.clone() else {
+            return false;
+        };
+        std::fs::read_to_string(&path)
+            .is_ok_and(|disk| quill_core::frontmatter::split(&disk).1 != s.buffer.text())
+    }
+
+    /// Keep the file's version beside the chapter as `<name> 2.md` (#1298), so
+    /// this session's unsaved words can be saved over it with nothing lost.
+    /// Returns the copy's file name.
+    pub fn keep_disk_version(&self) -> Result<String, QuillError> {
+        let path = self
+            .lock()
+            .buffer
+            .path
+            .clone()
+            .ok_or_else(|| QuillError::NotFound {
+                message: "This chapter has no file.".into(),
+            })?;
+        let disk = std::fs::read_to_string(&path)?;
+        let copy = quill_core::synced::keep_copy(&path, &disk)?;
+        Ok(copy
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default())
+    }
+
     /// Save the chapter: the atomic write that re-attaches its front matter,
     /// then its annotations (re-anchored to the edited text) and the project's
     /// cached word count. A no-op when nothing changed.

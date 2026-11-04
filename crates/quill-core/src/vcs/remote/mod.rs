@@ -28,6 +28,7 @@ pub(in crate::vcs) mod merge;
 mod sync;
 mod token;
 
+use crate::vcs::local::open_repo;
 use std::path::Path;
 
 use super::local::{is_dirty, signature};
@@ -45,7 +46,7 @@ pub(in crate::vcs) use error::classify;
 /// HTTPS (`https://…`), SSH (`git@…`), or a local path — auth is resolved at
 /// push/pull time, not here.
 pub fn set_remote(root: &Path, url: &str) -> Result<(), String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     // remote_set_url creates or updates; fall back to add for a brand-new remote.
     if repo.find_remote("origin").is_ok() {
         repo.remote_set_url("origin", url)
@@ -60,7 +61,7 @@ pub fn set_remote(root: &Path, url: &str) -> Result<(), String> {
 /// The configured `origin` URL, if any — for showing the author where their work
 /// backs up to.
 pub fn remote_url(root: &Path) -> Option<String> {
-    let repo = git2::Repository::open(root).ok()?;
+    let repo = open_repo(root).ok()?;
     let remote = repo.find_remote("origin").ok()?;
     remote.url().map(str::to_string)
 }
@@ -70,7 +71,7 @@ pub fn remote_url(root: &Path) -> Option<String> {
 /// non-fast-forward push and we surface that ("pull first") rather than
 /// clobbering remote history. Returns the branch name pushed.
 pub fn push(root: &Path) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
     let branch = current_branch(&repo)?;
     push_branch(&repo, &branch)?;
     Ok(branch)
@@ -130,7 +131,7 @@ fn push_branch(repo: &git2::Repository, branch: &str) -> Result<(), String> {
 /// dirty (#639) — so a save-but-don't-commit-then-pull can never silently discard the
 /// author's words. Returns a human message.
 pub fn pull(root: &Path) -> Result<String, String> {
-    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = open_repo(root)?;
 
     // Guard against silent data loss: the fast-forward below force-checks-out the
     // fetched tree, overwriting any uncommitted edits. Refuse before touching the

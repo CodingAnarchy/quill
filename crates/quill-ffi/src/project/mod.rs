@@ -61,6 +61,8 @@ pub struct BookInfo {
 pub struct ChapterInfo {
     pub index: u32,
     pub title: String,
+    /// The chapter's file, relative to the book's folder.
+    pub file: String,
     pub words: u64,
     /// The revision status label ("Draft", "Revised", "Final"), if one is set.
     pub status: Option<String>,
@@ -154,6 +156,7 @@ impl QuillProject {
             .map(|(i, c)| ChapterInfo {
                 index: to_u32(i),
                 title: c.title.clone(),
+                file: c.file.clone(),
                 words: p.chapter_words(i) as u64,
                 status: c.status.map(|s| s.label().to_string()),
                 summary: c.summary.clone(),

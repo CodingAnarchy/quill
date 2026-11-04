@@ -396,6 +396,13 @@ pub struct App {
     /// When the last save landed while a snapshot was owed (#1296); the
     /// snapshot is taken once `[history] snapshot_after_mins` have passed.
     pub(super) snapshot_owed_since: Option<std::time::Instant>,
+    /// The open chapter's file and its stamp when the editor last read or saw
+    /// it, so a change from another device is noticed (#1298).
+    pub(super) active_disk_stamp: Option<(std::path::PathBuf, super::synced_book::DiskStamp)>,
+    /// The conflict copies already named to the author (#1298).
+    pub(super) conflicts_noted: std::collections::HashSet<String>,
+    /// When a synced book was last scanned for conflict copies (#1298).
+    pub(super) last_conflict_scan: std::time::Instant,
     /// The in-flight automatic backup push (#887), on its own worker task so it
     /// never collides with the author's manual push/pull (`vc_task`). Polled each
     /// loop tick by [`App::poll_backup`].
