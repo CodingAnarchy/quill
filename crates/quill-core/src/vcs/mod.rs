@@ -25,6 +25,7 @@ pub use local::{
     init, is_repo, list_branches, list_tags, log, merge_branch, restore, restore_all,
     set_tag_message, show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
 };
+pub use local::{compare_prose, file_log, Change, FileVersion};
 pub use local::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
 pub use remote::{
     clone, finalize_sync, folder_name, pull, push, remote_url, set_remote, set_token, sync,

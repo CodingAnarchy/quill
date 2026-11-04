@@ -67,3 +67,32 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: entry.url.path))
     }
 }
+
+/// A chapter's earlier versions on the phone (#1299).
+@MainActor
+@Suite struct VersionTests {
+    @Test func aChaptersVersionsAreListedAndReadBack() async throws {
+        let root = try scratch("versions")
+        let library = Library(folder: root, tokens: MemoryTokenStore())
+        let folder = try await library.create(title: "Tide", form: .novel)
+        let store = ProjectStore()
+        store.open(folder)
+        let chapter = try #require(store.chapters.first)
+        let editor = try store.editor(for: chapter)
+        editor.apply(range: NSRange(location: 0, length: 0), replacement: "The sea came in.")
+        editor.save()
+        try await store.snapshot()
+
+        let versions = try await store.versions(of: chapter)
+        #expect(versions.count == 2)
+        #expect(versions.first?.summary.hasPrefix("Snapshot, ") == true)
+        let first = try #require(versions.last)
+        #expect(try await store.text(of: chapter, at: first) == "")
+        let latest = try #require(versions.first)
+        let saved = try await store.text(of: chapter, at: latest)
+        #expect(saved.trimmingCharacters(in: .newlines) == "The sea came in.", "\(saved)")
+
+        let runs = compareVersions(old: "The sea came in.", new: "The sea went out.")
+        #expect(runs.map(\.kind) == [.same, .removed, .added])
+    }
+}

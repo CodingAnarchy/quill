@@ -19,6 +19,7 @@ mod auto;
 mod drafts;
 mod graph;
 mod history;
+mod versions;
 
 pub use auto::{is_auto_history, snapshot, snapshot_message, start_auto_history, AutoHistory};
 
@@ -30,6 +31,7 @@ pub use history::{
     create_tag, diff, diff_file_to_worktree, diff_tree_to_worktree, list_tags, log, restore,
     restore_all, set_tag_message, show_file_at, CommitMeta, TagMeta,
 };
+pub use versions::{compare_prose, file_log, Change, FileVersion};
 
 // The commit-to-commit diff primitive the UI doesn't wire yet — reached by name
 // only from the tests, so re-exported (and forwarded by `super`) only under test.

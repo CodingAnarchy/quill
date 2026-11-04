@@ -246,6 +246,7 @@ struct ChapterRow: View {
 struct ChapterEditorView: View {
     @Environment(AppState.self) private var app
     let host: ProseHost
+    @State private var showingHistory = false
 
     var body: some View {
         ProseTextView(host: host)
@@ -267,6 +268,12 @@ struct ChapterEditorView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("TODO Markers", systemImage: "flag") { app.showingMarkers = true }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("History", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                }
+            }
+            .sheet(isPresented: $showingHistory) {
+                ChapterHistoryView(host: host)
             }
             .sheet(isPresented: Bindable(app).showingMarkers) {
                 MarkersView(current: host.editor)

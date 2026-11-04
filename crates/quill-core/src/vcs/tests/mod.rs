@@ -16,6 +16,7 @@ mod drafts;
 mod history;
 mod remote;
 mod sync;
+mod versions;
 
 /// A fresh scratch directory for a hermetic vcs test, namespaced under `vcs`.
 /// Shared by every submodule so each test builds its repositories in isolation.

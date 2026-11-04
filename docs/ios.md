@@ -161,6 +161,29 @@ remote syncs.
 A book can be deleted from the library by swiping its row. That removes it, and
 its history, from this iPhone only.
 
+## Version history on the phone
+
+From an open chapter, **History** (the clock button) lists the chapter's
+earlier versions (#1299), newest first: every snapshot, sync, or commit that
+changed it, with the date and where it came from ("Snapshot", "Edits on
+iPhone", or the author's own commit message). It works offline, on any book
+with history: created on the phone, opened there, or cloned.
+
+Opening a version shows the chapter as it was, read-only; select a passage and
+copy it as anywhere in iOS. **Compare** marks it against the chapter now, word by
+word: words cut since are struck through in red, and words added since are
+highlighted in green. A rewritten phrase reads as one cut and one addition.
+**Restore This Version** puts the whole chapter back as it was, as a single
+edit, so Undo takes it back. The restore is saved and snapshotted at once, so it
+becomes the newest version and the chapter as it was before stays in the
+history; nothing is ever erased.
+
+The core does the work (`file_log`, `show_file_at`, and `compare_prose` in
+`quill-core`'s `vcs`, over `quill-ffi`'s `chapter_versions`, `chapter_text_at`,
+and `compare_versions`); the Swift side only lists and draws. A restore edits
+the text view's storage directly, not through the keyboard's path, so smart
+punctuation can't curl the old version's quotes.
+
 ## Getting a novel onto the phone
 
 For a power user, the phone can also reach the author's novel through the same

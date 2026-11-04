@@ -69,6 +69,50 @@ final class QuillUITests: XCTestCase {
         XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
 
+    /// A chapter's earlier version can be read, compared, and restored, and
+    /// Undo takes the restore back (#1299).
+    func testAnEarlierVersionCanBeRestored() {
+        app.openSample()
+        app.openChapter("Low Tide")
+        let text = app.textViews.firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "the chapter should open")
+        text.tap()
+        XCTAssertTrue(text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should take the keyboard")
+        let word = "Gull\(Int.random(in: 1000...9999))"
+        text.typeText(" \(word).")
+
+        // Leaving the app saves a version with the word in it.
+        XCUIDevice.shared.press(.home)
+        _ = app.wait(for: .runningBackgroundSuspended, timeout: 10)
+        app.activate()
+
+        let history = app.buttons["History"]
+        XCTAssertTrue(history.waitForHittable(timeout: UITest.patience), "the chapter offers its history")
+        let versions = app.cells
+        history.tap(expecting: versions.firstMatch)
+        XCTAssertTrue(versions.element(boundBy: 1).waitForExistence(timeout: UITest.patience), "two versions at least")
+        // The oldest version is the sample as it came, without the word.
+        let old = app.textViews["VersionText"]
+        versions.element(boundBy: versions.count - 1).tap(expecting: old)
+        XCTAssertTrue(old.waitForExistence(timeout: UITest.patience), "the version should open")
+        let version = old.value as? String ?? ""
+        XCTAssertFalse(version.contains(word), "the old version is from before the word")
+        app.segmentedControls["VersionMode"].buttons["Compare"].tap()
+        XCTAssertTrue((old.value as? String ?? "").contains(word), "the comparison shows the word added since")
+        attach(app, "comparison")
+
+        let confirm = app.buttons["Restore"]
+        app.buttons["Restore This Version"].tap(expecting: confirm)
+        XCTAssertTrue(confirm.waitForHittable(timeout: UITest.patience), "the restore asks to confirm")
+        confirm.tapUntilGone()
+        XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "back at the chapter")
+        let restored = NSPredicate(format: "NOT (value CONTAINS %@)", word)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: restored, object: text)], timeout: UITest.patience),
+            .completed, "the chapter went back to the old version")
+        XCTAssertEqual(text.value as? String, version, "exactly the old version, quotes and all")
+    }
+
     // MARK: - The iPhone Duo (#1234, #1284, #1285)
 
     /// Unfolded and upright, the Duo keeps the chapter list beside the

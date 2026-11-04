@@ -127,3 +127,50 @@ fn opening_a_book_without_history_starts_one() {
     assert!(project.start_history().expect("start"), "started");
     assert!(!project.start_history().expect("again"), "only once");
 }
+
+#[test]
+fn a_chapters_versions_can_be_listed_and_read_back() {
+    let dir = scratch_dir("ffi-versions", "read");
+    let path = create_project("Tide", ProjectForm::Novel, &dir.to_string_lossy()).expect("create");
+    let project = QuillProject::open(&path).expect("open");
+    let file = Path::new(&path).join(project.lock().get().expect("open").chapter_file(0));
+    fs::write(&file, "---\nstatus: draft\n---\nThe sea came in.\n").expect("write");
+    project.snapshot().expect("snapshot");
+    fs::write(&file, "---\nstatus: draft\n---\nThe sea went out.\n").expect("write");
+    project.snapshot().expect("snapshot");
+
+    let versions = project.chapter_versions(0).expect("versions");
+    assert_eq!(versions.len(), 3, "the start and two snapshots");
+    assert!(versions[0].summary.starts_with("Snapshot, "));
+    assert_eq!(
+        project.chapter_text_at(0, &versions[1].rev).expect("read"),
+        "The sea came in.\n",
+        "the prose as it was, without its front matter"
+    );
+    assert!(project.chapter_versions(9).is_err(), "no such chapter");
+}
+
+#[test]
+fn a_book_without_a_history_has_no_versions() {
+    let dir = scratch_dir("ffi-versions", "none");
+    fs::write(
+        dir.join("book.toml"),
+        "title = \"Bare\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .expect("manifest");
+    fs::write(dir.join("one.md"), "Text.\n").expect("chapter");
+    let project = QuillProject::open(&dir.to_string_lossy()).expect("open");
+    assert!(project.chapter_versions(0).expect("versions").is_empty());
+}
+
+#[test]
+fn comparing_versions_marks_what_changed() {
+    let runs = compare_versions("The sea came in.", "The sea went out.");
+    let kinds: Vec<ChangeKind> = runs.iter().map(|r| r.kind).collect();
+    assert_eq!(
+        kinds,
+        [ChangeKind::Same, ChangeKind::Removed, ChangeKind::Added]
+    );
+    assert_eq!(runs[1].text, "came in.");
+    assert_eq!(runs[2].text, "went out.");
+}
