@@ -103,28 +103,7 @@ impl App {
     /// that exist). Empty when the book defines no parts. The single home for the
     /// 1-based→0-based range conversion and the unnamed-part naming.
     pub(super) fn part_ranges(&self) -> Vec<(String, std::ops::Range<usize>)> {
-        let Some(parts) = self.project.manifest.parts.as_ref() else {
-            return Vec::new();
-        };
-        let label = self.project.manifest.part_label();
-        // Part ranges are 1-based positions among the body chapters (#185); the
-        // body block is contiguous after the band reorder, starting past the
-        // front matter — so a body position maps to `front + position`.
-        let front = self.project.manifest.front_chapter_count();
-        let body = self.project.body_chapter_count();
-        parts
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let name = p
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| format!("{label} {}", i + 1));
-                let start = p.chapters[0].saturating_sub(1).min(body);
-                let end = p.chapters[1].min(body).max(start);
-                (name, (front + start)..(front + end))
-            })
-            .collect()
+        crate::export::assemble::part_ranges(&self.project)
     }
 
     pub(super) fn part_word_counts(&self) -> Vec<usize> {

@@ -102,6 +102,9 @@ struct ProjectToolbar: ToolbarContent {
             Button("Bible & Findings", systemImage: "text.book.closed") { showingNotes = true }
                 .sheet(isPresented: $showingNotes) { NotesView() }
         }
+        ToolbarItem(placement: .topBarTrailing) {
+            ExportMenu()
+        }
         if store.remote != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 if store.pulling {

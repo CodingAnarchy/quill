@@ -12,67 +12,27 @@ use crate::frontmatter::Epigraph;
 use std::process::Command as Proc;
 
 impl App {
-    /// The print bleed allowance in points (#652) from the manifest `[print] bleed`,
-    /// or `0` when unset. A full-bleed cover extends past the trim by this much.
+    /// The print bleed allowance in points (#652), `0` when unset.
     pub(super) fn print_bleed(&self) -> f32 {
-        self.project
-            .manifest
-            .print
-            .as_ref()
-            .map_or(0.0, crate::export::pdf::PrintConfig::bleed_points)
+        export::assemble::print_bleed(&self.project)
     }
 
-    /// The per-page paper caliper in inches (#819) from the manifest `[print] caliper`,
-    /// or the writer's sane default when unset. Sizes the wrap cover's spine.
+    /// The paper caliper in inches per page (#819), sizing the wrap's spine.
     pub(super) fn print_caliper(&self) -> f32 {
-        self.project.manifest.print.as_ref().map_or(
-            export::pdf::DEFAULT_CALIPER_INCHES,
-            crate::export::pdf::PrintConfig::caliper_inches,
-        )
+        export::assemble::print_caliper(&self.project)
     }
 
-    /// The print trim (in points) from the manifest `[print]` table, with a warning
-    /// when the configured size is unknown (the default is used instead).
+    /// The print trim in points, with a warning for an unknown size.
     pub(super) fn print_trim(&self) -> ((f32, f32), Option<String>) {
-        let name = self
-            .project
-            .manifest
-            .print
-            .as_ref()
-            .and_then(|p| p.trim.as_deref())
-            .unwrap_or(export::pdf::DEFAULT_TRIM);
-        export::pdf::trim_points(name).map_or_else(
-            || {
-                // `DEFAULT_TRIM` is a known size, so `trim_points` resolves it; the
-                // 6×9 points are the fallback if it somehow didn't, rather than a panic.
-                let default = export::pdf::trim_points(export::pdf::DEFAULT_TRIM)
-                    .unwrap_or((6.0 * 72.0, 9.0 * 72.0));
-                (
-                    default,
-                    Some(format!(
-                        "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
-                        export::pdf::DEFAULT_TRIM
-                    )),
-                )
-            },
-            |dims| (dims, None),
-        )
+        export::assemble::print_trim(&self.project)
     }
 
-    /// The designed-export styling for this project (#468): the manifest's
-    /// `[style]`, or the default (which reproduces today's plain output), with its
-    /// preset applied and font/image paths resolved (#469/#472). Shared by the EPUB
-    /// (#468) and PDF (#489) writers. Returns any resolution warnings to surface
-    /// alongside the export result.
+    /// The designed-export styling for this project (#468), resolved by the
+    /// core so the phone's exports match (#1300); see
+    /// [`export::assemble::resolve_style`]. Returns any resolution warnings to
+    /// surface alongside the export result.
     pub(super) fn export_style(&self) -> (ExportStyle, Vec<String>) {
-        let mut style = self.project.manifest.style.clone().unwrap_or_default();
-        let root = self.project.root.clone();
-        // Resolve the preset first (its values are the base for the rest).
-        let mut warnings: Vec<String> = style.apply_preset().into_iter().collect();
-        warnings.extend(style.resolve_fonts(|path| std::fs::read(root.join(path))));
-        warnings.extend(style.resolve_images(|path| std::fs::read(root.join(path))));
-        warnings.extend(style.style_warnings());
-        (style, warnings)
+        export::assemble::resolve_style(&self.project)
     }
 
     /// Append styling warnings (e.g. an unreadable font) to the export message, so

@@ -9,6 +9,7 @@ use std::fmt::Write;
 
 use crate::frontmatter::{series_list_lines, Epigraph, Role};
 
+pub mod assemble;
 pub mod docx;
 pub mod epub;
 pub mod pdf;

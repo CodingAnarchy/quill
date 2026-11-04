@@ -184,6 +184,19 @@ and `compare_versions`); the Swift side only lists and draws. A restore edits
 the text view's storage directly, not through the keyboard's path, so smart
 punctuation can't curl the old version's quotes.
 
+## Exporting
+
+**Export** in the book's toolbar (#1300) makes a **Manuscript (Word)** in
+standard manuscript format, an **EPUB**, a **PDF**, or a **Print PDF** of the
+open book, and opens the share sheet with it. The open chapter is saved first.
+The export runs off the main thread with a spinner in place of the button, so a
+long novel doesn't freeze the app. Styling warnings (an unreadable font, a
+low-resolution cover) are listed above the share sheet. If a chapter's file is
+missing, the export stops and names the chapter, with what to do about it.
+
+It's the desktop's own export code (see `docs/export.md`), so the file is the
+same as the desktop's for the same book and settings.
+
 ## Getting a novel onto the phone
 
 For a power user, the phone can also reach the author's novel through the same

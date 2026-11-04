@@ -96,3 +96,22 @@ import Testing
         #expect(runs.map(\.kind) == [.same, .removed, .added])
     }
 }
+
+/// Exporting from the phone (#1300).
+@MainActor
+@Suite struct ExportTests {
+    @Test func aBookExportsInEveryKind() async throws {
+        let root = try scratch("export")
+        let library = Library(folder: root, tokens: MemoryTokenStore())
+        let folder = try await library.create(title: "Tide", form: .novel)
+        let store = ProjectStore()
+        store.open(folder)
+        let out = root.appendingPathComponent("out")
+        for kind in [ExportKind.manuscript, .epub, .pdf, .printPdf] {
+            let result = try await store.export(kind, to: out)
+            #expect(FileManager.default.fileExists(atPath: result.path))
+            #expect(URL(fileURLWithPath: result.path).lastPathComponent.hasPrefix("Tide."))
+        }
+        #expect(!store.exporting)
+    }
+}

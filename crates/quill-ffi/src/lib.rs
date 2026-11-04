@@ -8,6 +8,7 @@
 
 mod bible;
 mod error;
+mod export;
 mod git;
 mod history;
 mod lookup;
@@ -21,6 +22,7 @@ use std::path::Path;
 
 pub use bible::{BiblePage, FindingInfo, TextSpan};
 pub use error::QuillError;
+pub use export::{ExportKind, ExportResult};
 pub use git::{clone_destination, clone_project, set_git_token, SyncReport};
 pub use history::{compare_versions, create_project, ChangeKind, ChangeRun, VersionInfo};
 pub use lookup::{has_claude_api_key, look_up_words, set_claude_api_key, WordCandidate};
