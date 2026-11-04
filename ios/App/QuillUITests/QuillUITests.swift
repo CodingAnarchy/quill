@@ -10,6 +10,7 @@ final class QuillUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchEnvironment["QUILL_TRACE_TOUCHES"] = "1"  // see TouchTrace
         // A half-open Duo is turned by ios/test-duo.sh, which knows which way
         // is upright; XCTest's portrait isn't, on the Duo's inner screen.
         if ProcessInfo.processInfo.environment["QUILL_DUO_POSE"] == nil {
@@ -33,6 +34,39 @@ final class QuillUITests: XCTestCase {
     /// on the next launch (#1232).
     func testTypedWordsSurviveBackgroundingAndAKill() {
         app.checkTypedWordsSurviveAKill()
+    }
+
+    /// A book started on the phone opens on its first chapter with the
+    /// keyboard up, ready to type (#1297).
+    func testANewBookOpensReadyToType() {
+        let title = "Harbor \(Int.random(in: 1000...9999))"
+        app.openLibrary()
+        let field = app.textFields["NewBookTitle"]
+        app.buttons["New Book…"].tap(expecting: field)
+        XCTAssertTrue(field.waitForExistence(timeout: UITest.patience), "the new book form should open")
+        field.tap()
+        field.typeText(title)
+        let text = app.textViews.firstMatch
+        app.buttons["Create"].tap(expecting: text)
+        XCTAssertTrue(text.waitForExistence(timeout: UITest.patience), "the first chapter should open")
+        XCTAssertTrue(
+            text.waitForKeyboardFocus(timeout: UITest.patience), "the chapter should be ready to type in")
+        text.typeText("The tide was out.")
+        let typed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS %@", "The tide was out."), object: text)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [typed], timeout: UITest.patience), .completed,
+            "the words should be in the chapter")
+        attach(app, "new book")
+
+        // Delete it again, so the next test's launch doesn't reopen it.
+        app.openLibrary()
+        let row = app.buttons[title]
+        XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the library lists the new book")
+        row.swipeLeft()
+        app.buttons["Delete"].tap(expecting: app.buttons["Delete Book"])
+        app.buttons["Delete Book"].tapUntilGone()
+        XCTAssertTrue(row.waitForNonExistence(timeout: UITest.patience), "the book is deleted")
     }
 
     // MARK: - The iPhone Duo (#1234, #1284, #1285)

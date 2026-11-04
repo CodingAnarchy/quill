@@ -14,9 +14,34 @@ enum UITest {
 }
 
 extension XCUIApplication {
+    /// Open the sample novel from the library, wherever the app opened: the
+    /// app reopens the last book, which another test may have created.
     func openSample() {
+        openLibrary()
         let sample = buttons["SampleNovel"]
-        if sample.waitForExistence(timeout: 5) { sample.tap() }
+        // Books of the author's (or a test's) may push it down the list.
+        let list = collectionViews.firstMatch
+        for _ in 0..<5 {
+            if sample.waitForExistence(timeout: 2) && sample.isHittable || !list.exists { break }
+            list.swipeUp()
+        }
+        XCTAssertTrue(sample.waitForExistence(timeout: UITest.patience), "the library should list the sample")
+        sample.tap(expecting: buttons["Projects"])
+    }
+
+    /// Back to the library from wherever the last test left the app: a
+    /// chapter, or a project's chapter list.
+    func openLibrary() {
+        let newBook = buttons["New Book…"]
+        for _ in 0..<3 where !newBook.waitForExistence(timeout: 3) {
+            let projects = buttons["Projects"]
+            if projects.exists && projects.isHittable {
+                projects.tap()
+            } else {
+                navigationBars.buttons.element(boundBy: 0).tap()
+            }
+        }
+        XCTAssertTrue(newBook.waitForExistence(timeout: UITest.patience), "the library should show")
     }
 
     func openChapter(_ title: String) {
@@ -26,7 +51,7 @@ extension XCUIApplication {
             navigationBars.buttons.element(boundBy: 0).tap()
         }
         XCTAssertTrue(row.waitForExistence(timeout: UITest.patience), "the chapter list should show \"\(title)\"")
-        row.tap()
+        row.tap(expecting: textViews.firstMatch)
     }
 
     /// Whether `element` is on screen and tappable, without failing the
@@ -93,9 +118,48 @@ extension XCUIElement {
         return XCTWaiter().wait(for: [focused], timeout: timeout) == .completed
     }
 
+    /// Tap the element, and tap it once more if `result` doesn't come.
+    ///
+    /// The simulator sometimes drops a test's tap. XCTest sends each one
+    /// through a virtual touch screen, and when backboardd registers that
+    /// screen late it lets the touch down through ("unknown digitizer"), then
+    /// skips the rest ("didn't see a previous touch down"), and UIKit cancels
+    /// the touch. In the CI run that showed it (#1319), the app had the row on
+    /// screen and an idle main thread, and nothing happened. The second tap
+    /// comes only after the full wait, so a tap that was only slow isn't
+    /// doubled. Use it for a tap that opens something `result` shows.
+    func tap(expecting result: XCUIElement, timeout: TimeInterval = UITest.patience) {
+        tap()
+        if result.waitForHittable(timeout: timeout) || !(exists && isHittable) { return }
+        tap()
+    }
+
+    /// Tap a button that closes what it's on (a confirmation's), and tap it
+    /// once more if it's still there after the full wait: the same dropped
+    /// tap as `tap(expecting:)`. What's behind a closing dialog can't be
+    /// waited on instead, as XCTest fails a test that asks whether an element
+    /// is hittable while it has no frame, which a view coming back from
+    /// under a sheet briefly does.
+    func tapUntilGone(timeout: TimeInterval = UITest.patience) {
+        tap()
+        if waitForNonExistence(timeout: timeout) { return }
+        tap()
+    }
+
     /// Wait for the element to be on screen and tappable, not just present.
+    ///
+    /// It asks whether the element is hittable only once it has a frame:
+    /// XCTest fails the test outright when asked about one without
+    /// (`{{inf, inf}, {0, 0}}`), as a view coming back from under a closing
+    /// sheet briefly is (#1319).
     func waitForHittable(timeout: TimeInterval) -> Bool {
-        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: self)
+        let hittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate { element, _ in
+                guard let element = element as? XCUIElement, let frame = try? element.snapshot().frame,
+                    frame.origin.x.isFinite, frame.origin.y.isFinite, !frame.isEmpty
+                else { return false }
+                return element.isHittable
+            }, object: self)
         return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
 }

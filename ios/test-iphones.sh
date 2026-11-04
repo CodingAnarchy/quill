@@ -61,10 +61,12 @@ for kind in "${kinds[@]}"; do
   udids+=("$udid")
 done
 
-# Start the first phone booting in the background, so it comes up while the
-# app builds or downloads (#1310). The rest boot one at a time, each as the
-# phone before it finishes: a CI runner booting three at once slowed to a
-# crawl and lost track of one of them.
+# Start the first phone booting in the background, so it comes up, and
+# finishes its first boot's setup, while the app builds or downloads (#1310).
+# The rest boot one at a time, each after the phone before it shuts down: a
+# CI runner booting a phone while another ran its tests starved the tests
+# (app launches and queries timed out), and xcodebuild looking for a phone
+# while another booted gave up, "Unable to find a device" (#1315, #1319).
 xcrun simctl boot "${udids[0]}" >/dev/null 2>&1 &
 [ "$boot_only" = 0 ] || exit 0
 
@@ -83,6 +85,11 @@ fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
+# Each phone's result bundle (screenshots, the accessibility tree at a failure,
+# a screen recording) is kept in ios/build/results when its tests fail, so a CI
+# failure can be looked at rather than guessed at; CI uploads the folder.
+RESULTS="$ROOT/ios/build/results"
+mkdir -p "$RESULTS"
 # Every phone runs even after one fails, so one run shows them all.
 failed=()
 for i in "${!phones[@]}"; do
@@ -90,10 +97,49 @@ for i in "${!phones[@]}"; do
   echo "== $phone"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true # already booting, or booted
   xcrun simctl bootstatus "$udid" >/dev/null
-  xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" test-without-building 2>&1 |
-    tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  # A phone tested the moment it reports booted is still doing its first
+  # boot's setup (search, the home screen, launch images): on CI that ran its
+  # tests at half speed and dropped its first test's taps and queries, and
+  # SpringBoard's setup ran for 153 s (#1319, #1320, #1321). The first phone
+  # gets that time during the build or its download; each later one waits it
+  # out here.
+  if [ "$i" -gt 0 ]; then
+    sleep "${QUILL_SETTLE_SECONDS:-150}"
+  fi
+  bundle="$RESULTS/${phone// /-}.xcresult"
+  run_tests() {
+    rm -rf "$bundle"
+    xcodebuild -xctestrun "$xctestrun" -destination "platform=iOS Simulator,id=$udid" \
+      -resultBundlePath "$bundle" test-without-building 2>&1 |
+      tee "$log" | grep -E "^Test Case .*(passed|failed|skipped)|: error: |encountered an error|TEST EXECUTE (SUCCEEDED|FAILED)" || true
+  }
+  started="$(date '+%Y-%m-%d %H:%M:%S')"
+  run_tests
+  # A simulator that hasn't settled can fail to launch the app or hand it a
+  # background assertion, failing tests that never ran. That's the runner, not
+  # the app: run the phone once more.
+  if ! grep -q "TEST EXECUTE SUCCEEDED" "$log" &&
+    grep -qE "Failed to launch|Failed to get background assertion|Timed out while launching" "$log"; then
+    echo "== $phone again (the simulator failed to launch the app)"
+    run_tests
+  fi
+  # A failing phone's log goes beside its bundle: every touch the app
+  # received and what it did (TouchTrace, which the UI tests turn on), and
+  # the app's errors and the system's (SpringBoard and backboardd decide
+  # whether a touch is the system's), to tell a tap the app never got, or
+  # that the system took back, from one it ignored.
+  if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
+    xcrun simctl spawn "$udid" log show --start "$started" --style compact --info \
+      --predicate 'subsystem == "dev.quill.Quill" OR (process IN {"Quill", "SpringBoard", "backboardd"} AND messageType >= 16 AND NOT eventMessage BEGINSWITH "IOSurfaceQuery")' \
+      >"$RESULTS/${phone// /-}.log" 2>&1 || true
+  fi
   # Free the runner for the next phone.
   xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+  if grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
+    rm -rf "$bundle" "$RESULTS/${phone// /-}.log" # keep only what explains a failure
+  else
+    echo "   results: $bundle"
+  fi
   if ! grep -q "TEST EXECUTE SUCCEEDED" "$log"; then
     failed+=("$phone: tests failed")
     # A failure before any test ran explains itself only in the full output.

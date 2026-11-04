@@ -19,6 +19,7 @@ final class PhoneLayoutUITests: XCTestCase {
         phone = try Phone.current()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
+        app.launchEnvironment["QUILL_TRACE_TOUCHES"] = "1"  // see TouchTrace
         app.launch()
     }
 
@@ -65,7 +66,7 @@ final class PhoneLayoutUITests: XCTestCase {
         let lampRoom = app.staticTexts["The Lamp Room"]
         let lowTide = app.staticTexts["Low Tide"]
         XCTAssertTrue(lampRoom.waitForHittable(timeout: UITest.patience), "the chapter list should show first")
-        lampRoom.tap()
+        lampRoom.tap(expecting: app.textViews.firstMatch)
         XCTAssertTrue(app.textViews.firstMatch.waitForHittable(timeout: UITest.patience), "the chapter should open")
         attach(app, "\(phone) \(orientation.isLandscape ? "sideways" : "upright")")
 
@@ -78,7 +79,7 @@ final class PhoneLayoutUITests: XCTestCase {
         } else {
             XCTAssertFalse(app.shows(lowTide), "\(phone) should show the chapter alone, not beside the list")
             // Back to the list.
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            app.navigationBars.buttons.element(boundBy: 0).tap(expecting: lowTide)
             XCTAssertTrue(lowTide.waitForHittable(timeout: UITest.patience), "back should return to the chapter list")
             XCTAssertFalse(app.shows(app.textViews.firstMatch), "the list should be alone again")
         }

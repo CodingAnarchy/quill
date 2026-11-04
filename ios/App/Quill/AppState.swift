@@ -63,16 +63,30 @@ final class AppState {
     }
 
     func open(_ folder: URL) {
+        TouchTrace.note("open \(folder.lastPathComponent)")
         selectedChapter = nil
         prose = nil
         store.open(folder)
         if store.error == nil {
             UserDefaults.standard.set(folder.lastPathComponent, forKey: Self.lastProjectKey)
+            // Every book keeps version history, as on the desktop (#1296).
+            Task { await store.startHistory() }
         }
         // A short story opens straight into its prose (#1247).
         if let story = store.info?.storyChapter {
             selectedChapter = story
         }
+    }
+
+    /// Create a new book and open it on its first chapter (or the story),
+    /// with the keyboard up, ready to type (#1297).
+    func create(title: String, form: ProjectForm) async throws {
+        let folder = try await library.create(title: title, form: form)
+        open(folder)
+        if selectedChapter == nil {
+            selectedChapter = store.chapters.first?.index
+        }
+        prose?.textView.typeOnShow()
     }
 
     /// Move the cursor to the start of a story's scene (#1247).
@@ -82,6 +96,7 @@ final class AppState {
 
     /// Back to the library.
     func closeProject() {
+        TouchTrace.note("close the project")
         selectedChapter = nil
         prose = nil
         store.close()
@@ -114,8 +129,8 @@ final class AppState {
         }
     }
 
-    /// Save and sync as the app leaves the foreground, inside a background
-    /// task so iOS gives the work time to finish. If time runs out first,
+    /// Save, snapshot, and sync as the app leaves the foreground, inside a
+    /// background task so iOS gives the work time to finish. If time runs out first,
     /// the edits are already committed here and go out on the next sync.
     func saveAndSyncForBackground() {
         let task = UIApplication.shared.beginBackgroundTask(withName: "Save and sync") { [weak self] in
@@ -125,6 +140,13 @@ final class AppState {
         if task != .invalid { backgroundSyncs.insert(task) }
         save()
         Task {
+            // A snapshot for the book's version history (#1297), then the
+            // sync for a book with a remote.
+            do {
+                try await store.snapshot()
+            } catch {
+                syncStatus = "Version history not saved: \(describe(error))"
+            }
             await sync(.background)
             endBackgroundSync(task)
         }

@@ -2,7 +2,8 @@ import Foundation
 import Observation
 
 /// The projects on this phone (#1231): the folders under `Projects/` that hold
-/// a `book.toml`, and cloning a new one from the author's git remote.
+/// a `book.toml`, starting a new one (#1297), and cloning one from the
+/// author's git remote.
 @MainActor
 @Observable
 public final class Library {
@@ -60,6 +61,27 @@ public final class Library {
         }
         refresh()
         return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    /// Create a new book called `title` (#1297), a novel or a short story, with
+    /// version history from the start, and return its folder. Throws with a
+    /// message that says what to fix (no title, or a book of that name already
+    /// here).
+    public func create(title: String, form: ProjectForm) async throws -> URL {
+        let projects = folder.path
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let path = try await Task.detached {
+            try createProject(title: title, form: form, projectsDir: projects)
+        }.value
+        refresh()
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    /// Delete the book in `entry` from this phone: its folder, chapters,
+    /// and history. A copy elsewhere (a Mac, a git remote) is untouched.
+    public func delete(_ entry: Entry) throws {
+        try FileManager.default.removeItem(at: entry.url)
+        refresh()
     }
 
     /// Hand the core the saved token for `remote`'s host before a pull or sync.

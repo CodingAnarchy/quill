@@ -6,14 +6,37 @@ struct LibraryView: View {
     @Environment(AppState.self) private var app
     @Environment(Library.self) private var library
     @State private var showingClone = false
+    @State private var showingNewBook = false
+    @State private var deleting: Library.Entry?
     @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             List {
-                Section("On this iPhone") {
-                    ForEach(library.projects) { entry in
-                        Button(entry.name) { app.open(entry.url) }
+                // Three ways in (#1297): start a book, open the sample, or
+                // (for a power user) clone one from git.
+                Section {
+                    Button("New Book…", systemImage: "square.and.pencil") {
+                        TouchTrace.note("new book")
+                        showingNewBook = true
+                    }
+                } footer: {
+                    Text("A novel or a short story, kept on this iPhone with its own version history.")
+                }
+                if !library.projects.isEmpty {
+                    Section {
+                        ForEach(library.projects) { entry in
+                            Button(entry.name) { app.open(entry.url) }
+                                .swipeActions {
+                                    Button("Delete", role: .destructive) { deleting = entry }
+                                }
+                        }
+                    } header: {
+                        Text("On this iPhone")
+                    } footer: {
+                        if library.projects.contains(where: { $0.name == SampleNovel.folderName }) {
+                            Text("\(SampleNovel.folderName) is a short sample book to try Quill with.")
+                        }
                     }
                 }
                 Section {
@@ -33,6 +56,27 @@ struct LibraryView: View {
             .sheet(isPresented: $showingClone) {
                 CloneView()
             }
+            .sheet(isPresented: $showingNewBook) {
+                NewBookView()
+            }
+            .confirmationDialog(
+                "Delete \u{201c}\(deleting?.name ?? "")\u{201d}?",
+                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Book", role: .destructive) {
+                    if let deleting {
+                        do {
+                            try library.delete(deleting)
+                        } catch {
+                            app.notice = describe(error)
+                        }
+                    }
+                    deleting = nil
+                }
+            } message: {
+                Text("The book and its version history are removed from this iPhone. Copies on other devices aren't touched.")
+            }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
@@ -43,6 +87,80 @@ struct LibraryView: View {
                         description: Text(error))
                 }
             }
+        }
+    }
+}
+
+/// Start a new book (#1297): its title, and whether it's a novel or a short
+/// story. It opens ready to type.
+struct NewBookView: View {
+    @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var form = ProjectForm.novel
+    @State private var creating = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Title", text: $title)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+                        .onSubmit { Task { await create() } }
+                        .accessibilityIdentifier("NewBookTitle")
+                }
+                Section {
+                    Picker("Kind", selection: $form) {
+                        Text("Novel").tag(ProjectForm.novel)
+                        Text("Short story").tag(ProjectForm.shortStory)
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text(
+                        form == .novel
+                            ? "A novel starts with one chapter; add more as you go."
+                            : "A short story is one piece of prose, with scenes."
+                    )
+                }
+                if let error {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("New Book")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(creating)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if creating {
+                        ProgressView()
+                    } else {
+                        Button("Create") { Task { await create() } }
+                            .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .interactiveDismissDisabled(creating)
+        }
+    }
+
+    private func create() async {
+        guard !creating, !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        error = nil
+        creating = true
+        defer { creating = false }
+        do {
+            try await app.create(title: title, form: form)
+            dismiss()
+        } catch {
+            self.error = describe(error)
         }
     }
 }

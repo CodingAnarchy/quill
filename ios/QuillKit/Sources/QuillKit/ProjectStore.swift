@@ -94,6 +94,25 @@ public final class ProjectStore {
         return report
     }
 
+    /// Give the open book version history if it has none, as the desktop does
+    /// (#1296). Returns whether a history was started just now. A book the
+    /// author manages with Git, or one inside a larger repository, is left
+    /// alone.
+    @discardableResult
+    public func startHistory() async -> Bool {
+        guard let project else { return false }
+        return (try? await Task.detached { try project.startHistory() }.value) ?? false
+    }
+
+    /// Snapshot the book's saved chapters into its history (#1297), if it's a
+    /// history Quill started. Returns whether a snapshot was taken. The caller
+    /// saves the open chapter first.
+    @discardableResult
+    public func snapshot() async throws -> Bool {
+        guard let project else { return false }
+        return try await Task.detached { try project.snapshot() }.value
+    }
+
     /// Open `chapter` for editing. Each save refreshes the chapter list, so
     /// its word counts stay current.
     public func editor(for chapter: ChapterInfo) throws -> ChapterEditor {
