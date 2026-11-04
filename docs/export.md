@@ -28,7 +28,11 @@ order, or just the active book.
   chapter on a fresh page, double-spaced Times New Roman, first-line indents, a
   running header carrying author, title, and a live page number, and `*`/`**`
   emphasis as italic and bold. A live table of contents updates when the reader
-  opens the file. This is the format editors and agents expect.
+  opens the file. This is the format editors and agents expect. CI checks every
+  sample book's `.docx` against the Office Open XML schemas with Microsoft's own
+  Open XML SDK (what Word checks before offering to repair a file) and converts
+  it with LibreOffice as a smoke test (#1302); see
+  [Word manuscripts in other programs](#word-manuscripts-in-other-programs).
 
 - **Scrivener (.scriv)** — a Scrivener 3 project bundle, not a single file: a
   `.scrivx` binder with your front matter and chapters as documents, named parts
@@ -99,6 +103,34 @@ uses the novel manuscript layout (title page, contents, each story on a new page
 which is what a publisher expects for a collection; the short story submission
 layout is for sending one story out. A story whose folder is missing is left out,
 and the export message says how many were.
+
+## Word manuscripts in other programs
+
+A manuscript is judged in the agent's or editor's program, not Quill's, so the
+`.docx` is checked outside Quill (#1302). On every pull request, CI exports the
+sample books in `tests/export-corpus` (a novel, a series and its omnibus, two
+short stories, and a collection) and validates each Word file with the Open XML
+SDK (`tools/docx-validate`, Office 2019 schemas, no errors allowed), then opens
+it in LibreOffice headless. `scripts/check-exports.sh` runs the same checks
+locally when .NET 8 and LibreOffice are installed.
+
+What each program does with the file is checked by hand, against the novel and
+short story samples, once and again whenever the Word writer changes. Look for:
+no repair prompt or warning on open; 12pt Times New Roman, double spaced, with
+one-inch margins and first-line indents; the title page with the word count;
+the running header (surname, short title, page number); each chapter on a new
+page; scene breaks; and italics as italics.
+
+| Program | Opens cleanly | Manuscript format holds | Notes |
+| --- | --- | --- | --- |
+| Microsoft Word (Mac) | not yet checked | not yet checked | |
+| Microsoft Word (web) | not yet checked | not yet checked | |
+| Apple Pages | not yet checked | not yet checked | |
+| Google Docs | not yet checked | not yet checked | |
+| LibreOffice Writer | CI (headless) | not yet checked | |
+
+Record any program-specific quirk an author should know here, with a
+screenshot under `docs/images/`.
 
 ## Exporting from the iPhone
 

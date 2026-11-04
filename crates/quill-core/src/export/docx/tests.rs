@@ -776,3 +776,113 @@ fn a_series_book_generates_an_also_in_this_series_page() {
         "no series list for a standalone book"
     );
 }
+
+/// The order the Office Open XML schema requires of a paragraph's properties
+/// (`CT_PPr`): Word reports anything else as a problem with the file.
+const PPR_ORDER: [&str; 34] = [
+    "pStyle",
+    "keepNext",
+    "keepLines",
+    "pageBreakBefore",
+    "framePr",
+    "widowControl",
+    "numPr",
+    "suppressLineNumbers",
+    "pBdr",
+    "shd",
+    "tabs",
+    "suppressAutoHyphens",
+    "kinsoku",
+    "wordWrap",
+    "overflowPunct",
+    "topLinePunct",
+    "autoSpaceDE",
+    "autoSpaceDN",
+    "bidi",
+    "adjustRightInd",
+    "snapToGrid",
+    "spacing",
+    "ind",
+    "contextualSpacing",
+    "mirrorIndents",
+    "suppressOverlap",
+    "jc",
+    "textDirection",
+    "textAlignment",
+    "textboxTightWrap",
+    "outlineLvl",
+    "divId",
+    "cnfStyle",
+    "rPr",
+];
+
+/// Every `<w:pPr>` in `xml` whose children are out of schema order.
+fn misordered_paragraph_properties(xml: &str) -> Vec<String> {
+    let mut bad = Vec::new();
+    for ppr in xml.split("<w:pPr>").skip(1) {
+        let Some(body) = ppr.split("</w:pPr>").next() else {
+            continue;
+        };
+        let mut last = 0;
+        // Each direct child starts with "<w:"; nested runs (in rPr) come last.
+        for tag in body.split("<w:").skip(1) {
+            let name: String = tag
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .collect();
+            let Some(at) = PPR_ORDER.iter().position(|n| *n == name) else {
+                continue; // a child of rPr, or an element this list doesn't order
+            };
+            if at < last {
+                bad.push(body.to_string());
+                break;
+            }
+            last = at;
+            if name == "rPr" {
+                break;
+            }
+        }
+    }
+    bad
+}
+
+#[test]
+fn paragraph_properties_follow_the_schema_order() {
+    // The Open XML SDK flagged epigraphs writing ind before spacing (#1302).
+    let mut d = doc();
+    d.parts[0].chapters[0].epigraph = Some(epigraph("A chapter's epigraph.", Some("Someone")));
+    for (name, profile) in [
+        ("manuscript", Profile::Manuscript),
+        ("vellum", Profile::Vellum),
+    ] {
+        let xml = part(&to_docx(&d, profile).unwrap(), "word/document.xml");
+        assert_eq!(
+            misordered_paragraph_properties(&xml),
+            Vec::<String>::new(),
+            "{name}"
+        );
+    }
+    let mut second = doc();
+    second.parts[0].chapters[0].epigraph = Some(epigraph("Another.", None));
+    let series = to_docx_series(
+        &[d, second],
+        Some("Series"),
+        Some("A. Writer"),
+        Profile::Manuscript,
+    )
+    .unwrap();
+    let xml = part(&series, "word/document.xml");
+    assert_eq!(
+        misordered_paragraph_properties(&xml),
+        Vec::<String>::new(),
+        "series"
+    );
+    // And the check does catch the mistake it's for.
+    assert_eq!(
+        misordered_paragraph_properties(
+            r#"<w:pPr><w:ind w:left="1"/><w:spacing w:line="2"/></w:pPr>"#
+        )
+        .len(),
+        1
+    );
+}
