@@ -175,13 +175,13 @@ keystrokes that stay out of the way.
   numbers at the outer corner, chapters starting on a right-hand (recto) page,
   and the body fonts **embedded** — what services like KDP and IngramSpark
   require. Set the trim from the **Set export style…** menu (below) or in a
-  `[print]` table in `book.toml` (`trim = "6x9"`; also `5x8`, `5.5x8.5`; default
-  `6x9`). It carries the same fully-embedded Unicode fonts as the screen PDF above,
+  `[print]` table in `book.toml` (`trim = "6x9"`, the default, or any of the
+  common KDP / IngramSpark paperback trims from `4.25x6.87` to `8.5x11`; see
+  [`docs/export.md`](docs/export.md)). Print files are PDF/X-4. It carries the same fully-embedded Unicode fonts as the screen PDF above,
   and a `[print] bleed` allowance (in inches) runs full-bleed art past the trim edge
   — **Prepare for KDP / IngramSpark** sets the 0.125″ those stores want. The companion
   **PDF wrap cover** export (`export:pdf-wrap-cover`) writes the press-ready back /
-  spine / front sheet, the spine sized from the interior page count. The one current
-  limitation is those three trim sizes only. The default 6×9 interior (0.875″ inside, 0.5″ outside,
+  spine / front sheet, the spine sized from the interior page count. The default 6×9 interior (0.875″ inside, 0.5″ outside,
   0.75″ top/bottom margins) clears KDP's published minimums; validate the file in
   your service's preview before ordering a proof.
   For a multi-book **series**, the menu offers each format twice — the whole

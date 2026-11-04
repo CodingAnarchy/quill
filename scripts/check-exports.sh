@@ -7,6 +7,9 @@
 # - Word (#1302): the Office Open XML schemas, through Microsoft's Open XML SDK
 #   (tools/docx-validate, needs .NET 8), and a LibreOffice headless conversion
 #   to PDF as a smoke test that another program reads the file.
+# - Print PDFs (#1303): the PDF/X-4 preflight (scripts/pdfx-preflight.py) over
+#   every print interior and wrap cover, qpdf's structural check over every
+#   PDF, and poppler's pdffonts to confirm every font is embedded.
 #
 #   scripts/check-exports.sh        every check whose tool is installed
 #   REQUIRE_ALL=1 scripts/...       fail when a tool is missing (CI does)
@@ -80,6 +83,29 @@ if have soffice "the LibreOffice check"; then
     soffice --headless --convert-to pdf --outdir "$work/lo" "$docx" >/dev/null 2>&1 || true
     if [ ! -s "$work/lo/$name.pdf" ]; then
       failed+=("$name.docx: LibreOffice couldn't open it")
+    fi
+  done
+fi
+
+echo "== PDF/X-4 preflight"
+if ! python3 "$ROOT/scripts/pdfx-preflight.py" "$work"/out/*.print.pdf "$work"/out/*.cover.pdf; then
+  failed+=("print PDFs: PDF/X-4 preflight")
+fi
+
+if have qpdf "the qpdf check"; then
+  for pdf in "$work"/out/*.pdf; do
+    if ! qpdf --check "$pdf" >/dev/null; then
+      failed+=("$(basename "$pdf"): qpdf found a structural problem")
+    fi
+  done
+fi
+
+if have pdffonts "the embedded-font check"; then
+  for pdf in "$work"/out/*.print.pdf; do
+    # Every font row's "emb" column must say yes.
+    if ! pdffonts "$pdf" | awk 'NR > 2 && $(NF-4) != "yes" { bad = 1 } END { exit bad }'; then
+      failed+=("$(basename "$pdf"): a font isn't embedded")
+      pdffonts "$pdf"
     fi
   done
 fi

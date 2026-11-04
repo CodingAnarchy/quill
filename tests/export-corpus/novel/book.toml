@@ -14,6 +14,10 @@ cover_image = "cover.png"
 cover_image_alt = "A lighthouse against a dark blue sky"
 scene_break = "* * *"
 
+[print]
+trim = "5.5x8.5"
+bleed = 0.125
+
 [[parts]]
 name = "The Shore"
 chapters = [1, 2]

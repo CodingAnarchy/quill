@@ -145,7 +145,7 @@ fn the_pdf_is_well_formed_pdf_x_with_the_cover_on_the_front() {
     let geo = WrapGeometry::new(TRIM_W, TRIM_H, BLEED, 200, DEFAULT_CALIPER_INCHES);
     let bytes = to_wrap_cover(geo, &style_with_cover(1800, 2700), "Title", "Author").unwrap();
     // Structural soundness (qpdf-style markers).
-    assert!(bytes.starts_with(b"%PDF-1.7"), "header");
+    assert!(bytes.starts_with(b"%PDF-1.6"), "header");
     assert!(bytes.ends_with(b"%%EOF\n"), "trailer marker");
     for marker in [
         "/Type /Catalog",
@@ -173,7 +173,7 @@ fn the_pdf_is_well_formed_pdf_x_with_the_cover_on_the_front() {
     // The reserved barcode/ISBN zone (a stroked rectangle) and the spine fold guides.
     assert!(drawn.contains(" re S"), "barcode reserved zone stroked");
     assert!(drawn.contains(" l S"), "spine fold guides drawn");
-    // PDF/X-3 conformance, like the interior (#817): a grayscale output intent + keys.
+    // PDF/X-4 conformance, like the interior (#817, #1303): a grayscale output intent + keys.
     assert!(has(&bytes, "/GTS_PDFX"), "PDF/X output intent");
     assert!(
         has(&bytes, "/GTS_PDFXVersion"),
@@ -190,7 +190,7 @@ fn no_cover_image_leaves_the_front_blank_but_still_valid() {
     // Without a configured cover, the wrap still renders (guides only, no image).
     let geo = WrapGeometry::new(TRIM_W, TRIM_H, BLEED, 120, DEFAULT_CALIPER_INCHES);
     let bytes = to_wrap_cover(geo, &ExportStyle::default(), "Untitled", "").unwrap();
-    assert!(bytes.starts_with(b"%PDF-1.7"), "still a PDF");
+    assert!(bytes.starts_with(b"%PDF-1.6"), "still a PDF");
     assert!(!has(&bytes, "/Subtype /Image"), "no cover image emitted");
     assert!(!has(&bytes, "/ImCover"), "no cover reference");
     assert_eq!(count(&bytes, "/Type /Page /Parent"), 1, "one page");

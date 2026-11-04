@@ -160,11 +160,29 @@ pub(super) fn flatten_outline(
     (ids.first().copied(), ids.last().copied())
 }
 
+/// The file identifier for the trailer's `/ID`: 128 bits of hash over the body,
+/// so the same file gets the same identifier.
+fn file_id(body: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let half = |salt: u8| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (salt, body).hash(&mut h);
+        h.finish()
+    };
+    format!("{:016x}{:016x}", half(1), half(2))
+}
+
 /// Write the objects (in id order), the xref table, and the trailer. `info` is the
 /// object id of the document `/Info` dictionary (#692), referenced from the trailer
 /// so readers and print tooling can index Title/Author/Producer; `None` omits it.
-pub(super) fn serialize(objects: &ObjMap, info: Option<u32>) -> Vec<u8> {
-    let mut out: Vec<u8> = b"%PDF-1.7\n".to_vec();
+/// A `pdf_x` file (#1303) is headed PDF 1.6, the version PDF/X-4 is built on; the
+/// screen proof stays 1.7. Every file gets a trailer `/ID`, which PDF/X requires.
+pub(super) fn serialize(objects: &ObjMap, info: Option<u32>, pdf_x: bool) -> Vec<u8> {
+    let mut out: Vec<u8> = if pdf_x {
+        b"%PDF-1.6\n%\xe2\xe3\xcf\xd3\n".to_vec()
+    } else {
+        b"%PDF-1.7\n".to_vec()
+    };
     // The caller always populates at least the catalog (id 1); an empty map has no
     // document to serialize, so emit just the header rather than panicking.
     let Some(&max_id) = objects.keys().max() else {
@@ -189,9 +207,10 @@ pub(super) fn serialize(objects: &ObjMap, info: Option<u32>) -> Vec<u8> {
         out.extend_from_slice(format!("{:010} {:05} n \n", offsets[id as usize], 0).as_bytes());
     }
     let info_ref = info.map_or_else(String::new, |id| format!(" /Info {id} 0 R"));
+    let id = file_id(&out);
     out.extend_from_slice(
         format!(
-            "trailer\n<< /Size {} /Root 1 0 R{info_ref} >>\nstartxref\n{xref}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root 1 0 R{info_ref} /ID [<{id}> <{id}>] >>\nstartxref\n{xref}\n%%EOF\n",
             max_id + 1
         )
         .as_bytes(),

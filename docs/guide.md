@@ -510,7 +510,8 @@ run-action) opens a menu of the common knobs, each showing its current value —
 pick a built-in look from the preset library (classic, modern, literary, romance,
 thriller, fantasy, minimalist), set the scene-break glyph, heading alignment, drop
 caps, and the title/part ornaments, and choose the print-interior trim size (6x9,
-5x8, or 5.5x8.5). Each choice is written straight into the [style] / [print]
+5x8, 5.5x8.5, or one of the other common KDP and IngramSpark paperback trims, from
+mass market 4.25x6.87 to 8.5x11). Each choice is written straight into the [style] / [print]
 tables of book.toml, leaving the rest of the file (other sections, comments,
 formatting) untouched, and takes effect on the next export and in the preview with
 no restart. "Preview style…" renders a fixed sample book through your current
@@ -566,7 +567,7 @@ any full-bleed art runs clean off the edge. Your cover image (the same one the
 interior and EPUB use) fills the front panel; the back panel carries a reserved
 barcode/ISBN box in its lower-outside corner for the retailer's barcode, and thin
 guides mark where the cover folds around the spine. It's written to
-export/<book>.cover.pdf as a PDF/X-3 grayscale press file, the same conformance as
+export/<book>.cover.pdf as a PDF/X-4 grayscale press file, the same conformance as
 the interior.
 
 The spine width is the part you can't eyeball: it's the interior page count times

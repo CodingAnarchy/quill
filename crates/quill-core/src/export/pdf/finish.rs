@@ -1,6 +1,6 @@
 //! Serializing the built [`Pdf`] to file bytes: [`Pdf::finish`] decorates every page
 //! (running heads + folios), lays out the object model (catalog, page tree, fonts,
-//! images, content streams, bookmark outline), stamps the PDF/X-3 output intent and
+//! images, content streams, bookmark outline), stamps the PDF/X-4 output intent, metadata, and
 //! `/Info` (#692/#817), and hands the objects to [`serialize`]. Split from `mod.rs` to
 //! keep both under the size convention (#927); the page/body assembly stays there.
 
@@ -124,29 +124,14 @@ impl Pdf {
             _ => "<< /Type /Outlines /Count 0 >>".to_string(),
         };
         objects.insert(3, outlines.into_bytes());
-        // The PDF/X output intent (#817), print interior only: a grayscale
-        // `/OutputIntent` naming an embedded ICC destination profile, referenced from
-        // the catalog's `/OutputIntents`. The screen proof stays plain. Object ids come
-        // off `next` before `/Info` so the intent + ICC stream are numbered first.
-        let output_intents = self.layout.pdf_x.then(|| {
-            let icc_id = take(&mut next);
-            // The ICC profile stream carries `/N 1` (a 1-component, grayscale space) so
-            // a reader knows the destination colour space without parsing the profile.
-            objects.insert(icc_id, flate_stream(icc::GRAY_ICC, " /N 1"));
-            let intent_id = take(&mut next);
-            objects.insert(
-                intent_id,
-                format!(
-                    "<< /Type /OutputIntent /S /GTS_PDFX \
-                     /OutputConditionIdentifier {ident} /OutputCondition {cond} \
-                     /Info {ident} /DestOutputProfile {icc_id} 0 R >>",
-                    ident = pdf_text_string(icc::OUTPUT_CONDITION),
-                    cond = pdf_text_string(icc::OUTPUT_CONDITION),
-                )
-                .into_bytes(),
-            );
-            format!(" /OutputIntents [{intent_id} 0 R]")
-        });
+        // PDF/X-4 (#817, #1303), print interior only: the grayscale output intent,
+        // the XMP metadata, and the `/Info` entries the standard requires. The
+        // screen proof stays plain. Object ids come off `next` before `/Info`.
+        let pdfx = self
+            .layout
+            .pdf_x
+            .then(|| icc::add_pdfx(&mut objects, &mut next, &self.doc_title, &self.doc_author));
+        let output_intents = pdfx.as_ref().map(|x| x.catalog.clone());
         let output_intents = output_intents.unwrap_or_default();
         objects.insert(
             1,
@@ -169,15 +154,11 @@ impl Pdf {
             let _ = write!(info, " /Author {}", pdf_text_string(&self.doc_author));
         }
         let _ = write!(info, " /Producer {}", pdf_text_string("Quill"));
-        if self.layout.pdf_x {
-            let _ = write!(
-                info,
-                " /GTS_PDFXVersion {ver} /GTS_PDFXConformance {ver}",
-                ver = pdf_text_string(icc::PDFX_VERSION)
-            );
+        if let Some(pdfx) = &pdfx {
+            info.push_str(&pdfx.info);
         }
         info.push_str(" >>");
         objects.insert(info_id, info.into_bytes());
-        serialize(&objects, Some(info_id))
+        serialize(&objects, Some(info_id), self.layout.pdf_x)
     }
 }
