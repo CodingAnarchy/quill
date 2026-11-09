@@ -27,8 +27,9 @@ order, or just the active book.
 - **Word (.docx)** — a `.docx` in standard manuscript format: a title block, each
   chapter on a fresh page, double-spaced Times New Roman, first-line indents, a
   running header carrying author, title, and a live page number, and `*`/`**`
-  emphasis as italic and bold. A live table of contents updates when the reader
-  opens the file. This is the format editors and agents expect. CI checks every
+  emphasis as italic and bold. The table of contents lists every part and
+  chapter as soon as the file opens, in any program, and Word can update it to
+  add page numbers. This is the format editors and agents expect. CI checks every
   sample book's `.docx` against the Office Open XML schemas with Microsoft's own
   Open XML SDK (what Word checks before offering to repair a file) and converts
   it with LibreOffice as a smoke test (#1302); see
@@ -58,6 +59,10 @@ order, or just the active book.
   [EPUBCheck](https://www.w3.org/publishing/epubcheck/) 5.3 with no errors or
   warnings, and the [Ace](https://daisy.github.io/ace/) accessibility checker
   with no violations (#1301). Run `scripts/check-exports.sh` to check locally.
+  [Kindle Previewer](https://kdp.amazon.com/en_US/help/topic/G202131170) 4.0
+  converts every sample with Enhanced Typesetting, no errors, and no quality
+  issues; its only notice is "Cover not specified" for the samples without a
+  cover image, since KDP takes the cover as its own upload.
 
 - **PDF** — two variants. *PDF (screen)* is a paginated, fixed-layout proof for
   beta readers and submissions. *PDF (print interior)* is the book block for
@@ -127,7 +132,7 @@ page; scene breaks; and italics as italics.
 | Microsoft Word (web) | not yet checked | not yet checked | |
 | Apple Pages | not yet checked | not yet checked | |
 | Google Docs | not yet checked | not yet checked | |
-| LibreOffice Writer | CI (headless) | not yet checked | |
+| LibreOffice Writer | yes (26.8, and headless in CI) | yes | The contents page listed only "Right-click to update the table of contents" until the export filled in the titles (#1302). |
 
 Record any program-specific quirk an author should know here, with a
 screenshot under `docs/images/`.

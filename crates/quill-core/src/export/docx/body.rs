@@ -151,6 +151,7 @@ pub(super) fn book_body(doc: &Document, profile: Profile) -> String {
 /// When a [`Header`] is present (manuscript profile), the section references the
 /// `word/header1.xml` part via `rId2` so the running header shows on every page.
 pub(super) fn wrap_document(body: &str, header: &Header) -> String {
+    let body = fill_toc(body);
     let header_ref = if header.is_some() {
         r#"<w:headerReference w:type="default" r:id="rId2"/>"#
     } else {
@@ -193,27 +194,71 @@ pub(super) fn page_field() -> String {
     .to_string()
 }
 
-/// A `Contents`-titled page carrying a live `TOC` field (manuscript profile). The
+/// Where the contents' entries go, until [`fill_toc`] lists the headings that
+/// follow it.
+const TOC_ENTRIES: &str = "<!--quill:toc-entries-->";
+
+/// A `Contents`-titled page carrying a `TOC` field (manuscript profile). The
 /// `\o "1-1"` switch collects heading-1 outline levels — the chapter/part titles
-/// — and `\h` makes the entries clickable. A placeholder line stands in until the
-/// reader updates the field (Word prompts on open; LibreOffice recalculates).
+/// — and `\h` makes the entries clickable when Word updates the field. The
+/// entries are filled in by [`fill_toc`] once the body is built.
 pub(super) fn toc_page() -> String {
     let mut out = para(
         r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
         run("Contents", true, false, Some(28)),
     );
-    let field = concat!(
+    out.push_str(TOC_ENTRIES);
+    out
+}
+
+/// Fill the contents page's `TOC` field with the titles of the outline-level
+/// headings in `body`, in order, as the field's result (#1302). Word, Pages,
+/// Google Docs, and LibreOffice all show a field's stored result as it is, and
+/// none of them updated an empty one on open, so a placeholder there was all
+/// the reader saw. Word can still update the field to add page numbers.
+pub(super) fn fill_toc(body: &str) -> String {
+    if !body.contains(TOC_ENTRIES) {
+        return body.to_string();
+    }
+    let begin = concat!(
         r#"<w:r><w:fldChar w:fldCharType="begin"/></w:r>"#,
         r#"<w:r><w:instrText xml:space="preserve"> TOC \o "1-1" \h </w:instrText></w:r>"#,
         r#"<w:r><w:fldChar w:fldCharType="separate"/></w:r>"#,
-        r#"<w:r><w:t>Right-click to update the table of contents.</w:t></w:r>"#,
-        r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#,
     );
-    let _ = write!(
-        out,
-        "<w:p><w:pPr><w:spacing w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>{field}</w:p>",
-    );
-    out
+    let end = r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#;
+    let ppr = r#"<w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr>"#;
+    let mut titles = outline_titles(body);
+    if titles.is_empty() {
+        titles.push(xml_escape("Right-click to update the table of contents."));
+    }
+    let last = titles.len() - 1;
+    let mut field = String::new();
+    for (i, title) in titles.iter().enumerate() {
+        let _ = write!(
+            field,
+            "<w:p>{ppr}{}<w:r><w:t xml:space=\"preserve\">{title}</w:t></w:r>{}</w:p>",
+            if i == 0 { begin } else { "" },
+            if i == last { end } else { "" },
+        );
+    }
+    body.replacen(TOC_ENTRIES, &field, 1)
+}
+
+/// The text of each outline-level-1 paragraph in `body`, still XML-escaped.
+fn outline_titles(body: &str) -> Vec<String> {
+    body.split("<w:p>")
+        .filter_map(|p| p.split("</w:p>").next())
+        .filter(|p| p.contains(r#"<w:outlineLvl w:val="0"/>"#))
+        .map(|p| {
+            // Every run is written by [`run`], so its text is in this form.
+            p.split(r#"<w:t xml:space="preserve">"#)
+                .skip(1)
+                .filter_map(|t| t.split_once("</w:t>"))
+                .map(|(text, _)| text)
+                .collect()
+        })
+        .filter(|title: &String| !title.is_empty())
+        .collect()
 }
 
 /// A part or chapter title. The manuscript profile opens a fresh page under a

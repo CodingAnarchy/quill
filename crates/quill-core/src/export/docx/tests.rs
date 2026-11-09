@@ -515,6 +515,28 @@ fn manuscript_profile_emits_a_toc_field_for_the_chapters() {
 }
 
 #[test]
+fn the_contents_lists_the_part_and_chapter_titles_without_an_update() {
+    // #1302: Word, Pages, Google Docs, and LibreOffice show a TOC field's stored
+    // result as it is, so the field carries the titles rather than a placeholder.
+    let bytes = to_docx(&doc(), Profile::Manuscript).expect("export");
+    let xml = part(&bytes, "word/document.xml");
+    assert!(
+        !xml.contains("Right-click to update"),
+        "no placeholder: {xml}"
+    );
+    assert!(!xml.contains("quill:toc"), "no marker left behind: {xml}");
+    let field = &xml[xml
+        .find(r#"<w:fldChar w:fldCharType="separate"/>"#)
+        .expect("TOC field")..];
+    let field = &field[..field
+        .find(r#"<w:fldChar w:fldCharType="end"/>"#)
+        .expect("field end")];
+    let part_at = field.find("Part One").expect("the part is listed");
+    let chapter_at = field.find("The Find").expect("the chapter is listed");
+    assert!(part_at < chapter_at, "in reading order: {field}");
+}
+
+#[test]
 fn vellum_profile_has_no_header_or_toc() {
     // Vellum applies its own front matter and running header — the generated
     // package must not add one, or it would conflict on import.
