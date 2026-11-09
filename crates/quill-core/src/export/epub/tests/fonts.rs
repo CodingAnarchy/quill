@@ -21,6 +21,7 @@ fn fonts_are_embedded_and_applied_via_the_stylesheet() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let mut style = ExportStyle {
         body_font: Some("b.otf".into()),
@@ -95,6 +96,7 @@ fn a_true_italic_sibling_embeds_and_gets_an_italic_font_face() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let mut style = ExportStyle {
         body_font: Some("fonts/eb-garamond.ttf".into()),
@@ -164,6 +166,7 @@ fn embedded_fonts_are_subset_smaller_than_the_source() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let mut style = ExportStyle {
         body_font: Some("fonts/body.ttf".into()),
@@ -209,6 +212,7 @@ fn font_face_declarations_carry_a_format_hint() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let mut style = ExportStyle {
         body_font: Some("b.otf".into()),

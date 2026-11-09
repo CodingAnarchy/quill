@@ -24,11 +24,19 @@ order, or just the active book.
   This is the hand-off / convert format: feed it to pandoc, paste it into a
   submission form, or keep it as a plain-text archive.
 
-- **Word (.docx)** — a `.docx` in standard manuscript format: a title block, each
-  chapter on a fresh page, double-spaced Times New Roman, first-line indents, a
-  running header carrying author, title, and a live page number, and `*`/`**`
-  emphasis as italic and bold. The table of contents lists every part and
-  chapter as soon as the file opens, in any program, and Word can update it to
+- **Word (.docx)** — a `.docx` in standard manuscript format, ready to send to
+  an agent or editor. A novel's title page carries your contact details at the
+  top left (from the `[author]` section of your config, or just your byline) and
+  the word count of its chapters, rounded to the nearest hundred, at the top
+  right, with the title and byline about halfway down. Each chapter starts on a
+  fresh page a third of the way down, in double-spaced 12pt Times New Roman with
+  first-line indents and one-inch margins, scenes are separated by a centered
+  `#`, `*`/`**` emphasis is italic and bold, and a centered END closes the novel
+  ahead of any back matter. The running header reads `Surname / Short title /
+  page`. A finished book's front matter (half-title, copyright page, "Also in
+  this series", contents) is left out: the EPUB and PDF carry it. A collection
+  or a series keeps its title page and a contents that lists every story or
+  book as soon as the file opens in Word or LibreOffice; Word can update it to
   add page numbers. This is the format editors and agents expect. CI checks every
   sample book's `.docx` against the Office Open XML schemas with Microsoft's own
   Open XML SDK (what Word checks before offering to repair a file) and converts
@@ -104,8 +112,8 @@ its title, with its credit line ("First published in …") set beneath the title
 when you've given it one, and the table of contents (Word, EPUB, PDF) lists every
 story. The stories are read from their own projects at export time, so an edit
 made in a story is in the next export with nothing to refresh. The Word export
-uses the novel manuscript layout (title page, contents, each story on a new page),
-which is what a publisher expects for a collection; the short story submission
+uses a book layout (title page, contents, each story on a new page), which is
+what a publisher expects for a collection; the short story submission
 layout is for sending one story out. A story whose folder is missing is left out,
 and the export message says how many were.
 
@@ -122,7 +130,8 @@ locally when .NET 8 and LibreOffice are installed.
 What each program does with the file is checked by hand, against the novel and
 short story samples, once and again whenever the Word writer changes. Look for:
 no repair prompt or warning on open; 12pt Times New Roman, double spaced, with
-one-inch margins and first-line indents; the title page with the word count;
+one-inch margins and first-line indents; the title page with the contact
+details and word count;
 the running header (surname, short title, page number); each chapter on a new
 page; scene breaks; and italics as italics.
 
@@ -130,9 +139,9 @@ page; scene breaks; and italics as italics.
 | --- | --- | --- | --- |
 | Microsoft Word (Mac) | not yet checked | not yet checked | |
 | Microsoft Word (web) | not yet checked | not yet checked | |
-| Apple Pages | not yet checked | not yet checked | |
+| Apple Pages | yes (Pages 15.4) | yes | Until the export defined a `Normal` style, Pages ignored every paragraph's formatting and set the whole manuscript as one Helvetica page (#1302). Pages starts a chapter title at the top of its page rather than a third of the way down, and shows an empty contents for a collection or series. |
 | Google Docs | not yet checked | not yet checked | |
-| LibreOffice Writer | yes (26.8, and headless in CI) | yes | The contents page listed only "Right-click to update the table of contents" until the export filled in the titles (#1302). |
+| LibreOffice Writer | yes (26.8, and headless in CI) | yes | The contents page listed only "Right-click to update the table of contents" until the export filled in the titles (#1302). On a Mac without a Japanese font set up for LibreOffice, Japanese characters are left blank. |
 
 Record any program-specific quirk an author should know here, with a
 screenshot under `docs/images/`.
@@ -229,6 +238,9 @@ when you pick a family, download it into the project's `fonts/` directory as
 half_title  = true    # a bare half-title page before the full title page; off by default
 series_list = true    # an "Also in this series" page; on by default for series books
 ```
+
+Both apply to the EPUB and PDF. A novel's Word manuscript is a submission, so
+it has neither.
 
 ### `[print]` — trim, margins, and the spine
 

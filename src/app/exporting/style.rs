@@ -184,6 +184,7 @@ fn style_preview_document() -> Document {
         }],
         back: Vec::new(),
         story: None,
+        novel: None,
     }
 }
 

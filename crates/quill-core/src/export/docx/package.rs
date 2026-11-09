@@ -36,6 +36,12 @@ const DOC_RELS_HEADER: &str = r#"<Relationship Id="rId2" Type="http://schemas.op
 const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="480" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>"#;
 
+/// The manuscript's `Normal` paragraph style, repeating the document defaults.
+/// Pages applies neither the document defaults nor any paragraph's own
+/// formatting (page breaks, centering, spacing, indents) to a file that defines
+/// no `Normal` style: the whole novel came out as one Helvetica page (#1302).
+const MANUSCRIPT_STYLES: &str = r#"<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:line="480" w:lineRule="auto"/></w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>"#;
+
 /// A `Normal` base plus the canonical built-in "heading 1" paragraph style.
 /// Vellum starts a new chapter at each Heading 1, so the [`Profile::Vellum`]
 /// writer tags chapter/part titles with it; the full canonical form (the
@@ -54,9 +60,9 @@ pub(super) fn build_docx(
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default();
     // Vellum needs a Heading 1 style to recognize chapter breaks; the manuscript
-    // profile adds nothing to the base styles.
+    // profile needs a `Normal` style for Pages to apply its formatting.
     let extra = match profile {
-        Profile::Manuscript => "",
+        Profile::Manuscript => MANUSCRIPT_STYLES,
         Profile::Vellum => VELLUM_STYLES,
     };
     let styles = format!("{STYLES}{extra}</w:styles>");

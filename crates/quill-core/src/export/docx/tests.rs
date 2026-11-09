@@ -36,6 +36,7 @@ fn doc() -> Document {
         }],
         back: vec![],
         story: None,
+        novel: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn smart_typography_glyphs_pass_through_to_docx() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx(&d, Profile::Manuscript).unwrap();
     let xml = part(&bytes, "word/document.xml");
@@ -103,6 +105,7 @@ fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let xml = part(
         &to_docx(&d, Profile::Manuscript).unwrap(),
@@ -139,6 +142,7 @@ fn series_docx_carries_every_book_in_order() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx_series(
         &[book("Book One"), book("Book Two")],
@@ -184,6 +188,7 @@ fn series_docx_reprints_each_books_copyright_not_just_the_first() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let first = PubMeta {
         isbn: Some("978-0-00-000000-0".into()),
@@ -331,6 +336,7 @@ fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let xml = part(
         &to_docx(&d, Profile::Manuscript).unwrap(),
@@ -691,6 +697,7 @@ fn series_docx_carries_a_header_and_toc() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx_series(
         &[book("Book One"), book("Book Two")],

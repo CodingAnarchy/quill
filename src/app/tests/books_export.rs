@@ -45,32 +45,27 @@ fn exporting_just_the_active_book_is_scoped_to_it() {
 #[test]
 fn exporting_a_series_book_generates_the_also_in_this_series_page() {
     // #820: exporting one book of a series compiles an "also in this series" page
-    // from the `[[books]]` list — it names the *other* book, not itself. Assert on
-    // the emitted `.docx` XML (hermetic, #531).
+    // from the `[[books]]` list — it names the *other* book, not itself. The Word
+    // manuscript is a submission and leaves it out (#1302), so assert on the EPUB.
     let (mut app, dir) = series_app("export-series-page");
-    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+    app.run_export(ExportFormat::Epub, ExportScope::ActiveBook);
 
-    let bytes = fs::read(dir.join("export/book-one.docx")).unwrap();
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    let mut xml = String::new();
-    zip.by_name("word/document.xml")
-        .unwrap()
-        .read_to_string(&mut xml)
-        .unwrap();
+    let page = epub_page(
+        &fs::read(dir.join("export/book-one.epub")).unwrap(),
+        "series",
+    )
+    .expect("a series page");
     assert!(
-        xml.contains(SERIES_LIST_HEADING),
-        "the series book carries the 'also in this series' heading: {xml}"
+        page.contains(SERIES_LIST_HEADING),
+        "the series book carries the 'also in this series' heading: {page}"
     );
     assert!(
-        xml.contains("Book Two"),
-        "it lists the other book of the series: {xml}"
+        page.contains("Book Two"),
+        "it lists the other book of the series: {page}"
     );
-    // It lists the *other* book, never itself: "Book One" appears once (the title
-    // block), not again in the list.
-    assert_eq!(
-        xml.matches("Book One").count(),
-        1,
-        "the book does not list itself: {xml}"
+    assert!(
+        !page.contains("Book One"),
+        "the book does not list itself: {page}"
     );
 }
 
@@ -79,18 +74,12 @@ fn a_standalone_book_omits_the_series_page() {
     // #820: a standalone project (one book) has no other titles, so no "also in
     // this series" page is generated — the export is unchanged.
     let (mut app, dir) = two_chapter_app("export-standalone-no-series");
-    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+    app.run_export(ExportFormat::Epub, ExportScope::ActiveBook);
 
-    let bytes = fs::read(dir.join("export/book.docx")).unwrap();
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    let mut xml = String::new();
-    zip.by_name("word/document.xml")
-        .unwrap()
-        .read_to_string(&mut xml)
-        .unwrap();
+    let bytes = fs::read(dir.join("export/book.epub")).unwrap();
     assert!(
-        !xml.contains(SERIES_LIST_HEADING),
-        "a standalone book has no series page: {xml}"
+        epub_page(&bytes, "series").is_none(),
+        "a standalone book has no series page"
     );
 }
 
@@ -262,6 +251,19 @@ fn a_standalone_report_has_no_series_line() {
 
 // --- Per-book publishing metadata (#810) ------------------------------------
 
+/// The EPUB page whose file name starts with `id` (`series`, `copyright`; the
+/// writer numbers them, as in `OEBPS/copyright0003.xhtml`), or `None`.
+fn epub_page(bytes: &[u8], id: &str) -> Option<String> {
+    let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid epub zip");
+    let prefix = format!("OEBPS/{id}");
+    let name = zip
+        .file_names()
+        .map(|n| n.expect("an archive Quill wrote has valid entry names"))
+        .find(|n| n.starts_with(&prefix) && n.ends_with(".xhtml"))?
+        .into_owned();
+    Some(docx_part(bytes, &name))
+}
+
 /// Read one part out of a built `.docx` (a zip) as UTF-8 text — for asserting on
 /// the emitted `word/document.xml` copyright blocks.
 fn docx_part(bytes: &[u8], name: &str) -> String {
@@ -389,11 +391,14 @@ fn a_standalone_export_copyright_is_unchanged() {
     .unwrap();
     let mut app = open_test_app(&dir);
     let _guard = TempProject::new(dir.clone());
-    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
-    let xml = docx_part(
-        &fs::read(dir.join("export/solo.docx")).unwrap(),
-        "word/document.xml",
-    );
+    // The Word manuscript is a submission and leaves the copyright page out
+    // (#1302); the EPUB keeps it.
+    app.run_export(ExportFormat::Epub, ExportScope::ActiveBook);
+    let xml = epub_page(
+        &fs::read(dir.join("export/solo.epub")).unwrap(),
+        "copyright",
+    )
+    .expect("a copyright page");
     assert!(
         xml.contains("978-0-00-000000-0") && xml.contains("© 2024 A. Writer"),
         "the standalone book's own copyright:\n{xml}"

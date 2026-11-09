@@ -51,6 +51,7 @@ fn story() -> Document {
             ],
             words: 3_456,
         }),
+        novel: None,
     }
 }
 

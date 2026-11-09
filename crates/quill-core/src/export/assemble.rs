@@ -122,6 +122,7 @@ impl<'a> Assembly<'a> {
             parts: body_parts,
             back,
             story: self.story_meta(),
+            novel: self.novel_meta(),
         }
     }
 
@@ -176,6 +177,28 @@ impl<'a> Assembly<'a> {
         };
         Some(StoryMeta {
             contact: AuthorConfig::load().contact_lines(self.project.manifest.author.as_deref()),
+            words,
+        })
+    }
+
+    /// A novel's submission details for its Word manuscript's title page (#1302),
+    /// or `None` for a short story or a collection: the `[author]` contact block
+    /// (falling back to the byline) and the word count of the body chapters, the
+    /// whole book's even when exporting a sample.
+    fn novel_meta(&self) -> Option<StoryMeta> {
+        let project = self.project;
+        if project.manifest.story_chapter().is_some() || project.is_collection() {
+            return None;
+        }
+        let words = (0..project.manifest.chapters.len())
+            .filter(|&i| project.chapter_band(i) == Band::Body)
+            .map(|i| match &self.live {
+                Some(live) if live.index == i => live.words,
+                _ => project.chapter_words(i),
+            })
+            .sum();
+        Some(StoryMeta {
+            contact: AuthorConfig::load().contact_lines(project.manifest.author.as_deref()),
             words,
         })
     }
@@ -279,6 +302,7 @@ impl<'a> Assembly<'a> {
             parts: body_parts,
             back,
             story: None,
+            novel: None,
         }
     }
 }

@@ -12,6 +12,7 @@
 //! shared by both.
 
 mod body;
+mod novel;
 mod package;
 mod review;
 mod series;
@@ -42,9 +43,12 @@ pub enum Profile {
 
 /// Compile a [`Document`] to the bytes of a `.docx` file in the given [`Profile`].
 pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
-    let header = match (profile, &doc.story) {
-        (Profile::Manuscript, Some(_)) => story::story_header(doc),
-        _ => running_header(doc.author.as_deref(), Some(&doc.title), profile),
+    // A submission manuscript's header carries the surname and a short title.
+    let submission = doc.story.is_some() || doc.novel.is_some();
+    let header = if profile == Profile::Manuscript && submission {
+        story::story_header(doc)
+    } else {
+        running_header(doc.author.as_deref(), Some(&doc.title), profile)
     };
     build_docx(document_xml(doc, profile), profile, header)
 }

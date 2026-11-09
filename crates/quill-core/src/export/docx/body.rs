@@ -19,6 +19,10 @@ pub(super) fn document_xml(doc: &Document, profile: Profile) -> String {
     if let (Profile::Manuscript, Some(story)) = (profile, &doc.story) {
         return super::story::story_document_xml(doc, story);
     }
+    // A novel's takes standard manuscript format (#1302).
+    if let (Profile::Manuscript, Some(novel)) = (profile, &doc.novel) {
+        return super::novel::novel_document_xml(doc, novel);
+    }
     let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
     let mut body = String::new();
     if profile == Profile::Manuscript {
@@ -325,7 +329,7 @@ fn mono_run(code: &str) -> String {
 
 /// An epigraph as set-apart italic paragraphs (single-spaced, indented), the
 /// attribution on its own line.
-fn epigraph_paras(epigraph: &Epigraph) -> String {
+pub(super) fn epigraph_paras(epigraph: &Epigraph) -> String {
     // Schema order (CT_PPrBase): spacing before ind (#1302).
     let ppr = r#"<w:spacing w:line="240" w:lineRule="auto"/><w:ind w:left="1440"/>"#;
     render_epigraph(
