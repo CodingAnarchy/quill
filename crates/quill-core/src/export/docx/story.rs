@@ -61,7 +61,7 @@ pub(super) fn story_document_xml(doc: &Document, story: &StoryMeta) -> String {
 /// The contact block: the first line carries the word count right-aligned on a
 /// tab stop at the right margin, the rest of the details single-spaced beneath.
 /// With no contact details set, the word count stands alone on the right.
-fn contact_block(story: &StoryMeta) -> String {
+pub(super) fn contact_block(story: &StoryMeta) -> String {
     let count = approximate_words(story.words);
     let mut lines = story.contact.iter();
     let first = lines.next().map_or("", String::as_str);

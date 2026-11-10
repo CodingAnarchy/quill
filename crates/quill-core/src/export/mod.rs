@@ -12,6 +12,8 @@ use crate::frontmatter::{series_list_lines, Epigraph, Role};
 pub mod assemble;
 pub mod docx;
 pub mod epub;
+#[cfg(test)]
+mod novel_tests;
 pub mod pdf;
 pub mod preflight;
 pub mod scriv;
@@ -59,10 +61,15 @@ pub struct Document {
     /// writer gives it a chapter heading or a one-entry contents, and the Word
     /// manuscript takes the short story submission layout.
     pub story: Option<StoryMeta>,
+    /// Set for a novel (#1302): the contact block and word count for its Word
+    /// manuscript's title page, which takes standard manuscript format rather
+    /// than a finished book's front matter. `None` for a story, a collection,
+    /// and a series book.
+    pub novel: Option<StoryMeta>,
 }
 
-/// What a short story's submission manuscript carries beyond the prose (#1241):
-/// the author's contact block and the story's word count.
+/// What a submission manuscript carries beyond the prose (#1241, #1302): the
+/// author's contact block and the story's or novel's word count.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StoryMeta {
     /// The contact block, top-left of page one: name, address lines, email, phone.
@@ -660,6 +667,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         }
     }
 
@@ -681,6 +689,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         let md = to_markdown_series(
             &[book("Book One", "alpha"), book("Book Two", "beta")],
@@ -744,6 +753,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         // The body is emitted verbatim, so the fence (and its literal `--`) survive.
         assert!(
@@ -775,6 +785,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         assert!(
             to_markdown(&d).contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
@@ -925,6 +936,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         assert!(
             to_markdown(&d).contains("Scene one.\n\n---\n\nScene two."),
@@ -948,6 +960,7 @@ mod tests {
             parts: vec![],
             back: vec![],
             story: None,
+            novel: None,
         };
         let md = to_markdown(&d);
         assert!(

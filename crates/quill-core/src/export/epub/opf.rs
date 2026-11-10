@@ -376,6 +376,7 @@ mod tests {
             }],
             back: vec![chapter("Afterword", None, "After.")],
             story: None,
+            novel: None,
         }
     }
 
@@ -747,6 +748,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         let bytes = to_epub_series(
             &[book("Book One", "alpha"), book("Book Two", "beta")],
@@ -792,6 +794,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         let first = PubMeta {
             isbn: Some("978-0-00-000000-0".into()),

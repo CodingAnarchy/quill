@@ -36,6 +36,7 @@ fn doc() -> Document {
         }],
         back: vec![],
         story: None,
+        novel: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn smart_typography_glyphs_pass_through_to_docx() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx(&d, Profile::Manuscript).unwrap();
     let xml = part(&bytes, "word/document.xml");
@@ -103,6 +105,7 @@ fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let xml = part(
         &to_docx(&d, Profile::Manuscript).unwrap(),
@@ -139,6 +142,7 @@ fn series_docx_carries_every_book_in_order() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx_series(
         &[book("Book One"), book("Book Two")],
@@ -184,6 +188,7 @@ fn series_docx_reprints_each_books_copyright_not_just_the_first() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let first = PubMeta {
         isbn: Some("978-0-00-000000-0".into()),
@@ -331,6 +336,7 @@ fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let xml = part(
         &to_docx(&d, Profile::Manuscript).unwrap(),
@@ -515,6 +521,28 @@ fn manuscript_profile_emits_a_toc_field_for_the_chapters() {
 }
 
 #[test]
+fn the_contents_lists_the_part_and_chapter_titles_without_an_update() {
+    // #1302: Word, Pages, Google Docs, and LibreOffice show a TOC field's stored
+    // result as it is, so the field carries the titles rather than a placeholder.
+    let bytes = to_docx(&doc(), Profile::Manuscript).expect("export");
+    let xml = part(&bytes, "word/document.xml");
+    assert!(
+        !xml.contains("Right-click to update"),
+        "no placeholder: {xml}"
+    );
+    assert!(!xml.contains("quill:toc"), "no marker left behind: {xml}");
+    let field = &xml[xml
+        .find(r#"<w:fldChar w:fldCharType="separate"/>"#)
+        .expect("TOC field")..];
+    let field = &field[..field
+        .find(r#"<w:fldChar w:fldCharType="end"/>"#)
+        .expect("field end")];
+    let part_at = field.find("Part One").expect("the part is listed");
+    let chapter_at = field.find("The Find").expect("the chapter is listed");
+    assert!(part_at < chapter_at, "in reading order: {field}");
+}
+
+#[test]
 fn vellum_profile_has_no_header_or_toc() {
     // Vellum applies its own front matter and running header — the generated
     // package must not add one, or it would conflict on import.
@@ -669,6 +697,7 @@ fn series_docx_carries_a_header_and_toc() {
         }],
         back: vec![],
         story: None,
+        novel: None,
     };
     let bytes = to_docx_series(
         &[book("Book One"), book("Book Two")],

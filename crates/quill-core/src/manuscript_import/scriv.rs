@@ -713,6 +713,7 @@ mod tests {
                 role: None,
             }],
             story: None,
+            novel: None,
         };
         let dir =
             crate::testutil::scratch_dir("scriv-import", "round-trip").join("Round Trip.scriv");

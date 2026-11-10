@@ -669,6 +669,7 @@ mod tests {
                 }],
                 back: vec![],
                 story: None,
+                novel: None,
             },
             "2026-06-30T00:00:00Z",
             &style,

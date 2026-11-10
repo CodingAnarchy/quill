@@ -548,6 +548,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         // The Vellum profile tags chapter titles as Heading 1 — what the importer splits on.
         let bytes = to_docx(&doc, Profile::Vellum).unwrap();
@@ -784,6 +785,7 @@ mod tests {
             }],
             back: vec![],
             story: None,
+            novel: None,
         };
         let notes: Vec<ChapterNotes> = vec![vec![
             ReviewNote {
