@@ -42,7 +42,12 @@ impl App {
             KeyCode::Home => self.prompt_mut().move_home(),
             KeyCode::End => self.prompt_mut().move_end(),
             KeyCode::Enter => {
-                let text = mem::take(&mut self.prompt_mut().input);
+                // Take the input and put the caret back at its start, so a prompt
+                // a handler leaves open stays editable rather than holding a caret
+                // past its now-empty input.
+                let prompt = self.prompt_mut();
+                prompt.caret = 0;
+                let text = mem::take(&mut prompt.input);
                 self.submit_text(pending, text.trim(), nav_return);
             }
             KeyCode::Esc => self.cancel_text_prompt(pending, nav_return),
@@ -128,7 +133,6 @@ impl App {
                 };
                 self.select(sel);
             }
-            Pending::SetPronunciation => self.apply_pronunciation(text),
             Pending::SetMeta(field) => {
                 // Single-line metadata prompts (summary, POV, attribution, book
                 // fields). The multi-line epigraph quotations are edited in the
@@ -245,6 +249,8 @@ impl App {
                 self.create_annotation(start, end, text.to_string());
             }
             Pending::AiArg(action) => self.submit_ai_arg(action, text),
+            // Reports in the status bar (#1328).
+            Pending::SetPronunciation => self.apply_pronunciation(text),
             // The ranked similar passages arrive in the findings overlay (#924).
             Pending::SemanticFind => self.semantic_find(text),
             Pending::Thesaurus => self.thesaurus(text),
