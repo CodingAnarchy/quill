@@ -102,7 +102,8 @@ fn an_annotation_stays_on_its_phrase() {
 #[test]
 fn a_verse_fence_is_verse_and_a_code_fence_is_code() {
     let dir = scratch_dir("ffi-session", "verse");
-    let text = "She sang.\n\n```verse iambic tetrameter abab\nThe wind was loud\n```\n\n```\nlog\n```\n";
+    let text =
+        "She sang.\n\n```verse iambic tetrameter abab\nThe wind was loud\n```\n\n```\nlog\n```\n";
     let session = project(&dir, text).edit_chapter(0).unwrap();
     let spans = session.styles(0, session.utf16_length());
     let at = |kind: StyleKind| {
@@ -119,7 +120,10 @@ fn a_verse_fence_is_verse_and_a_code_fence_is_code() {
         .filter(|s| s.kind == StyleKind::Marker)
         .map(|s| &text[s.start as usize..(s.start + s.length) as usize])
         .collect();
-    assert!(markers.contains(&"```verse iambic tetrameter abab\n"), "{markers:?}");
+    assert!(
+        markers.contains(&"```verse iambic tetrameter abab\n"),
+        "{markers:?}"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
