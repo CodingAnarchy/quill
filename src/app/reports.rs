@@ -25,49 +25,6 @@ impl App {
         self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
     }
 
-    /// Open the verse report overlay (#1324, #1325): each chapter with a target
-    /// meter or rhyme scheme, checked line by line. With no target set anywhere,
-    /// say how to set one rather than open an empty report.
-    pub(crate) fn open_verse_report(&mut self) {
-        let active = self.project.active_index();
-        let chapters: Vec<verse::ChapterVerse> = (0..self.chapter_count())
-            .filter_map(|i| {
-                let meter = self.project.chapter_meter(i).cloned();
-                let rhyme = self.project.chapter_rhyme(i).cloned();
-                if meter.is_none() && rhyme.is_none() {
-                    return None;
-                }
-                let text = self.chapter_text_with_active(i, active);
-                Some(verse::ChapterVerse {
-                    title: self
-                        .project
-                        .chapter_title(i)
-                        .unwrap_or("Untitled")
-                        .to_string(),
-                    scans: meter
-                        .as_ref()
-                        .map(|m| verse::scan_meter_with(&text, m, self.project.lexicon()))
-                        .unwrap_or_default(),
-                    rhymes: rhyme
-                        .as_ref()
-                        .map(|r| verse::check_rhyme_with(&text, r, self.project.lexicon()))
-                        .unwrap_or_default(),
-                    meter,
-                    rhyme,
-                })
-            })
-            .collect();
-        if chapters.is_empty() {
-            self.message = Some(
-                "No chapter has a target meter or rhyme scheme. Set one with V or H in the chapter browser (Ctrl-G)."
-                    .into(),
-            );
-            return;
-        }
-        let lines = verse::lines(&self.project.manifest.title, &chapters);
-        self.overlay = Some(Overlay::report("verse", lines));
-    }
-
     /// Open the writing-history view overlay (the run-action menu, #586): the
     /// daily net-words graph, the current and longest streak, the totals, and the
     /// month calendar heatmap with its per-session breakdown (#835) — built from

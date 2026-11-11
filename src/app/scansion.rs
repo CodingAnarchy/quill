@@ -1,5 +1,6 @@
 //! The in-editor scansion marks (#1326): with the toggle on, each line of a
-//! chapter that has a target meter or rhyme scheme shows its stress reading,
+//! chapter that has a target meter or rhyme scheme, and of each fenced verse
+//! block in a chapter (#1337), shows its stress reading,
 //! syllable count, and rhyme letter in a gutter beside it, and the words that
 //! break the meter or the scheme are marked in the text (licences apart from
 //! faults). `]m` / `[m` step between the lines that break it.
@@ -17,7 +18,7 @@ use super::*;
 
 use crate::verse::lexicon::Lexicon;
 use crate::verse::marks::{self as verse_marks, Marks};
-use crate::verse::pronounce;
+use crate::verse::{pronounce, Targets};
 
 /// What the marks were computed from: the buffer's content revision, each
 /// chapter in view with its targets, and the pronunciations.
@@ -30,8 +31,8 @@ pub(super) struct ScansionKey {
 impl App {
     /// Recompute the scansion marks for the edit buffer, off the keystroke path.
     /// Empty when the marks are off, when the focused pane isn't a chapter, or
-    /// when no chapter in view has a target. Skips the scan when nothing it reads
-    /// has changed since the last one.
+    /// when no chapter in view has a target or a fenced verse block. Skips the
+    /// scan when nothing it reads has changed since the last one.
     pub(crate) fn refresh_scansion(&mut self) {
         if !self.scansion_on || !self.focus_shows_active_chapter() {
             self.scansion = Marks::default();
@@ -67,22 +68,22 @@ impl App {
             return;
         }
         let mut marks = Marks::default();
-        if targets
-            .iter()
-            .any(|(_, _, m, r)| m.is_some() || r.is_some())
+        // Only on a changed revision, with the marks on: one copy of the window.
+        let text = self.edit_buffer().text();
+        if text.contains("```")
+            || targets
+                .iter()
+                .any(|(_, _, m, r)| m.is_some() || r.is_some())
         {
-            let text = self.edit_buffer().text();
             for (start, end, meter, rhyme) in &targets {
                 let Some(span) = text.get(*start..*end) else {
                     continue;
                 };
-                marks.extend(verse::marks(
-                    span,
-                    *start,
-                    meter.as_ref(),
-                    rhyme.as_ref(),
-                    lexicon,
-                ));
+                let chapter = Targets {
+                    meter: meter.clone(),
+                    rhyme: rhyme.clone(),
+                };
+                marks.extend(verse::chapter_marks(span, *start, &chapter, lexicon));
             }
         }
         self.scansion = marks;
@@ -110,7 +111,7 @@ impl App {
         let lines = self.scansion.lines.len();
         let faults = self.scansion.fault_lines().len();
         let mut message = if lines == 0 {
-            "Scansion marks on. Nothing here has a target meter or rhyme scheme (V or H in the chapter browser).".to_string()
+            "Scansion marks on. Nothing here has a target meter or rhyme scheme (V or H in the chapter browser, or a ```verse block).".to_string()
         } else if faults == 0 {
             format!("Scansion marks on: {lines} lines, all keeping to the target.")
         } else {
@@ -172,7 +173,8 @@ impl App {
     }
 
     /// Single view: walk to the next / previous chapter with a line off its
-    /// target, open it, and land on its first (forward) or last (backward) one.
+    /// target (its own, or a fenced verse block's), open it, and land on its
+    /// first (forward) or last (backward) one.
     fn scansion_across_chapters(&mut self, dir: i32) {
         let active = self.project.active_index();
         let count = self.chapter_count();
@@ -191,20 +193,13 @@ impl App {
                 }
                 idx - 1
             };
-            let meter = self.project.chapter_meter(idx).cloned();
-            let rhyme = self.project.chapter_rhyme(idx).cloned();
-            if meter.is_none() && rhyme.is_none() {
+            let chapter = self.chapter_targets(idx);
+            let text = self.chapter_text_with_active(idx, active);
+            if chapter.is_empty() && !text.contains("```") {
                 continue;
             }
-            let text = self.chapter_text_with_active(idx, active);
-            let faults = verse::marks(
-                &text,
-                0,
-                meter.as_ref(),
-                rhyme.as_ref(),
-                self.project.lexicon(),
-            )
-            .fault_lines();
+            let faults =
+                verse::chapter_marks(&text, 0, &chapter, self.project.lexicon()).fault_lines();
             let landing = if dir >= 0 {
                 faults.first()
             } else {

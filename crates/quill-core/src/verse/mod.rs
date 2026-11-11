@@ -13,9 +13,14 @@
 //! - [`lines`]: which lines are verse, shared by both.
 //! - [`lexicon`]: the author's own pronunciations for the project (#1328).
 //! - [`marks`]: the scans as the editor's gutter and in-text marks (#1326).
+//! - [`blocks`]: verse fenced inside a prose chapter, with its own targets
+//!   (#1337).
 //!
 //! `docs/manuscript-analysis.md` explains the method and where it falls short.
 
+pub mod blocks;
+#[cfg(test)]
+mod blocks_tests;
 pub mod lexicon;
 #[cfg(test)]
 mod lexicon_tests;
@@ -32,8 +37,9 @@ pub mod scan;
 #[cfg(test)]
 mod tests;
 
+pub use blocks::{fence_targets, shift_lines, verse_blocks, Targets, VerseBlock};
 pub use lexicon::{Entry, Lexicon, PRONUNCIATIONS_NAME};
-pub use marks::{marks, GutterLine, Marks, MeterCell, RhymeCell};
+pub use marks::{chapter_marks, marks, GutterLine, Marks, MeterCell, RhymeCell};
 pub use meter::{Foot, Meter, METER_EXAMPLES};
 pub use rhyme::{
     check_rhyme, check_rhyme_with, letter_name, summarize_rhyme, RhymeFault, RhymeKind, RhymeLine,

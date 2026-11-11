@@ -251,6 +251,8 @@ impl App {
             Pending::AiArg(action) => self.submit_ai_arg(action, text),
             // Reports in the status bar (#1328).
             Pending::SetPronunciation => self.apply_pronunciation(text),
+            // The result opens as a verse report (#1337).
+            Pending::CheckVerse => self.apply_verse_check(text),
             // The ranked similar passages arrive in the findings overlay (#924).
             Pending::SemanticFind => self.semantic_find(text),
             Pending::Thesaurus => self.thesaurus(text),

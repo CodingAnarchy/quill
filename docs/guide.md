@@ -513,6 +513,28 @@ between the lines that break it, crossing into the next chapter when this one
 has none left. F3 again hides it all; Quill remembers which you chose for the
 project. A chapter with no target shows nothing either way.
 
+A poem or song inside prose (a ballad a character sings, a verse quoted at a
+funeral) can be checked on its own. Fence it like this:
+
+    ```verse iambic tetrameter abab
+    The wind was loud upon the hill,
+    The sheep were huddled in the fold,
+    ```
+
+The words after "verse" are its targets: a meter, a rhyme scheme, or both, in
+the same words "V" and "H" take (put a "/" between them if it reads better).
+With none, the block uses the chapter's targets, if it has any. The Verse
+report lists each block under its chapter, numbered as lines of the chapter,
+and F3 marks its lines and nothing else of the prose. The fence lines hide
+until the cursor steps into the block, and on export the block is set as verse
+(each line its own line, stanza gaps kept), never as code, without the fences.
+
+To check some lines once, without fencing them, select them (v, or drag), press
+Ctrl-K, and run "Check the selected lines as verse". With no selection it takes
+the stanza the cursor is in. Type what to check against ("common meter abcb")
+and the result opens as a Verse report for just those lines. Nothing is written
+to the chapter.
+
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest
 writing streak (a day counts when its net words are positive; a streak survives a

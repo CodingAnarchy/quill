@@ -32,6 +32,9 @@ pub enum Action {
     /// Open the verse report (#1324): every chapter with a target meter, scanned
     /// line by line.
     VerseReport,
+    /// Check the selected lines, or the stanza at the cursor, against a meter
+    /// and rhyme scheme chosen for them (#1337).
+    CheckVerse,
     /// Set how the word at the cursor sounds for verse analysis (#1328).
     SetPronunciation,
     /// Open the project's pronunciations file to view and edit it (#1328).

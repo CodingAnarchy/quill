@@ -83,8 +83,8 @@ fn a_fenced_code_block_is_kept_whole_and_classified_preformatted() {
     let body = "Intro line.\n\n```\nZENITH // 2053\n\nPRE-IGNIT\n```\n\nAfter.";
     let blocks = body_blocks(body);
     assert_eq!(blocks.len(), 3, "{blocks:?}");
-    assert_eq!(blocks[0], "Intro line.");
-    assert_eq!(blocks[2], "After.");
+    assert_eq!(&*blocks[0], "Intro line.");
+    assert_eq!(&*blocks[2], "After.");
     // The fenced block is preformatted: fences gone, inner breaks preserved.
     match classify_block(&blocks[1], false) {
         Some(Prose::Preformatted(code)) => {

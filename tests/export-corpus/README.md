@@ -10,8 +10,9 @@ request.
 
 - `novel/`: parts, front and back matter (a dedication, acknowledgments), a
   book epigraph and a chapter epigraph, scene breaks, emphasis, a cover image
-  with alt text, publishing metadata, text in French, Greek, and Japanese, and a
-  5.5 by 8.5 print trim with a 0.125" bleed.
+  with alt text, publishing metadata, text in French, Greek, and Japanese, a
+  song fenced as verse inside a prose chapter (#1337), and a 5.5 by 8.5 print
+  trim with a 0.125" bleed.
 - `series/`: a two-book series (`[[books]]`), exported as one omnibus and as
   its open book.
 - `story/` and `story-two/`: short stories with scenes.

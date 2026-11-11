@@ -10,6 +10,7 @@ use std::io;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use super::blocks::{verse_blocks, Targets};
 use super::lexicon::Lexicon;
 use super::meter::Meter;
 use super::rhyme::{check_rhyme_with, letter_name, RhymeScheme};
@@ -78,6 +79,46 @@ impl Marks {
             .map(|l| l.line_start)
             .collect()
     }
+}
+
+/// The marks for a chapter's `text`, which starts at byte `offset` of the
+/// buffer: its lines against the chapter's targets, and each fenced verse block
+/// (#1337) against its own targets, or the chapter's when it names none.
+pub fn chapter_marks(text: &str, offset: usize, targets: &Targets, lexicon: &Lexicon) -> Marks {
+    let mut out = marks(
+        text,
+        offset,
+        targets.meter.as_ref(),
+        targets.rhyme.as_ref(),
+        lexicon,
+    );
+    if !text.contains("```") {
+        return out;
+    }
+    let mut added = false;
+    for block in verse_blocks(text) {
+        let own = block.targets_within(targets);
+        let Some(span) = text.get(block.inner.clone()) else {
+            continue;
+        };
+        if own.is_empty() {
+            continue;
+        }
+        out.extend(marks(
+            span,
+            offset + block.inner.start,
+            own.meter.as_ref(),
+            own.rhyme.as_ref(),
+            lexicon,
+        ));
+        added = true;
+    }
+    if added {
+        out.lines.sort_by_key(|l| l.line_start);
+        out.faults = merged(out.faults);
+        out.licences = merged(out.licences);
+    }
+    out
 }
 
 /// The marks for `text`, which starts at byte `offset` of the buffer, against

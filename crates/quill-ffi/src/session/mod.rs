@@ -266,7 +266,8 @@ const fn style_kind(kind: HighlightKind) -> StyleKind {
         HighlightKind::Heading => StyleKind::Heading,
         HighlightKind::Strong => StyleKind::Strong,
         HighlightKind::Emphasis => StyleKind::Emphasis,
-        HighlightKind::Code => StyleKind::Code,
+        // The phone sets a verse fence (#1337) apart like code for now.
+        HighlightKind::Code | HighlightKind::Verse => StyleKind::Code,
         HighlightKind::SceneBreak => StyleKind::SceneBreak,
     }
 }

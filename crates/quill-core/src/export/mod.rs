@@ -6,8 +6,10 @@
 //! `Document`.
 
 use std::fmt::Write;
+use std::ops::Deref;
 
 use crate::frontmatter::{series_list_lines, Epigraph, Role};
+use crate::verse::fence_targets;
 
 pub mod assemble;
 pub mod docx;
@@ -266,9 +268,11 @@ pub fn to_markdown(doc: &Document) -> String {
                 // the Word/Scrivener writers, which can't carry raw Markdown).
                 // A verse chapter's lines carry hard breaks so they stay lines
                 // (#1327).
+                // So do the lines of a fenced verse block, whose fences are
+                // dropped (#1337).
                 let verse_body;
-                let body = if chapter.verse {
-                    verse_body = verse::markdown_body(chapter.body.trim());
+                let body = if chapter.verse || chapter.body.contains("```") {
+                    verse_body = verse::markdown_body(chapter.body.trim(), chapter.verse);
                     verse_body.trim()
                 } else {
                     chapter.body.trim()
@@ -501,38 +505,77 @@ enum Prose {
     Stanza(Vec<verse::VerseLine>),
 }
 
+/// One block of a chapter body, before classification: its text, and whether
+/// it came from a fenced verse block (#1337), which reads as verse whatever the
+/// chapter is. Derefs to its text.
+#[derive(Debug)]
+struct BodyBlock {
+    text: String,
+    verse: bool,
+}
+
+impl Deref for BodyBlock {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Where [`body_blocks`] is in the body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fence {
+    None,
+    Code,
+    Verse,
+}
+
 /// Split a chapter body into blocks for classification. Blocks are separated by
 /// blank lines, except a fenced code block (```` ``` ````) is kept whole even
-/// when it contains blank lines, so preformatted text survives intact (#522).
-fn body_blocks(body: &str) -> Vec<String> {
+/// when it contains blank lines, so preformatted text survives intact (#522). A
+/// fenced verse block (```` ```verse ````, #1337) loses its fence lines and
+/// splits into its stanzas, each marked as verse.
+fn body_blocks(body: &str) -> Vec<BodyBlock> {
     let mut blocks = Vec::new();
     let mut cur: Vec<&str> = Vec::new();
-    let mut in_fence = false;
-    let flush = |cur: &mut Vec<&str>, blocks: &mut Vec<String>| {
+    let mut fence = Fence::None;
+    let flush = |cur: &mut Vec<&str>, blocks: &mut Vec<BodyBlock>, verse: bool| {
         if !cur.is_empty() {
-            blocks.push(cur.join("\n"));
+            blocks.push(BodyBlock {
+                text: cur.join("\n"),
+                verse,
+            });
             cur.clear();
         }
     };
     for line in body.lines() {
         let is_fence = line.trim_start().starts_with("```");
-        if in_fence {
-            cur.push(line);
-            if is_fence {
-                flush(&mut cur, &mut blocks);
-                in_fence = false;
+        match fence {
+            Fence::Code => {
+                cur.push(line);
+                if is_fence {
+                    flush(&mut cur, &mut blocks, false);
+                    fence = Fence::None;
+                }
             }
-        } else if is_fence {
-            flush(&mut cur, &mut blocks);
-            cur.push(line);
-            in_fence = true;
-        } else if line.trim().is_empty() {
-            flush(&mut cur, &mut blocks);
-        } else {
-            cur.push(line);
+            Fence::Verse if is_fence => {
+                flush(&mut cur, &mut blocks, true);
+                fence = Fence::None;
+            }
+            Fence::None if is_fence => {
+                flush(&mut cur, &mut blocks, false);
+                if fence_targets(line).is_some() {
+                    fence = Fence::Verse;
+                } else {
+                    cur.push(line);
+                    fence = Fence::Code;
+                }
+            }
+            _ if line.trim().is_empty() => flush(&mut cur, &mut blocks, fence == Fence::Verse),
+            _ => cur.push(line),
         }
     }
-    flush(&mut cur, &mut blocks);
+    flush(&mut cur, &mut blocks, fence == Fence::Verse);
     blocks
 }
 
@@ -560,11 +603,11 @@ fn fenced_code(block: &str) -> Option<String> {
 /// [`Prose`] to its own markup; any per-format state (the EPUB drop-cap
 /// `opening` flag) is computed by the caller from the yielded variant.
 /// In a verse chapter (`verse`), a block that would be a paragraph is a stanza
-/// instead (#1327).
+/// instead (#1327), as is every block of a fenced verse block (#1337).
 fn prose_blocks(body: &str, verse: bool) -> impl Iterator<Item = Prose> {
     body_blocks(body)
         .into_iter()
-        .filter_map(move |block| classify_block(&block, verse))
+        .filter_map(move |block| classify_block(&block, verse || block.verse))
 }
 
 /// Classify one body block (already split via [`body_blocks`]), or `None` when

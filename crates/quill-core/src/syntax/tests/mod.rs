@@ -152,6 +152,20 @@ fn fenced_code_block_is_highlighted_and_holds_no_concealed_emphasis() {
 }
 
 #[test]
+fn a_verse_fence_is_verse_not_code_and_hides_its_fence_lines() {
+    let text = "She sang.\n\n```verse iambic tetrameter abab\nThe wind was loud\n```\n\nAfter.\n";
+    let s = Syntax::new(text);
+    let kinds: Vec<HighlightKind> = all(&s).iter().map(|h| h.kind).collect();
+    assert_eq!(kinds, [HighlightKind::Verse], "{kinds:?}");
+    let hidden = s.conceal_ranges(None);
+    assert_eq!(
+        &text[hidden[0].0..hidden[0].1],
+        "```verse iambic tetrameter abab\n"
+    );
+    assert_eq!(&text[hidden[1].0..hidden[1].1], "```\n");
+}
+
+#[test]
 fn conceals_whole_fence_lines_and_reveals_them_inside_the_block() {
     // Opening fence carries an info string; both fence rows (with newline) hide.
     let text = "Intro.\n\n```rust\nlet x = 1;\n```\n\nAfter.\n";

@@ -5,6 +5,8 @@
 //! with a hanging indent, so a line too long for the page wraps visibly inside
 //! itself rather than reading as a new line.
 
+use crate::verse::fence_targets;
+
 /// One line of a stanza.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerseLine {
@@ -36,30 +38,56 @@ pub fn stanza(block: &str) -> Vec<VerseLine> {
         .collect()
 }
 
-/// A verse chapter's Markdown body: each line of a stanza but the last ends in a
-/// backslash, CommonMark's hard line break, so a Markdown reader keeps the lines.
-/// Headings, scene breaks, fenced code, and blank lines are left as they are.
-pub fn markdown_body(body: &str) -> String {
+/// A chapter's Markdown body with its verse kept as lines: in a verse chapter
+/// (`chapter_verse`) and in a fenced verse block (#1337), each line of a stanza
+/// but the last ends in a backslash, CommonMark's hard line break, so a Markdown
+/// reader keeps the lines. A verse block's fence lines become blank lines, so its
+/// stanzas stand apart from the prose around them. Headings, scene breaks, code
+/// fences, and blank lines are left as they are.
+pub fn markdown_body(body: &str, chapter_verse: bool) -> String {
     let lines: Vec<&str> = body.lines().collect();
     let mut out = String::with_capacity(body.len() + lines.len());
-    let mut fenced = false;
-    for (i, line) in lines.iter().enumerate() {
-        let fence = line.trim_start().starts_with("```");
-        if fence {
-            fenced = !fenced;
-        }
-        let verse = |l: &str| {
-            !l.trim().is_empty()
-                && !l.trim_start().starts_with('#')
-                && !l.trim_start().starts_with("```")
-                && !super::is_thematic_break(l.trim())
+    // Whether each line is verse, and which lines are verse fences to blank.
+    let mut verse = Vec::with_capacity(lines.len());
+    let mut blank = Vec::with_capacity(lines.len());
+    let mut fence: Option<bool> = None;
+    for line in &lines {
+        let is_fence = line.trim_start().starts_with("```");
+        let (is_verse, is_blank) = match fence {
+            Some(in_verse) if is_fence => {
+                fence = None;
+                (false, in_verse)
+            }
+            Some(in_verse) => (in_verse && stanza_line(line), false),
+            None if is_fence => {
+                let opens_verse = fence_targets(line).is_some();
+                fence = Some(opens_verse);
+                (false, opens_verse)
+            }
+            None => (chapter_verse && stanza_line(line), false),
         };
+        verse.push(is_verse);
+        blank.push(is_blank);
+    }
+    for (i, line) in lines.iter().enumerate() {
+        if blank[i] {
+            out.push('\n');
+            continue;
+        }
         out.push_str(line);
-        let next_is_verse = lines.get(i + 1).is_some_and(|n| verse(n));
-        if !fence && !fenced && verse(line) && next_is_verse && !line.ends_with('\\') {
+        let next_is_verse = verse.get(i + 1).copied().unwrap_or(false);
+        if verse[i] && next_is_verse && !line.ends_with('\\') {
             out.push('\\');
         }
         out.push('\n');
     }
     out
+}
+
+/// Whether a line of verse text is a line of a stanza, rather than a gap, a
+/// heading, or a scene break.
+fn stanza_line(line: &str) -> bool {
+    !line.trim().is_empty()
+        && !line.trim_start().starts_with('#')
+        && !super::is_thematic_break(line.trim())
 }
