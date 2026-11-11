@@ -23,6 +23,7 @@ mod header;
 mod margin;
 mod ranges;
 mod rows;
+mod scansion;
 
 pub use galley::{galley_last_top, galley_next_top, galley_prev_top};
 // The galley page renderer is dispatched from `ui::draw_editor_base` (#1003).
@@ -68,6 +69,11 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
     let margin = margin::wanted(app);
     if margin {
         column = margin::make_room(body, column);
+    }
+    // The scansion gutter (#1326) sits left of the prose; open room for it there.
+    let gutter = scansion::wanted(app);
+    if gutter {
+        column = scansion::make_room(body, column, &app.scansion);
     }
 
     let buffer = app.edit_buffer();
@@ -128,6 +134,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
         spell,
         style_flags,
         proximity,
+        verse_faults: &app.scansion.faults,
+        verse_licences: &app.scansion.licences,
         annotations: &annotations,
         focus,
     };
@@ -140,6 +148,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
             highlights.spell,
             highlights.style_flags,
             highlights.proximity,
+            highlights.verse_faults,
+            highlights.verse_licences,
         ]
         .iter()
         .all(|l| is_sorted_disjoint(l)),
@@ -168,6 +178,9 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App, acti
     );
     if margin {
         margin::draw(frame, body, app, &editor_layout);
+    }
+    if gutter {
+        scansion::draw(frame, body, app, &editor_layout);
     }
     drop(editor_layout);
     // Store the offset the renderer actually applied (clamped to the content), so a
@@ -235,6 +248,8 @@ pub(super) fn render_reference_pane(
         spell: &[],
         style_flags: &[],
         proximity: &[],
+        verse_faults: &[],
+        verse_licences: &[],
         annotations: &Overlapping::default(),
         focus: None,
     };

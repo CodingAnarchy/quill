@@ -64,6 +64,11 @@ pub(super) struct SpanHighlights<'a> {
     /// marker while the toggle is on so the local repetition is visible where it
     /// happens. Empty (no marking) when the toggle is off.
     pub(super) proximity: &'a [ByteRange],
+    /// Verse that breaks its meter or rhyme scheme (#1326), red and underlined,
+    /// while the scansion marks are on.
+    pub(super) verse_faults: &'a [ByteRange],
+    /// Verse that takes a licence (#1326), in the "revised" color.
+    pub(super) verse_licences: &'a [ByteRange],
     /// Annotated spans, tinted background (#302). Indexed for row-window lookup
     /// because, unlike the other lists, annotations may overlap or nest.
     pub(super) annotations: &'a Overlapping,
@@ -385,6 +390,8 @@ fn styled_row(
     let spell = disjoint_within(hl.spell, seg_start, seg_end);
     let style_flags = disjoint_within(hl.style_flags, seg_start, seg_end);
     let proximity = disjoint_within(hl.proximity, seg_start, seg_end);
+    let verse_faults = disjoint_within(hl.verse_faults, seg_start, seg_end);
+    let verse_licences = disjoint_within(hl.verse_licences, seg_start, seg_end);
     let annotations = hl.annotations.within(seg_start, seg_end);
     let has_highlight = syntax.highlights_in(seg_start, seg_end).next().is_some();
     // `current` (the search current match, or the Visual selection #205) can be
@@ -401,6 +408,8 @@ fn styled_row(
         && spell.is_empty()
         && style_flags.is_empty()
         && proximity.is_empty()
+        && verse_faults.is_empty()
+        && verse_licences.is_empty()
         && annotations.is_empty()
         && focus_covers_row
     {
@@ -432,6 +441,14 @@ fn styled_row(
         // author sees the local repetition without it shouting like a misspelling.
         if covers(proximity, abs) {
             style = style.add_modifier(Modifier::DIM);
+        }
+        // Scansion marks (#1326): a licence in the "revised" color, a fault red
+        // and underlined, so the two read apart at a glance.
+        if covers(verse_licences, abs) {
+            style = style.fg(theme.revised);
+        }
+        if covers(verse_faults, abs) {
+            style = style.fg(theme.removed).add_modifier(Modifier::UNDERLINED);
         }
         // Annotated spans (#302) get a tinted background, layered on the rest.
         if covers(&annotations, abs) {

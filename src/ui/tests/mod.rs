@@ -17,6 +17,7 @@ mod highlights;
 mod nav_pane;
 mod overlays;
 mod perf;
+mod scansion;
 
 fn buffer_with(text: &str) -> Buffer {
     let mut b = Buffer::empty();

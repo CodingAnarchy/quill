@@ -33,6 +33,9 @@ impl App {
                 self.refresh_style_flags();
                 self.refresh_proximity_repeats();
                 self.project.set_active(index);
+                // The scansion marks read the active chapter's targets, so they
+                // refresh once it's the active one.
+                self.refresh_scansion();
                 // No need to cache the new active chapter's count: while active,
                 // chapter_word_count reads it live from the buffer.
                 if let Some(title) = self.project.active_title() {

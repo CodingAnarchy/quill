@@ -96,6 +96,7 @@ mod pronounce; // setting how a word sounds for verse analysis (#1328)
 mod proximity_repeats; // the near-proximity word-repeat marking: toggle, dim-mark in place (#1002)
 mod quick_switch;
 mod saving;
+mod scansion; // the in-editor scansion gutter and marks for verse (#1326)
 mod sequenced;
 mod series_bible;
 mod spell;
@@ -128,6 +129,13 @@ pub use state::App;
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
         let under_vc = crate::vcs::is_repo(&project.root);
+        // The scansion marks (#1326) are remembered per project.
+        let scansion_on = crate::verse::marks::shown(&project.root);
+        if scansion_on {
+            // Parse the pronouncing dictionary off the UI thread before the first
+            // idle pass needs it.
+            std::thread::spawn(crate::verse::pronounce::warm);
+        }
         // Register the project so every config loader below layers this project's
         // `book.toml` `[quill]` overrides over the global config (#710). Set before
         // the first load, and re-set here on a switch (open_in_place rebuilds the
@@ -189,6 +197,9 @@ impl App {
             style_flags_key: None,
             proximity_repeats_on: false,
             proximity_repeats: Vec::new(),
+            scansion_on,
+            scansion: crate::verse::Marks::default(),
+            scansion_key: None,
             proximity_key: None,
             word_lists: RefCell::default(),
             pronounce_word: None,
@@ -534,6 +545,7 @@ impl App {
         self.refresh_spell_flags();
         self.refresh_style_flags();
         self.refresh_proximity_repeats();
+        self.refresh_scansion();
         // Turn the day over before booking any words, so the first post-midnight
         // tally lands on the new day rather than compounding yesterday's total (#1170).
         self.roll_day_if_needed(&crate::date::iso(crate::date::today()));
@@ -579,6 +591,10 @@ impl App {
         // even if its other inputs are unchanged.
         self.style_flags_key = None;
         self.proximity_key = None;
+        self.scansion_key = None;
+        if !self.scansion.lines.is_empty() {
+            self.scansion = crate::verse::Marks::default();
+        }
         if !self.style_flags.is_empty() {
             self.style_flags.clear();
         }

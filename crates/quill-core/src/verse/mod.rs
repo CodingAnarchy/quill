@@ -12,6 +12,7 @@
 //!   against it (#1325).
 //! - [`lines`]: which lines are verse, shared by both.
 //! - [`lexicon`]: the author's own pronunciations for the project (#1328).
+//! - [`marks`]: the scans as the editor's gutter and in-text marks (#1326).
 //!
 //! `docs/manuscript-analysis.md` explains the method and where it falls short.
 
@@ -19,6 +20,9 @@ pub mod lexicon;
 #[cfg(test)]
 mod lexicon_tests;
 pub mod lines;
+pub mod marks;
+#[cfg(test)]
+mod marks_tests;
 pub mod meter;
 pub mod pronounce;
 pub mod rhyme;
@@ -29,6 +33,7 @@ pub mod scan;
 mod tests;
 
 pub use lexicon::{Entry, Lexicon, PRONUNCIATIONS_NAME};
+pub use marks::{marks, GutterLine, Marks, MeterCell, RhymeCell};
 pub use meter::{Foot, Meter, METER_EXAMPLES};
 pub use rhyme::{
     check_rhyme, check_rhyme_with, letter_name, summarize_rhyme, RhymeFault, RhymeKind, RhymeLine,

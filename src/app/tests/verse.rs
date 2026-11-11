@@ -294,3 +294,152 @@ fn a_verse_chapter_keeps_its_lines_on_export() {
         app.message
     );
 }
+
+/// A two-chapter project in pentameter, each chapter with one line off it.
+fn pentameter_app(name: &str) -> (App, TempProject) {
+    let dir = two_chapter_dir(name);
+    fs::write(
+        dir.join("one.md"),
+        "---\nmeter: iambic pentameter\n---\nShall I compare thee to a summer's day?\nThe cat sat on the mat\nThou art more lovely and more temperate:\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("two.md"),
+        "---\nmeter: iambic pentameter\n---\nRough winds do shake the darling buds of May,\nA dog, happy, lay by the lamp at night\n",
+    )
+    .unwrap();
+    let app = open_test_app(&dir);
+    (app, dir)
+}
+
+#[test]
+fn the_scansion_marks_toggle_and_are_remembered_for_the_project() {
+    let (mut app, dir) = pentameter_app("verse-marks-toggle");
+    assert!(!app.scansion_on, "off by default");
+    app.on_key(key(KeyCode::F(3)));
+    assert!(app.scansion_on);
+    assert_eq!(
+        app.scansion.lines.len(),
+        3,
+        "each verse line has a gutter row"
+    );
+    assert_eq!(app.scansion.fault_lines().len(), 1);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("3 lines, 1 off"),
+        "{:?}",
+        app.message
+    );
+    assert!(open_test_app(&dir).scansion_on, "remembered on reopen");
+
+    app.run_action(Action::ToggleScansion, false);
+    assert!(!app.scansion_on);
+    assert!(app.scansion.lines.is_empty());
+    assert!(!open_test_app(&dir).scansion_on, "and off again");
+}
+
+#[test]
+fn the_marks_clear_while_typing_and_return_on_idle() {
+    let (mut app, _dir) = pentameter_app("verse-marks-idle");
+    app.on_key(key(KeyCode::F(3)));
+    assert!(!app.scansion.faults.is_empty());
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.on_key(key(KeyCode::Char('O')));
+    assert!(
+        app.scansion.lines.is_empty() && app.scansion.faults.is_empty(),
+        "an edit drops marks that point at old offsets"
+    );
+    app.on_idle();
+    assert_eq!(app.scansion.lines.len(), 3, "back on the next idle pass");
+}
+
+#[test]
+fn a_chapter_without_a_target_shows_nothing() {
+    let (mut app, _dir) = two_chapter_app("verse-marks-prose");
+    app.on_key(key(KeyCode::F(3)));
+    assert!(app.scansion_on && app.scansion.lines.is_empty());
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("Nothing here has a target"));
+}
+
+#[test]
+fn stepping_finds_the_lines_off_the_meter_across_chapters() {
+    let (mut app, _dir) = pentameter_app("verse-marks-step");
+    app.on_key(key(KeyCode::F(3)));
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.run_action(Action::NextScansionFault, false);
+    let line = |app: &App| app.buffer.line_of_byte(app.buffer.cursor_byte());
+    assert_eq!(
+        (app.project.active_index(), line(&app)),
+        (0, 1),
+        "The cat …"
+    );
+    app.run_action(Action::NextScansionFault, false);
+    assert_eq!(
+        app.project.active_index(),
+        1,
+        "crossed into the next chapter"
+    );
+    assert_eq!(line(&app), 1, "A dog, happy …");
+    assert_eq!(app.scansion.lines.len(), 2, "the marks follow the chapter");
+    app.run_action(Action::NextScansionFault, false);
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("end of the manuscript"));
+    app.run_action(Action::PrevScansionFault, false);
+    assert_eq!(
+        (app.project.active_index(), line(&app)),
+        (0, 1),
+        "back again"
+    );
+}
+
+#[test]
+fn the_continuous_view_marks_every_chapter_in_it() {
+    let (mut app, _dir) = pentameter_app("verse-marks-continuous");
+    app.toggle_continuous();
+    app.on_key(key(KeyCode::F(3)));
+    assert_eq!(app.scansion.lines.len(), 5, "both chapters' lines");
+    assert_eq!(app.scansion.fault_lines().len(), 2);
+}
+
+/// The idle scansion pass (#1326) over a book-length verse chapter: 1,500 lines
+/// of pentameter, scanned and rhyme-checked. It runs on the idle tick, never per
+/// keystroke, and once per edit burst (it's cached by revision), but it still
+/// runs on the UI thread, so it must stay well under a pause in typing.
+#[test]
+#[ignore = "timing guard: run with `cargo perf` (release)"]
+fn scansion_refresh_is_fast_for_a_long_poem() {
+    let stanza = "Shall I compare thee to a summer's day?\nThou art more lovely and more temperate:\nRough winds do shake the darling buds of May,\nAnd summer's lease hath all too short a date;\n\n";
+    let dir = two_chapter_dir("verse-marks-perf");
+    fs::write(
+        dir.join("one.md"),
+        format!(
+            "---\nmeter: iambic pentameter\nrhyme: ABAB\n---\n{}",
+            stanza.repeat(375)
+        ),
+    )
+    .unwrap();
+    let mut app = open_test_app(&dir);
+    crate::verse::pronounce::warm();
+    app.scansion_on = true;
+    // Warm the caches the first pass fills, then time a fresh pass.
+    app.refresh_scansion();
+    assert_eq!(app.scansion.lines.len(), 1500);
+    let runs = 5;
+    let start = std::time::Instant::now();
+    for _ in 0..runs {
+        app.invalidate_revision_highlights();
+        app.refresh_scansion();
+    }
+    let each = start.elapsed() / runs;
+    eprintln!("scansion refresh, 1,500 lines: {each:?}");
+    assert!(each.as_millis() < 50, "took {each:?}");
+}

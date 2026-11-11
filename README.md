@@ -46,8 +46,9 @@ keystrokes that stay out of the way.
   the licences it takes, where it breaks the meter, and which endings rhyme
   (perfect, slant, eye, identical) and which break the scheme. Names and
   invented words scan the way you say them once you set how they sound
-  (`pronunciations.txt`). Verse chapters keep their line breaks, stanzas, and
-  indents in every export. Offline,
+  (`pronunciations.txt`). F3 shows the scansion beside each line as you
+  write, with the faults marked in the text. Verse chapters keep their line
+  breaks, stanzas, and indents in every export. Offline,
   from the bundled CMU Pronouncing Dictionary (`assets/pronouncing/`, with its
   license); it only reports, never rewrites. See `docs/manuscript-analysis.md`.
 - **Project as a folder of chapters** — a `book.toml` manifest plus one

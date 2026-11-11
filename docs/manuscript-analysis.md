@@ -364,6 +364,28 @@ out), or how a word shifts its stress in a phrase. Monosyllables are read as the
 line needs, so a line made only of them can fit almost anything. The report is a
 reader's ear for where to look, not a ruling.
 
+## Verse: in-editor scansion (#1326)
+
+**F3** (or `view:scansion`) shows the same checks while the author writes. For
+each verse line of a chapter with a target, a gutter left of the prose column
+shows the meter verdict (✓, `~` for a licence, ✗), the reading, the syllable
+count, and the rhyme letter (red when the ending breaks the scheme). In the
+text, faults are red and underlined: a word with a fixed stress on the wrong
+beat, a whole line whose syllable count no reading holds, a rhyme word that
+breaks the scheme, and, under `strict`, a licence's word. An accepted licence's
+word (the last word of a feminine or catalectic ending, the first of a headless
+or inverted line or anacrusis) is in the "revised" color instead. A substituted
+foot has no single word to mark, so only its gutter verdict shows it.
+
+`]m` / `[m` (and `verse:next` / `verse:prev`) step between lines off the meter
+or the scheme, wrapping in the continuous view and crossing chapters in the
+single view. The marks are computed on the idle tick over the edit buffer (each
+chapter in the continuous view against its own targets), cached by revision,
+targets, and pronunciations, and dropped on an edit until the next idle pass,
+like the other revision aids. The toggle is remembered per project by a file in
+the `.quill/` state folder. When the terminal has no room left of the prose, the
+gutter isn't drawn; the in-text marks still are.
+
 ## Verse: the author's pronunciations (#1328)
 
 The dictionary is a reader with an American accent and no context. When it hears

@@ -36,6 +36,11 @@ pub enum Action {
     SetPronunciation,
     /// Open the project's pronunciations file to view and edit it (#1328).
     EditPronunciations,
+    /// Show or hide the scansion gutter and marks for verse (#1326), F3.
+    ToggleScansion,
+    /// Step to the next / previous line off its meter or rhyme scheme (#1326).
+    NextScansionFault,
+    PrevScansionFault,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
     /// Turn on the opt-in AI features in-app (#602): write `[ai] enabled = true`
