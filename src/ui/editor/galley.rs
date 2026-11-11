@@ -138,6 +138,8 @@ pub fn render_galley(frame: &mut Frame, area: Rect, app: &App) {
         spell: empty,
         style_flags: empty,
         proximity: empty,
+        verse_faults: empty,
+        verse_licences: empty,
         annotations: &Overlapping::default(),
         focus: None,
     };

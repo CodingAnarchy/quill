@@ -255,6 +255,12 @@ What they assert:
   (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
   words), so flagging on idle never stutters. It runs on the idle tick, never the
   keystroke path; the one-time dictionary parse is warmed before timing.
+- `scansion_refresh_is_fast_for_a_long_poem` (`app/tests/verse.rs`) — the
+  in-editor scansion marks (#1326) are computed on the idle tick, never per
+  keystroke (an edit clears them), and cached by buffer revision, targets, and
+  pronunciations. The one idle pass over 1,500 lines of rhymed pentameter stays
+  under 50ms (~16ms). Keep the scan off the keystroke and draw paths; the
+  gutter reads the cache by binary search.
 - `a_keystroke_is_fast_in_a_long_chapter` (`crates/quill-ffi/src/session/tests.rs`)
   — the iPhone editor's per-keystroke work through the FFI (#1232): apply the
   UTF-16 edit, restyle the edited paragraph, read the live count. It stays far

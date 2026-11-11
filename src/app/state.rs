@@ -27,7 +27,8 @@ use super::task::Task;
 use super::vcs_actions::VcMsg;
 use super::{
     assist, backup, batch_update, corkboard, findings_store, models, pass_queue, proximity_repeats,
-    qa_store, reports, series_bible, spell, sprint, style_flags, workflows, FoldState, GalleyState,
+    qa_store, reports, scansion, series_bible, spell, sprint, style_flags, workflows, FoldState,
+    GalleyState,
 };
 
 pub struct App {
@@ -96,6 +97,13 @@ pub struct App {
     /// visible window's content words echoed within a short span dim-mark in place,
     /// recomputed on the idle tick; toggling it off clears the cache and the marks.
     pub(crate) proximity_repeats_on: bool,
+    /// Whether the scansion marks are on (#1326), remembered for the project.
+    pub(crate) scansion_on: bool,
+    /// The scansion gutter and in-text marks for the edit buffer (#1326),
+    /// computed on idle; empty when off.
+    pub(crate) scansion: crate::verse::Marks,
+    /// What `scansion` was last computed from.
+    pub(super) scansion_key: Option<scansion::ScansionKey>,
     /// Byte ranges of near-proximity repeated content words in the edit buffer
     /// (#1002), recomputed on the idle tick (never the keystroke path or per draw)
     /// and dim-marked by the editor. Empty when the marking is off.

@@ -500,6 +500,19 @@ remove them (closing the pane reloads it). Verse spellings scan as written: a
 grave accent sounds a syllable (belovèd is three), 'd is a silent -ed (dimm'd),
 and an elision counts its letters as written (heav'n, o'er, wand'ring).
 
+To see the scansion while you write, press F3 (or run "Scansion marks for
+verse" from the Ctrl-K menu). Each line of a chapter with a target meter or rhyme
+scheme then shows, in a gutter to the left of the text, its verdict (a tick, ~
+for a licence, a cross when it breaks the meter), its stresses, its syllable
+count, and its rhyme letter, red when the ending breaks the scheme. In the text,
+the words that break the meter or the scheme are underlined in red, and a
+licence (a feminine ending, an inverted first foot) is colored instead. The marks
+catch up when you pause typing. "Next line off the meter or rhyme" and "Previous
+line off the meter or rhyme" in the Ctrl-K menu (]m and [m in Vim mode) step
+between the lines that break it, crossing into the next chapter when this one
+has none left. F3 again hides it all; Quill remembers which you chose for the
+project. A chapter with no target shows nothing either way.
+
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest
 writing streak (a day counts when its net words are positive; a streak survives a
@@ -734,6 +747,7 @@ KEY REFERENCE
 
   F1              this guide
   F2              story bible (browse it; entries grouped by folder)
+  F3              scansion marks for verse (gutter and in-text marks; ]m / [m step)
   Mouse           click to position the cursor; drag to select; scroll-wheel to scroll
   Paste           terminal paste inserts the system clipboard (one undoable edit)
   Ctrl-S          save

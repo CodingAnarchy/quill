@@ -271,6 +271,22 @@ const GROUPS: &[(&str, &[ActionSpec])] = &[
                 "Edit pronunciations (verse)",
             ),
             row(
+                Action::ToggleScansion,
+                "view:scansion",
+                "Scansion marks for verse (toggle)",
+            )
+            .key("F3"),
+            row(
+                Action::NextScansionFault,
+                "verse:next",
+                "Next line off the meter or rhyme",
+            ),
+            row(
+                Action::PrevScansionFault,
+                "verse:prev",
+                "Previous line off the meter or rhyme",
+            ),
+            row(
                 Action::HealthTrend,
                 "report:health-trend",
                 "Export health trend (across drafts)",
@@ -581,6 +597,9 @@ mod tests {
                 VerseReport,
                 SetPronunciation,
                 EditPronunciations,
+                ToggleScansion,
+                NextScansionFault,
+                PrevScansionFault,
                 EnableAi,
                 UserGuide,
                 QuickStart,

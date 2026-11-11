@@ -144,6 +144,16 @@ impl App {
             return;
         }
 
+        // F3 shows or hides the scansion marks for verse (#1326), with the same
+        // guard as F1 and F2.
+        if key.code == KeyCode::F(3)
+            && self.overlay.is_none()
+            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+        {
+            self.toggle_scansion();
+            return;
+        }
+
         // While a sequenced run is in progress (a workflow #227, a series-bible
         // refresh #340, or a durable pass queue #923) suspended on an async step,
         // Esc cancels it — cleanly, after the current step finishes (#344). Only in

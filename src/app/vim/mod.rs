@@ -85,7 +85,8 @@ impl App {
                 return;
             }
             // `]s` / `[s` jump to the next / previous misspelling (#359); `]r` / `[r`
-            // step the active style-flag sweep (#1001); `]]` / `[[` step scene
+            // step the active style-flag sweep (#1001); `]m` / `[m` step the lines
+            // off their meter or rhyme scheme (#1326); `]]` / `[[` step scene
             // heading to scene heading (#1009, Vim's own section motion); `]a` / `[a`
             // step to the next / previous OPEN annotation (#1009). Vim's own
             // bracket-nav bindings; any other second key cancels.
@@ -96,6 +97,7 @@ impl App {
                 match c {
                     's' => self.navigate_spell_flag(dir),
                     'r' => self.navigate_style_flag(dir),
+                    'm' => self.navigate_scansion(dir),
                     ']' if forward => self.jump_to_scene_heading(true),
                     '[' if !forward => self.jump_to_scene_heading(false),
                     'a' => self.jump_to_open_annotation(forward),
