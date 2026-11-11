@@ -11,9 +11,13 @@
 //! - [`rhyme`]: the target rhyme scheme, and checking each line's ending
 //!   against it (#1325).
 //! - [`lines`]: which lines are verse, shared by both.
+//! - [`lexicon`]: the author's own pronunciations for the project (#1328).
 //!
 //! `docs/manuscript-analysis.md` explains the method and where it falls short.
 
+pub mod lexicon;
+#[cfg(test)]
+mod lexicon_tests;
 pub mod lines;
 pub mod meter;
 pub mod pronounce;
@@ -24,11 +28,13 @@ pub mod scan;
 #[cfg(test)]
 mod tests;
 
+pub use lexicon::{Entry, Lexicon, PRONUNCIATIONS_NAME};
 pub use meter::{Foot, Meter, METER_EXAMPLES};
 pub use rhyme::{
-    check_rhyme, letter_name, summarize_rhyme, RhymeFault, RhymeKind, RhymeLine, RhymeScheme,
-    RhymeSummary, RHYME_EXAMPLES,
+    check_rhyme, check_rhyme_with, letter_name, summarize_rhyme, RhymeFault, RhymeKind, RhymeLine,
+    RhymeScheme, RhymeSummary, RHYME_EXAMPLES,
 };
 pub use scan::{
-    scan_meter, summarize, Deviation, LineScan, MeterSummary, Variation, WordScan, BEAT, OFFBEAT,
+    scan_meter, scan_meter_with, summarize, Deviation, LineScan, MeterSummary, Variation, WordScan,
+    BEAT, OFFBEAT,
 };

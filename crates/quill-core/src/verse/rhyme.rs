@@ -14,8 +14,10 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::lexicon::Lexicon;
 use super::lines::verse_lines;
-use super::pronounce::pronounce;
+use super::pronounce::pronounce_with;
+use super::scan::with_elision;
 
 /// The shape of a scheme.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -290,14 +292,16 @@ struct Ending {
     guessed: bool,
 }
 
-fn ending(line: &str) -> Option<Ending> {
+fn ending(line: &str, lexicon: &Lexicon) -> Option<Ending> {
     let (start, word) = line
         .unicode_word_indices()
         .rfind(|(_, w)| w.chars().any(char::is_alphabetic))?;
-    let sound = pronounce(word);
+    let range = with_elision(line, start..start + word.len());
+    let word = &line[range.clone()];
+    let sound = pronounce_with(word, lexicon);
     Some(Ending {
         word: word.to_lowercase().replace('\u{2019}', "'"),
-        range: start..start + word.len(),
+        range,
         phones: sound
             .prons
             .into_iter()
@@ -400,9 +404,15 @@ impl RhymeKind {
 
 /// Check every verse line's ending in `text` against `scheme`.
 pub fn check_rhyme(text: &str, scheme: &RhymeScheme) -> Vec<RhymeLine> {
+    check_rhyme_with(text, scheme, &Lexicon::default())
+}
+
+/// [`check_rhyme`], hearing end words through the project's own pronunciations
+/// (#1328) before the dictionary.
+pub fn check_rhyme_with(text: &str, scheme: &RhymeScheme, lexicon: &Lexicon) -> Vec<RhymeLine> {
     let lines: Vec<_> = verse_lines(text)
         .into_iter()
-        .filter_map(|l| ending(l.text).map(|e| (l, e)))
+        .filter_map(|l| ending(l.text, lexicon).map(|e| (l, e)))
         .collect();
     let places: Vec<(usize, usize)> = lines.iter().map(|(l, _)| (l.stanza, l.position)).collect();
     let expected = scheme.expected(&places);

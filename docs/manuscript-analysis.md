@@ -302,10 +302,11 @@ breaks, and fenced code end a stanza and aren't scanned.
 
 **How a word sounds.** Syllables and stress come from the CMU Pronouncing
 Dictionary (about 134,000 words, BSD licence, bundled in
-`assets/pronouncing/`). A possessive the dictionary lacks is its base word plus
-the `s`, a syllable after a hiss (*Rose's*). Any other missing word gets the
-spelling-based syllable estimate above with its stress left open, and is listed
-as a guess under its line.
+`assets/pronouncing/`). The author's own pronunciations come first (see
+below). A possessive the dictionary lacks is its base word plus the `s`, a
+syllable after a hiss (*Rose's*). Any other missing word gets the spelling-based
+syllable estimate above with its stress left open, and is listed as a guess
+under its line.
 
 **Reading a line.** Words don't scan the same in every line, so Quill reads each
 line the way a reader resolves it. A polysyllable's primary stress is fixed, and
@@ -362,6 +363,43 @@ in American English, on its own. It doesn't know an archaic stress (Shakespeare'
 out), or how a word shifts its stress in a phrase. Monosyllables are read as the
 line needs, so a line made only of them can fit almost anything. The report is a
 reader's ear for where to look, not a ruling.
+
+## Verse: the author's pronunciations (#1328)
+
+The dictionary is a reader with an American accent and no context. When it hears
+a word wrong (a character's name, an invented word, Shakespeare's *some-TIME*),
+the author tells it once, for the whole project, in **`pronunciations.txt`** at
+the project root:
+
+```text
+# word = stress, one digit a syllable (1 stressed, 2 secondary, 0 unstressed)
+Hermione = 0100 rhymes with Tony
+sometime = 01
+```
+
+"Set how the word at the cursor sounds" (`verse:pronounce`) writes one line,
+prefilled with how Quill hears the word now; a blank entry removes it. "Edit
+pronunciations" (`verse:pronunciations`) opens the file in a pane; closing it
+reloads the file and names any line that didn't parse (that word falls back to
+the dictionary). Matching ignores case. An entry's stress is read like a
+dictionary word's (its primary stress fixed, and so on). `rhymes with` lends the
+word another word's sound for the rhyme check; without it the rhyme check
+compares the word by its spelling. The file is plain text, so it diffs and
+travels in git with the manuscript.
+
+Some spellings carry their own pronunciation and need no entry:
+
+- a **grave accent** sounds a syllable that's usually silent: *belovèd* is three
+  syllables, the dictionary's *beloved* with its `-ed` sounded;
+- other accents are read past (*naïve* is *naive*);
+- **`'d`** is a silent `-ed` (*dimm'd* is *dimmed*);
+- an **elision** (*heav'n*, *o'er*, *ev'ry*, *wand'ring*, *th'*, *'tis*) counts
+  its syllables from the letters as written, and isn't listed as a guess. An
+  apostrophe before or after a word counts as part of it only when it touches
+  the word and no other letter, so a quotation mark around a word doesn't cost
+  it its dictionary entry.
+
+Quill only changes how it hears the word. The text is never touched.
 
 ## Verse: rhyme scheme (#1325)
 

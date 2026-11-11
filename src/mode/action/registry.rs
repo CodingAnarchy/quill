@@ -32,6 +32,10 @@ pub enum Action {
     /// Open the verse report (#1324): every chapter with a target meter, scanned
     /// line by line.
     VerseReport,
+    /// Set how the word at the cursor sounds for verse analysis (#1328).
+    SetPronunciation,
+    /// Open the project's pronunciations file to view and edit it (#1328).
+    EditPronunciations,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
     /// Turn on the opt-in AI features in-app (#602): write `[ai] enabled = true`

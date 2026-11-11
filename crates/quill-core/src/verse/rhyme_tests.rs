@@ -77,8 +77,9 @@ fn a_sonnet_keeps_its_scheme_but_one_wrenched_rhyme() {
     );
     assert_eq!(lines[3].word, "date");
     assert_eq!(lines[2].partner, Some((0, RhymeKind::Perfect)));
-    // Spelled-out elisions the dictionary lacks rhyme by their spelling.
-    assert!(lines[7].guessed && lines[7].fits(), "{:?}", lines[7]);
+    // Spelled-out elisions the dictionary lacks rhyme by their spelling, and
+    // aren't guesses (#1328).
+    assert!(!lines[7].guessed && lines[7].fits(), "{:?}", lines[7]);
 
     let summary = summarize_rhyme(&lines);
     assert_eq!((summary.lines, summary.fitting), (14, 13));

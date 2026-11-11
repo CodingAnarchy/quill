@@ -109,6 +109,8 @@ pub struct App {
     /// by value on each use, so any change to the section (settings edit, config
     /// reload, project switch) rebuilds it.
     pub(super) word_lists: RefCell<Option<reports::WordListsCache>>,
+    /// The word whose pronunciation the open prompt sets (#1328).
+    pub(super) pronounce_word: Option<String>,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.

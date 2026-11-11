@@ -49,6 +49,9 @@ impl WizardStep {
 pub enum Pending {
     /// y/N: quit despite unsaved changes.
     Quit,
+    /// Text input: how the word at the cursor sounds, for verse analysis
+    /// (#1328). The word itself waits in `App::pronounce_word`.
+    SetPronunciation,
     /// y/N: delete the chapter at `at`.
     Delete { at: usize },
     /// y/N: merge the chapter at `at` into the one above it (#585).

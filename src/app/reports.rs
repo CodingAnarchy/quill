@@ -46,11 +46,11 @@ impl App {
                         .to_string(),
                     scans: meter
                         .as_ref()
-                        .map(|m| verse::scan_meter(&text, m))
+                        .map(|m| verse::scan_meter_with(&text, m, self.project.lexicon()))
                         .unwrap_or_default(),
                     rhymes: rhyme
                         .as_ref()
-                        .map(|r| verse::check_rhyme(&text, r))
+                        .map(|r| verse::check_rhyme_with(&text, r, self.project.lexicon()))
                         .unwrap_or_default(),
                     meter,
                     rhyme,

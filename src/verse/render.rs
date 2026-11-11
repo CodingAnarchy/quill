@@ -38,6 +38,9 @@ pub fn lines(book: &str, chapters: &[ChapterVerse]) -> Vec<Line<'static>> {
     out.push(dim(
         "a verdict and the letter its ending earns (heard/expected when they differ); then the text.",
     ));
+    out.push(dim(
+        "A word heard wrong, or guessed: put the cursor on it and run \"Set how the word at the cursor sounds\" (Ctrl-K).",
+    ));
     for chapter in chapters {
         out.push(Line::raw(""));
         out.extend(chapter_lines(chapter));

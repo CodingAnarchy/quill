@@ -311,8 +311,13 @@ impl App {
     /// Close the split, keeping the focused editor (an editor pane is flushed
     /// first so its edits aren't lost; a surface is read-only).
     fn close_split(&mut self) {
+        let before = self.message.clone();
         if self.split.is_some() && self.close_focused_pane(false).is_ok() {
-            self.message = Some("Closed the pane.".into());
+            // A reload on close may have something to say (a pronunciations line
+            // that didn't parse, #1328); keep that over the plain confirmation.
+            if self.message == before {
+                self.message = Some("Closed the pane.".into());
+            }
         }
         // A failed close left the pane open and reported why (#1188) — don't
         // overwrite that with a success message.
@@ -359,6 +364,10 @@ impl App {
             self.project.reload_dictionary();
             self.refresh_spell_flags();
         }
+        // Likewise the pronunciations' edit pane (#1328).
+        if closed_path.as_deref() == Some(self.project.pronunciations_path().as_path()) {
+            self.reload_pronunciations();
+        }
         self.sync_active_to_focus();
         Ok(())
     }
@@ -397,6 +406,9 @@ impl App {
                 if other.path.as_deref() == Some(self.project.dictionary_path().as_path()) {
                     self.project.reload_dictionary();
                     self.refresh_spell_flags();
+                }
+                if other.path.as_deref() == Some(self.project.pronunciations_path().as_path()) {
+                    self.reload_pronunciations();
                 }
             }
             // A surface is read-only and the assistant's conversation lives in the
