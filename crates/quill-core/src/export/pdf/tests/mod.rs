@@ -28,6 +28,7 @@ fn ep(text: &str, by: Option<&str>) -> Epigraph {
 }
 fn ch(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
     Chapter {
+        verse: false,
         title: title.into(),
         epigraph,
         body: body.into(),
@@ -127,4 +128,20 @@ fn png_bytes(w: u32, h: u32, alpha: u8) -> Vec<u8> {
         .write_to(&mut bytes, image::ImageFormat::Png)
         .unwrap();
     bytes.into_inner()
+}
+
+#[test]
+fn a_verse_chapter_draws_each_line_on_its_own() {
+    // Three short lines: one joined line as prose, three as verse (#1327).
+    let body = "one short line\ntwo short line\nthree short line\n";
+    let render = |verse: bool| {
+        let mut d = doc();
+        d.parts[0].chapters = vec![Chapter {
+            verse,
+            ..ch("Poem", None, body)
+        }];
+        to_pdf(&d, &plain()).expect("pdf")
+    };
+    let lines = |bytes: &[u8]| content(bytes).matches("BT\n").count();
+    assert_eq!(lines(&render(true)), lines(&render(false)) + 2);
 }

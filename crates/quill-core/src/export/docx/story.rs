@@ -38,14 +38,14 @@ pub(super) fn story_document_xml(doc: &Document, story: &StoryMeta) -> String {
             continue; // a story has no parts
         };
         if doc.is_story_body(chapter) {
-            for prose in prose_blocks(&chapter.body) {
+            for prose in prose_blocks(&chapter.body, chapter.verse) {
                 body.push_str(&prose_paragraph(&prose));
             }
         } else {
             // A dedication or afterword follows the story, each on its own page,
             // so nothing pushes the story off page one.
             sections.push_str(&heading(&chapter.title, Profile::Manuscript));
-            for prose in prose_blocks(&chapter.body) {
+            for prose in prose_blocks(&chapter.body, chapter.verse) {
                 sections.push_str(&prose_paragraph(&prose));
             }
         }

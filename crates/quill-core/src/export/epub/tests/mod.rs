@@ -27,6 +27,7 @@ fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
 
 fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
     Chapter {
+        verse: false,
         title: title.to_string(),
         epigraph,
         body: body.to_string(),
@@ -38,6 +39,7 @@ fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
 /// can assert its `epub:type` reaches the output.
 fn section(title: &str, role: Role, body: &str) -> Chapter {
     Chapter {
+        verse: false,
         title: title.to_string(),
         epigraph: None,
         body: body.to_string(),

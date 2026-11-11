@@ -661,6 +661,7 @@ mod tests {
                 parts: vec![crate::export::Part {
                     name: None,
                     chapters: vec![crate::export::Chapter {
+                        verse: false,
                         title: "One".into(),
                         epigraph: None,
                         body: "Prose.".into(),

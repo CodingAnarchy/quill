@@ -74,6 +74,10 @@ pub struct ChapterEntry {
     /// at open.
     #[serde(skip)]
     pub rhyme: Option<RhymeScheme>,
+    /// Cached: whether the chapter is verse (#1327). Transient — read from front
+    /// matter at open.
+    #[serde(skip)]
+    pub verse: bool,
 }
 
 impl ChapterEntry {
@@ -92,6 +96,7 @@ impl ChapterEntry {
             role: None,
             meter: None,
             rhyme: None,
+            verse: false,
         }
     }
 
@@ -106,6 +111,7 @@ impl ChapterEntry {
         self.role = front.and_then(FrontMatter::role);
         self.meter = front.and_then(FrontMatter::meter);
         self.rhyme = front.and_then(FrontMatter::rhyme);
+        self.verse = front.is_some_and(FrontMatter::is_verse);
     }
 }
 

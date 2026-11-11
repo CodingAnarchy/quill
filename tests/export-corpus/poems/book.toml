@@ -1,0 +1,15 @@
+title = "Three Poems"
+author = "Various"
+language = "en"
+
+[[chapters]]
+title = "Sonnet 18"
+file = "sonnet.md"
+
+[[chapters]]
+title = "Because I could not stop for Death"
+file = "death.md"
+
+[[chapters]]
+title = "Song of Myself"
+file = "song.md"

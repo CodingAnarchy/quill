@@ -74,7 +74,7 @@ fn chapter_xml(chapter: &Chapter) -> String {
     if let Some(epigraph) = &chapter.epigraph {
         out.push_str(&epigraph_paras(epigraph));
     }
-    for prose in prose_blocks(&chapter.body) {
+    for prose in prose_blocks(&chapter.body, chapter.verse) {
         out.push_str(&prose_paragraph(&prose));
     }
     out

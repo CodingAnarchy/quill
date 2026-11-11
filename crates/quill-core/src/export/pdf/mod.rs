@@ -425,8 +425,12 @@ impl Pdf {
         }
         let mut opened = false;
         for block in body_blocks(&ch.body) {
-            match classify_block(&block) {
+            match classify_block(&block, ch.verse) {
                 None => {}
+                Some(Prose::Stanza(lines)) => {
+                    self.stanza(&lines);
+                    opened = true;
+                }
                 Some(Prose::SceneBreak) => self.scene_break_line(),
                 Some(Prose::Heading(h)) => self.sub_heading(&h),
                 Some(Prose::Preformatted(code)) => self.preformatted(&code),
@@ -605,6 +609,10 @@ enum Align {
     LeftInset(f32),
     /// Flush to a right edge inset by this many points (epigraph attribution).
     RightInset(f32),
+    /// A verse line (#1327): inset by this many points plus the flow's first-line
+    /// indent, which a stanza sets negative so the first line hangs out and a
+    /// wrapped continuation sits further in.
+    Verse(f32),
 }
 #[cfg(test)]
 mod tests;

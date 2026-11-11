@@ -658,6 +658,12 @@ impl Project {
             .and_then(|c| c.rhyme.as_ref())
     }
 
+    /// Whether the chapter is verse (#1327), so its lines keep their breaks on
+    /// export.
+    pub fn chapter_is_verse(&self, index: usize) -> bool {
+        self.manifest.chapters.get(index).is_some_and(|c| c.verse)
+    }
+
     /// The ordering band a file sits in (#180): front matter, body, or back matter.
     pub fn chapter_band(&self, index: usize) -> Band {
         Band::of(self.chapter_role(index))

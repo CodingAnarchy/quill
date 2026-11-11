@@ -17,6 +17,10 @@ request.
 - `story/` and `story-two/`: short stories with scenes.
 - `collection/`: a collection linking the two stories by relative path, with a
   credit line on one.
+- `poems/`: verse chapters (#1327), whose lines keep their breaks: a sonnet with
+  a target meter and rhyme scheme and an indented couplet, ballad stanzas with
+  indented even lines, and free verse (`verse: true`) with lines long enough to
+  wrap. The poems are in the public domain.
 
 Fix the exporter, not the samples, when a check fails. Add a sample when the
 exporters learn a feature (footnotes have no Quill syntax yet).

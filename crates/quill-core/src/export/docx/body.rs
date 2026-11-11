@@ -10,6 +10,7 @@ use super::{
     copyright_lines, inline_runs, prose_blocks, render_epigraph, running_header, xml_escape, Block,
     Document, Header, Profile, Prose, PubMeta, SCENE_BREAK,
 };
+use crate::export::verse::VerseLine;
 use crate::frontmatter::Epigraph;
 
 /// The `word/document.xml` for one book: the title block (manuscript only), then
@@ -142,7 +143,7 @@ pub(super) fn book_body(doc: &Document, profile: Profile) -> String {
                 if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
-                for prose in prose_blocks(&chapter.body) {
+                for prose in prose_blocks(&chapter.body, chapter.verse) {
                     body.push_str(&prose_paragraph(&prose));
                 }
             }
@@ -312,7 +313,33 @@ pub(super) fn prose_paragraph(prose: &Prose) -> String {
             r#"<w:spacing w:line="240" w:lineRule="auto"/>"#,
             mono_run(code),
         ),
+        Prose::Stanza(lines) => stanza_paragraphs(lines),
     }
+}
+
+/// A stanza (#1327): a paragraph a line with no first-line indent, hanging so a
+/// line too long for the page wraps inside itself, indented lines set further
+/// in, and a line's space after the stanza.
+pub(super) fn stanza_paragraphs(lines: &[VerseLine]) -> String {
+    let last = lines.len().saturating_sub(1);
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let left = 720 + 360 * line.indent;
+            let after = if i == last { 240 } else { 0 };
+            let runs: String = inline_runs(&line.text)
+                .into_iter()
+                .map(|r| run(&r.text, r.bold, r.italic, None))
+                .collect();
+            para(
+                &format!(
+                    r#"<w:keepLines/><w:spacing w:after="{after}"/><w:ind w:left="{left}" w:hanging="720"/>"#
+                ),
+                runs,
+            )
+        })
+        .collect()
 }
 
 /// A single monospaced run carrying a preformatted block — its lines separated by

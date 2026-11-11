@@ -169,6 +169,7 @@ fn style_preview_document() -> Document {
         parts: vec![Part {
             name: Some("Part One".into()),
             chapters: vec![Chapter {
+                verse: false,
                 title: "Chapter One".into(),
                 epigraph: None,
                 body: "This opening paragraph shows how a drop cap and the body text \

@@ -148,6 +148,25 @@ impl FrontMatter {
         }
     }
 
+    /// Whether the chapter is verse (#1327): `verse: true`, or a target meter or
+    /// rhyme scheme (which only verse has). Its lines keep their breaks on export.
+    pub fn is_verse(&self) -> bool {
+        self.get("verse")
+            .is_some_and(|v| matches!(v.trim().to_lowercase().as_str(), "true" | "yes"))
+            || self.meter().is_some()
+            || self.rhyme().is_some()
+    }
+
+    /// Mark the chapter as verse, or not (`verse: true`, or no key). A chapter
+    /// with a meter or rhyme scheme is verse either way.
+    pub fn set_verse(&mut self, verse: bool) {
+        if verse {
+            self.set("verse", "true");
+        } else {
+            self.remove("verse");
+        }
+    }
+
     /// The chapter epigraph, if a quotation is set. The attribution is optional.
     pub fn epigraph(&self) -> Option<Epigraph> {
         Epigraph::from_parts(self.get("epigraph"), self.get("epigraph_by"))

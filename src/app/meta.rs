@@ -109,6 +109,26 @@ impl App {
         }
     }
 
+    /// Mark chapter `index` as verse or not (#1327), so its lines keep their
+    /// breaks on export. A chapter with a target meter or rhyme scheme is verse
+    /// either way, which the message says rather than pretending to unmark it.
+    pub(crate) fn toggle_verse(&mut self, index: usize) {
+        let verse = !self.project.chapter_is_verse(index);
+        if !self.edit_chapter_meta(index, |fm| fm.set_verse(verse)) {
+            return;
+        }
+        let title = self.project.chapter_title(index).unwrap_or("Chapter");
+        self.message = Some(if self.project.chapter_is_verse(index) == verse {
+            if verse {
+                format!("{title}: verse; its lines keep their breaks on export")
+            } else {
+                format!("{title}: prose; its lines join into paragraphs on export")
+            }
+        } else {
+            format!("{title}: still verse, since it has a target meter or rhyme scheme")
+        });
+    }
+
     /// Apply a front-matter edit to chapter `index`. The active chapter is edited
     /// through its live buffer (persisted on the next save, like prose); any other
     /// chapter is edited on disk immediately. Either way the pane cache is updated.

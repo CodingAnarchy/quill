@@ -692,6 +692,7 @@ mod tests {
             half_title: false,
             series_books: Vec::new(),
             front: vec![Chapter {
+                verse: false,
                 title: "Prologue".into(),
                 epigraph: None,
                 body: "Before *it* all.".into(),
@@ -700,6 +701,7 @@ mod tests {
             parts: vec![Part {
                 name: Some("Part One".into()),
                 chapters: vec![Chapter {
+                    verse: false,
                     title: "The Find".into(),
                     epigraph: None,
                     body: "The locket **gleamed**.".into(),
@@ -707,6 +709,7 @@ mod tests {
                 }],
             }],
             back: vec![Chapter {
+                verse: false,
                 title: "Epilogue".into(),
                 epigraph: None,
                 body: "After.".into(),

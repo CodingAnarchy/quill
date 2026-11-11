@@ -57,6 +57,8 @@ pub struct StoryText {
     pub epigraph: Option<Epigraph>,
     pub credit: Option<String>,
     pub body: String,
+    /// Whether the story is verse (#1327).
+    pub verse: bool,
 }
 
 impl StoryLink {
@@ -207,11 +209,13 @@ impl Project {
         let (manifest, file) = story_manifest(&dir)?;
         let text = fs::read_to_string(dir.join(file))?;
         let (front, body) = frontmatter::split(&text);
+        let front = front.map(FrontMatter::from_raw);
         Ok(StoryText {
             title: manifest.title,
-            epigraph: front.map(FrontMatter::from_raw).and_then(|f| f.epigraph()),
+            epigraph: front.as_ref().and_then(FrontMatter::epigraph),
             credit: link.credit.clone(),
             body: body.to_string(),
+            verse: front.as_ref().is_some_and(FrontMatter::is_verse),
         })
     }
 

@@ -29,6 +29,7 @@ fn review_docx(body: &str, notes: Vec<ReviewNote>) -> Vec<u8> {
         parts: vec![Part {
             name: None,
             chapters: vec![Chapter {
+                verse: false,
                 title: "One".into(),
                 epigraph: None,
                 body: body.into(),

@@ -82,7 +82,8 @@ pane sets each chapter's metadata — press "s" to cycle its status (draft →
 revised → final), "m" for a one-line summary, "v" for the POV, "g" for a chapter
 epigraph, "l" for a word-count goal, "S" for a section role (prologue,
 epilogue, appendix, …), and "V" for a target meter or "H" for a rhyme scheme when the
-chapter is verse. Book-level details live here too: "t" title, "b"
+chapter is verse. A chapter with either is exported as verse, every line kept as a line;
+"L" marks free verse the same way. Book-level details live here too: "t" title, "b"
 subtitle, "w" author, "e" series, and "G" a book epigraph. All of it is kept in
 front matter or the manifest, out of the prose, and shown as a badge beside the
 chapter (the status badge is D / R / F).
@@ -757,6 +758,7 @@ KEY REFERENCE
                     m  v  g      summary / POV / chapter epigraph
                     l  S         word-count goal / section role (prologue, epilogue, …)
                     V  H         verse: target meter / rhyme scheme (iambic pentameter, ABAB, …)
+                    L            mark as verse (free verse), so its lines keep their breaks on export
                     t b w e G    book title / subtitle / author / series / epigraph
                     Esc          clear the filter, then leave the browser
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading

@@ -117,6 +117,29 @@ what a publisher expects for a collection; the short story submission
 layout is for sending one story out. A story whose folder is missing is left out,
 and the export message says how many were.
 
+## Verse
+
+In prose, the lines of a paragraph are soft-wrapped and join into one when
+exported. In a **verse** chapter or story (#1327) each line stays its own line:
+a chapter is verse when its front matter has a target meter or rhyme scheme
+(set with V or H in the chapter browser), or `verse: true` (L in the browser
+toggles it, for free verse). Then, in every format:
+
+- each source line is set as its own line, flush left and unjustified, with no
+  first-line indent;
+- a blank line between stanzas is a visible gap;
+- leading spaces indent a line, a step for every two spaces (a tab is four),
+  up to eight steps;
+- a line too long for the page wraps with a hanging indent, so its continuation
+  sits further in than the next line and reads as part of the same line.
+
+Headings, scene breaks, fenced blocks, and emphasis work as they do in prose.
+The Markdown export ends each line of a stanza but the last with a backslash
+(CommonMark's hard line break). The EPUB sets each stanza as a `stanza` block of
+one paragraph a line. Word and Scrivener use a paragraph a line with a hanging
+indent and the stanza gap as space after its last line. The PDF draws each line
+on its own. The `poems/` sample in `tests/export-corpus` covers all of this.
+
 ## Word manuscripts in other programs
 
 A manuscript is judged in the agent's or editor's program, not Quill's, so the

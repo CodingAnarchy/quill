@@ -3,7 +3,7 @@
 //! report.
 
 use super::*;
-use crate::mode::Action;
+use crate::mode::{Action, ExportFormat};
 
 /// The plain text of each line of the open overlay.
 fn overlay_text(app: &App) -> Vec<String> {
@@ -258,5 +258,39 @@ fn editing_the_pronunciations_pane_reloads_them_on_close() {
     assert!(
         message.contains("line 2"),
         "the bad line is reported: {message}"
+    );
+}
+
+#[test]
+fn a_verse_chapter_keeps_its_lines_on_export() {
+    let (mut app, dir) = two_chapter_app("verse-export");
+    fs::write(dir.join("two.md"), "The tide came in\nand went away\n").unwrap();
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('L')));
+    assert!(app.project.chapter_is_verse(1));
+    assert!(fs::read_to_string(dir.join("two.md"))
+        .unwrap()
+        .contains("verse: true"));
+    app.on_key(key(KeyCode::Esc));
+    app.run_action(Action::Export(ExportFormat::Markdown), false);
+    let out = fs::read_to_string(dir.join("export/book.md")).unwrap();
+    assert!(out.contains("The tide came in\\\nand went away"), "{out}");
+
+    // Toggled off, the lines join again; a chapter with a meter stays verse.
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('L')));
+    assert!(!app.project.chapter_is_verse(1));
+    app.on_key(key(KeyCode::Char('V')));
+    type_str(&mut app, "blank verse");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.project.chapter_is_verse(1), "a meter makes it verse");
+    app.on_key(key(KeyCode::Char('L')));
+    assert!(app.project.chapter_is_verse(1));
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("still verse"),
+        "{:?}",
+        app.message
     );
 }
