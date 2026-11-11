@@ -7,19 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-11
+
+Verse comes to Quill. A chapter or short story can now name the meter and rhyme
+scheme it's written in, and Quill reports how closely each line keeps to them,
+marks the lines that stray as you write, and keeps a poem's line breaks and
+stanzas in every export. Like the rest of Quill's revision aids, it only
+observes: it never changes a line. This release also gives every book version
+history with no setup, makes saving and crash recovery stop stalling the editor
+on a busy disk, and brings the Word and print PDF exports up to what agents,
+publishers, and printers expect. Every existing 1.x project opens as before.
+
 ### Added
 
+- **Meter report** (#1324). Give a chapter a target meter with `V` in the chapter
+  browser (iambic pentameter, trochaic tetrameter, blank verse, common meter,
+  and others), then open the Verse report from Ctrl-K. Each line is scanned
+  against the target: its stress reading, its syllable count, the licences it
+  takes (a feminine ending, a headless line, an initial inversion), and what
+  puts it off the meter. A strict setting counts licences as faults.
+- **Rhyme report** (#1325). Give a chapter a target rhyme scheme with `H`
+  (couplets, ABAB quatrains, the Shakespearean sonnet, terza rima, or a
+  scheme you write out). The Verse report letters each line's ending
+  as it is actually heard, and tells perfect, slant, eye, and identical rhymes
+  apart.
+- **Scansion marks in the editor** (#1326). F3 shows each verse line's stress
+  reading, syllable count, and rhyme letter in a gutter beside it, and marks the
+  words that break the meter or the scheme, with licences shown apart from
+  faults. `]m` and `[m` step between the lines that stray. Quill remembers the
+  toggle for each project.
+- **Verse keeps its shape on export** (#1327). Mark a chapter as verse with `L`
+  (any chapter with a target meter or scheme already is), and its line breaks,
+  stanza gaps, and indents come through in Markdown, EPUB, Word, PDF, and
+  Scrivener.
+- **Set how a word sounds** (#1328). When the bundled pronouncing dictionary
+  gets a name, a coinage, or an older stress wrong, "Set how the word at the
+  cursor sounds" records its stress and what it rhymes with in the project's
+  `pronunciations.txt`, which the reports and marks then follow. Verse
+  spellings such as `belovèd` and `heav'n` are read as written.
+- **Automatic version history** (#1314). Opening a book with no history starts
+  a local Git history for it, and Quill takes a snapshot a few minutes after you
+  stop saving and when you close the book. Nothing is pushed anywhere. A new
+  `[history]` config section (and a Settings row) turns it off, changes the
+  delay, or opts in a repository you manage yourself.
+- **More print trims, as PDF/X-4** (#1321). Print interiors and wrap covers are
+  PDF/X-4, as IngramSpark asks for and KDP accepts, in thirteen common paperback
+  trims instead of three.
+- **Writing in iCloud Drive from the Mac and the iPhone** (#1322). A book in
+  iCloud Drive keeps its version history and per-device state (lock, crash
+  recovery, stats) outside the shared folder. An open chapter picks up the other
+  device's edits, and a conflicting edit is kept as a copy rather than lost.
 - Sync brings in drafts that the iPhone app parked its conflicting edits on
   (`phone/<date>`): they appear in the Drafts list, the sync message names
   them, and merging one opens the conflict resolver (#1233).
 
 ### Changed
 
+- **A novel's Word export is a standard submission manuscript** (#1323): contact
+  details and the rounded word count on the title page, each chapter a third of
+  the way down a new page, END after the last chapter, and a
+  `Surname / Title / page` header. The half-title, copyright page, and contents
+  stay in the EPUB and PDF.
 - Quill is now a Cargo workspace. The editing core (projects, chapters,
   parsing, analysis, export, version control, and the AI backends) builds as
   the `quill-core` library with no terminal UI, so other front ends can share
   it, starting with an iPhone app (#1229). The `quill` binary, its install
   methods, and its project files are unchanged.
+- The bundled pronouncing dictionary (the CMU Pronouncing Dictionary, BSD
+  licensed) adds about 3.6 MB to the binary.
+
+### Fixed
+
+- Typing no longer stutters, and saves no longer freeze the editor, when the
+  disk is busy: the crash-recovery sidecar (#1226) and autosave and Ctrl-S
+  saves (#1227) are written on a background thread.
+- Word manuscripts keep their formatting in Pages, which ignored every page
+  break, indent, and centering, and their contents page lists the chapters in
+  every program instead of waiting to be updated (#1323).
+
+### Security
+
+- The `zip` dependency is on 9.2.2, with the older 8.x copy that the optional
+  offline-model backend pulled in removed, closing five zip advisories (#1294,
+  #1313).
 
 ## [1.3.0] - 2026-10-27
 
@@ -758,6 +828,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.4.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.4.0
 [1.3.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.3.0
 [1.2.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.0
