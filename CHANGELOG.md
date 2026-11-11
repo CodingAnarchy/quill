@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.0] - 2026-11-11
 
-Verse comes to Quill. A chapter or short story can now name the meter and rhyme
-scheme it's written in, and Quill reports how closely each line keeps to them,
-marks the lines that stray as you write, and keeps a poem's line breaks and
-stanzas in every export. Like the rest of Quill's revision aids, it only
-observes: it never changes a line. This release also gives every book version
+Verse comes to Quill. A chapter, a short story, or a poem inside prose can now
+name the meter and rhyme scheme it's written in, and Quill reports how closely
+each line keeps to them, marks the lines that stray as you write, and keeps a
+poem's line breaks and stanzas in every export. Like the rest of Quill's
+revision aids, it only observes: it never changes a line. This release also gives every book version
 history with no setup, makes saving and crash recovery stop stalling the editor
 on a busy disk, and brings the Word and print PDF exports up to what agents,
 publishers, and printers expect. Every existing 1.x project opens as before.
@@ -45,6 +45,13 @@ publishers, and printers expect. Every existing 1.x project opens as before.
   cursor sounds" records its stress and what it rhymes with in the project's
   `pronunciations.txt`, which the reports and marks then follow. Verse
   spellings such as `belovèd` and `heav'n` are read as written.
+- **Verse inside prose** (#1337). Fence a song or poem in a prose chapter as
+  ```` ```verse iambic tetrameter abab ```` and it's checked on its own: the
+  Verse report gives it a section, numbered as lines of the chapter, F3 marks its
+  lines and none of the prose, and every export sets it as verse rather than
+  code. "Check the selected lines as verse" (Ctrl-K) checks the selected lines,
+  or the stanza at the cursor, against a meter and scheme you type, without
+  changing the chapter.
 - **Automatic version history** (#1314). Opening a book with no history starts
   a local Git history for it, and Quill takes a snapshot a few minutes after you
   stop saving and when you close the book. Nothing is pushed anywhere. A new
