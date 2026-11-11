@@ -57,6 +57,12 @@ impl App {
     /// `None`) stays. The groups open collapsed by default and remember the author's
     /// collapse/expand changes across opens (#943).
     pub(crate) fn open_action_palette(&mut self) {
+        // Remember a Visual selection, which the menu replaces, for the actions
+        // that work on one (#1337).
+        self.palette_selection = match self.mode {
+            Mode::Visual { anchor, linewise } => Some(self.selection_bytes(anchor, linewise)),
+            _ => None,
+        };
         let items: Vec<PaletteItem> = Action::ALL
             .iter()
             .filter(|&&a| self.action_status(a).is_none())
@@ -306,6 +312,7 @@ impl App {
             Action::AnalysisReport => self.open_analysis_report(),
             Action::WritingHistory => self.open_writing_history(),
             Action::VerseReport => self.open_verse_report(),
+            Action::CheckVerse => self.prompt_verse_check(),
             Action::SetPronunciation => self.prompt_pronunciation(),
             Action::EditPronunciations => self.edit_pronunciations(),
             Action::ToggleScansion => self.toggle_scansion(),

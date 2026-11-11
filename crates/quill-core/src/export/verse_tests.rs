@@ -1,4 +1,5 @@
-//! Verse chapters keep their lines on export (#1327).
+//! Verse chapters keep their lines on export (#1327), and so does verse fenced
+//! inside a prose chapter (#1337).
 
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -6,7 +7,8 @@ use std::path::Path;
 use super::docx::{to_docx, Profile};
 use super::verse::{markdown_body, stanza, VerseLine};
 use super::{
-    classify_block, epub, to_markdown, Chapter, Document, ExportStyle, Part, Prose, PubMeta,
+    body_blocks, classify_block, epub, to_markdown, Chapter, Document, ExportStyle, Part, Prose,
+    PubMeta,
 };
 
 const POEM: &str = "The tide came in across the stone\n  and left the harbour wall alone,\n\nThe lamps were *lit* along the quay\n    and no one sailed\n\n* * *\n\nA last line that runs on long enough to need to wrap across the width of a printed page somewhere.\n";
@@ -90,7 +92,7 @@ fn a_stanza_keeps_its_lines_and_indents() {
 #[test]
 fn markdown_keeps_verse_lines_with_hard_breaks() {
     assert_eq!(
-        markdown_body("a\nb\n\n# H\nc\nd\n\n```\nx\ny\n```\n"),
+        markdown_body("a\nb\n\n# H\nc\nd\n\n```\nx\ny\n```\n", true),
         "a\\\nb\n\n# H\nc\\\nd\n\n```\nx\ny\n```\n"
     );
     let md = to_markdown(&book(true));
@@ -169,5 +171,79 @@ fn word_sets_a_paragraph_a_line_with_a_hanging_indent() {
             xml.contains(">Prose runs on across a soft wrap.<"),
             "prose still joins"
         );
+    }
+}
+
+/// A prose chapter with a song fenced inside it (#1337).
+const SONG: &str = "She sang as she worked.\n\n```verse iambic tetrameter abab\nThe tide came in across the stone\n  and left the harbour wall alone,\n\nThe lamps were *lit* along the quay\n```\n\nThen she stopped,\nand listened.\n";
+
+fn song_book() -> Document {
+    let mut doc = book(false);
+    doc.parts[0].chapters = vec![chapter("The Song", SONG, false)];
+    doc
+}
+
+#[test]
+fn a_verse_fence_splits_into_stanzas_and_drops_its_fences() {
+    let blocks = body_blocks(SONG);
+    let kinds: Vec<String> = blocks
+        .iter()
+        .map(|b| match classify_block(b, b.verse) {
+            Some(Prose::Paragraph(p)) => format!("p:{p}"),
+            Some(Prose::Stanza(lines)) => format!("s:{}", lines.len()),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "p:She sang as she worked.",
+            "s:2",
+            "s:1",
+            "p:Then she stopped, and listened."
+        ]
+    );
+    // A code fence stays code.
+    let code = body_blocks("```text\nx\n\ny\n```\n");
+    assert!(
+        matches!(classify_block(&code[0], code[0].verse), Some(Prose::Preformatted(c)) if c == "x\n\ny")
+    );
+}
+
+#[test]
+fn every_format_sets_fenced_verse_as_verse() {
+    let md = to_markdown(&song_book());
+    assert!(!md.contains("```"), "{md}");
+    assert!(md.contains("She sang as she worked.\n\n\nThe tide came in across the stone\\\n  and left the harbour wall alone,\n\nThe lamps"), "{md}");
+    assert!(
+        md.contains("Then she stopped,\nand listened."),
+        "prose is untouched: {md}"
+    );
+
+    let text = epub_text(&song_book());
+    assert!(
+        text.contains(
+            "<div class=\"stanza\"><p>The tide came in across the stone</p><p class=\"i1\">"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("<p>The lamps were <em>lit</em> along the quay</p>"),
+        "{text}"
+    );
+    assert!(!text.contains("<pre>"), "{text}");
+    assert!(
+        !text.contains("iambic"),
+        "the fence line never shows: {text}"
+    );
+
+    for profile in [Profile::Manuscript, Profile::Vellum] {
+        let xml = docx_body(&song_book(), profile);
+        assert!(
+            xml.contains(r#"<w:ind w:left="1080" w:hanging="720"/>"#),
+            "an indented line"
+        );
+        assert!(!xml.contains("iambic"));
+        assert!(!xml.contains("Courier"), "not set as code");
     }
 }

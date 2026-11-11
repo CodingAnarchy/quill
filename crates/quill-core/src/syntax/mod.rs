@@ -28,6 +28,8 @@ use tree_sitter::{Node, Tree};
 
 use segment::Segments;
 
+use crate::verse::fence_targets;
+
 mod segment;
 
 /// What a highlighted span represents. The renderer maps each to a `Style`.
@@ -39,6 +41,10 @@ pub enum HighlightKind {
     /// A fenced code block (#522), rendered verbatim and set apart — no emphasis
     /// concealment or smart typography applies inside it.
     Code,
+    /// A fenced verse block (#1337): a poem or song inside the prose. Its lines
+    /// read as text, not code, but like code they're never given a paragraph
+    /// indent, and the fence lines conceal the same way.
+    Verse,
     /// A CommonMark thematic break (#908) — the author's scene divider (`---`,
     /// `***`, `* * *`, …). Rendered as a centered `* * *` divider with breathing
     /// room, and drives the flush-left rule for the paragraph that resumes after
@@ -378,10 +384,19 @@ fn collect(block: &Tree, inlines: &[Tree], read: impl Fn(usize, usize) -> String
         } else if node.kind() == "fenced_code_block" {
             // The whole fence (delimiters + content) is set apart; its content
             // has no inline tree, so no emphasis is parsed or concealed inside.
+            // A `verse` fence (#1337) is verse rather than code.
+            let fences = fence_delimiter_lines(&node, &read);
+            let verse = fences
+                .first()
+                .is_some_and(|&(s, e)| fence_targets(&read(s, e)).is_some());
             out.push(Highlight {
                 start: node.start_byte(),
                 end: node.end_byte(),
-                kind: HighlightKind::Code,
+                kind: if verse {
+                    HighlightKind::Verse
+                } else {
+                    HighlightKind::Code
+                },
             });
             // Register the opening/closing fence *lines* as concealable markers,
             // reusing the emphasis reveal-on-cursor path (#723): each fence line is
@@ -390,7 +405,7 @@ fn collect(block: &Tree, inlines: &[Tree], read: impl Fn(usize, usize) -> String
             // reveal span is the whole `fenced_code_block` node. The line range runs
             // from a delimiter's line start to the byte after it (including the
             // newline), so the whole row disappears — not just the backticks.
-            for line in fence_delimiter_lines(&node, &read) {
+            for line in fences {
                 markers.push(Marker {
                     delim_start: line.0,
                     delim_end: line.1,

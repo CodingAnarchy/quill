@@ -1,7 +1,8 @@
 //! The in-editor scansion marks (#1326).
 
+use super::blocks::Targets;
 use super::lexicon::Lexicon;
-use super::marks::marks;
+use super::marks::{chapter_marks, marks};
 use super::meter::Meter;
 use super::rhyme::RhymeScheme;
 
@@ -63,4 +64,43 @@ fn a_rhyme_fault_marks_the_end_word_and_letters_the_gutter() {
     let faults: Vec<&str> = m.faults.iter().map(|&(s, e)| &text[s..e]).collect();
     assert_eq!(faults, ["sky"]);
     assert!(m.lines.iter().all(|l| l.meter.is_none()));
+}
+
+/// Prose with a pentameter quatrain fenced inside it, then a block with no
+/// targets of its own (#1337).
+const STORY: &str = "She sang it slowly, the way her mother had.\n\n```verse iambic pentameter\nShall I compare thee to a summer's day?\nThe cat sat on the mat\n```\n\nThen silence.\n\n```verse\nShall I compare thee to a summer's day?\n```\n";
+
+#[test]
+fn a_fenced_block_is_marked_against_its_own_targets_and_prose_isnt() {
+    let m = chapter_marks(STORY, 50, &Targets::default(), &Lexicon::default());
+    let at = |line: &str| STORY.find(line).expect("the line") + 50;
+    // The block with no targets of its own takes the chapter's, which are none.
+    let starts: Vec<usize> = m.lines.iter().map(|l| l.line_start).collect();
+    assert_eq!(starts, [at("Shall"), at("The cat")]);
+    assert_eq!(m.fault_lines(), [at("The cat")]);
+    assert!(m.faults.iter().all(|&(s, _)| s >= at("The cat")));
+}
+
+#[test]
+fn a_block_with_no_targets_takes_the_chapters() {
+    let chapter = Targets {
+        meter: Some(Meter::parse("trochaic tetrameter").expect("a meter")),
+        rhyme: None,
+    };
+    let m = chapter_marks(STORY, 0, &chapter, &Lexicon::default());
+    let second = STORY.rfind("Shall").expect("the second block");
+    let cell = m
+        .lines
+        .iter()
+        .find(|l| l.line_start == second)
+        .and_then(|l| l.meter.as_ref())
+        .expect("the second block is checked");
+    assert!(!cell.fits, "pentameter against the chapter's tetrameter");
+    // The prose lines are checked against the chapter's meter, as before, and
+    // the lines stay in buffer order.
+    assert!(m.lines.iter().any(|l| l.line_start == 0));
+    assert!(m
+        .lines
+        .windows(2)
+        .all(|w| w[0].line_start < w[1].line_start));
 }

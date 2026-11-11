@@ -104,6 +104,7 @@ pub mod sprint; // the writing-sprint state + status segment, read by the UI (#2
 mod story; // a short story's scenes as outline / corkboard entries (#1240)
 mod style_flags; // the style-flag sweep: pick a category, step through it, underline it (#1001)
 mod tree;
+mod verse_report; // the verse report, fenced verse, and checking chosen lines (#1324, #1337)
 mod vim;
 mod vim_case;
 mod wizard;
@@ -203,6 +204,9 @@ impl App {
             proximity_key: None,
             word_lists: RefCell::default(),
             pronounce_word: None,
+            palette_selection: None,
+            verse_check: None,
+            verse_check_last: String::new(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),

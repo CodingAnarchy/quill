@@ -68,7 +68,7 @@ fn the_verse_report_scans_only_chapters_with_a_target() {
     assert!(app
         .message
         .as_deref()
-        .is_some_and(|m| m.contains("No chapter has a target meter or rhyme scheme")));
+        .is_some_and(|m| m.contains("Nothing to check: set a target meter or rhyme scheme")));
 
     // The active chapter is read live, unsaved edits and all.
     app.on_key(ctrl('g'));

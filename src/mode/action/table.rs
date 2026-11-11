@@ -261,6 +261,11 @@ const GROUPS: &[(&str, &[ActionSpec])] = &[
             )
             .runnable(),
             row(
+                Action::CheckVerse,
+                "verse:check",
+                "Check the selected lines as verse (meter & rhyme)…",
+            ),
+            row(
                 Action::SetPronunciation,
                 "verse:pronounce",
                 "Set how the word at the cursor sounds (verse)…",
@@ -595,6 +600,7 @@ mod tests {
                 AnalysisReport,
                 WritingHistory,
                 VerseReport,
+                CheckVerse,
                 SetPronunciation,
                 EditPronunciations,
                 ToggleScansion,

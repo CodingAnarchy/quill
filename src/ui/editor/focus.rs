@@ -39,7 +39,7 @@ pub(super) fn focus_paragraph(buffer: &Buffer) -> ByteRange {
 /// indentable prose. Indented: a non-blank line that isn't a heading or fenced
 /// code, and isn't the first paragraph immediately after a heading (matching the
 /// manuscript convention the exports already follow — `h1+p`/`h2+p` get no indent).
-/// Blank lines, headings, and fenced code are never indented; centered chapter/part
+/// Blank lines, headings, fenced code, and fenced verse are never indented; centered chapter/part
 /// dividers and epigraphs are render-only inserts that never pass through here.
 pub(super) fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
     let syntax = buffer.syntax();
@@ -57,6 +57,7 @@ pub(super) fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
     if blank(line)
         || is_kind(line, HighlightKind::Heading)
         || is_kind(line, HighlightKind::Code)
+        || is_kind(line, HighlightKind::Verse)
         || is_kind(line, HighlightKind::SceneBreak)
     {
         return false;
@@ -72,7 +73,8 @@ pub(super) fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
     !(prev > 0
         && (is_kind(prev - 1, HighlightKind::Heading)
             || is_kind(prev - 1, HighlightKind::SceneBreak)
-            || is_kind(prev - 1, HighlightKind::Code)))
+            || is_kind(prev - 1, HighlightKind::Code)
+            || is_kind(prev - 1, HighlightKind::Verse)))
 }
 
 /// The first visual row's indent width in cells for `line`: the display-only

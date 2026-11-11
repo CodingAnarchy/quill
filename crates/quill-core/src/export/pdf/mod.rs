@@ -425,7 +425,7 @@ impl Pdf {
         }
         let mut opened = false;
         for block in body_blocks(&ch.body) {
-            match classify_block(&block, ch.verse) {
+            match classify_block(&block, ch.verse || block.verse) {
                 None => {}
                 Some(Prose::Stanza(lines)) => {
                     self.stanza(&lines);

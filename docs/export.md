@@ -133,6 +133,12 @@ toggles it, for free verse). Then, in every format:
 - a line too long for the page wraps with a hanging indent, so its continuation
   sits further in than the next line and reads as part of the same line.
 
+A **fenced verse block** (```` ```verse ````, #1337) inside a prose chapter is
+set the same way, so a song or poem in a novel keeps its lines: its fence lines
+are dropped, its stanzas are set as above, and it's never set as code. The
+Markdown export turns its fence lines into blank lines so the stanzas stand
+apart from the prose around them.
+
 Headings, scene breaks, fenced blocks, and emphasis work as they do in prose.
 The Markdown export ends each line of a stanza but the last with a backslash
 (CommonMark's hard line break). The EPUB sets each stanza as a `stanza` block of
