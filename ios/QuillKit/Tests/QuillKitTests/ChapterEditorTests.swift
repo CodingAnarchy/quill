@@ -84,4 +84,20 @@ import Testing
         #expect(NSRange(location: Int(em.start), length: Int(em.length))
             == (editor.initialText as NSString).range(of: "*dark*"))
     }
+
+    @Test func aVerseFenceIsStyledAsVerseNotCode() throws {
+        let dir = try scratch("editor-verse")
+        try writeNovel(in: dir)
+        try "She sang.\n\n```verse common meter\nThe wind was loud upon the hill\n```\n".write(
+            to: dir.appendingPathComponent("storm.md"), atomically: true, encoding: .utf8)
+        let store = ProjectStore()
+        store.open(dir)
+        let editor = try store.editor(for: store.chapters[1])
+        let spans = editor.styles(in: NSRange(location: 0, length: editor.utf16Length))
+        let verse = try #require(spans.first { $0.kind == .verse })
+        let text = editor.initialText as NSString
+        let line = text.range(of: "The wind was loud upon the hill")
+        #expect(NSLocationInRange(line.location, NSRange(location: Int(verse.start), length: Int(verse.length))))
+        #expect(!spans.contains { $0.kind == .code })
+    }
 }
