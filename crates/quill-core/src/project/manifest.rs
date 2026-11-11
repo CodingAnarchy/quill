@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 
 use super::{Form, Goals, StoryLink};
-use crate::verse::Meter;
+use crate::verse::{Meter, RhymeScheme};
 
 /// The current on-disk `book.toml` format version (#1097). Bumped only for a
 /// *breaking* format change — one that an older Quill couldn't read correctly, so
@@ -70,6 +70,10 @@ pub struct ChapterEntry {
     /// front matter at open.
     #[serde(skip)]
     pub meter: Option<Meter>,
+    /// Cached target rhyme scheme (#1325). Transient — read from front matter
+    /// at open.
+    #[serde(skip)]
+    pub rhyme: Option<RhymeScheme>,
 }
 
 impl ChapterEntry {
@@ -87,6 +91,7 @@ impl ChapterEntry {
             goal: None,
             role: None,
             meter: None,
+            rhyme: None,
         }
     }
 
@@ -100,6 +105,7 @@ impl ChapterEntry {
         self.goal = front.and_then(FrontMatter::goal);
         self.role = front.and_then(FrontMatter::role);
         self.meter = front.and_then(FrontMatter::meter);
+        self.rhyme = front.and_then(FrontMatter::rhyme);
     }
 }
 

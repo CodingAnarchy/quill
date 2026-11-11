@@ -81,7 +81,8 @@ a chapter into the one above it ("M"), and duplicate a chapter ("c"). The same
 pane sets each chapter's metadata — press "s" to cycle its status (draft →
 revised → final), "m" for a one-line summary, "v" for the POV, "g" for a chapter
 epigraph, "l" for a word-count goal, "S" for a section role (prologue,
-epilogue, appendix, …), and "V" for a target meter when the chapter is verse. Book-level details live here too: "t" title, "b"
+epilogue, appendix, …), and "V" for a target meter or "H" for a rhyme scheme when the
+chapter is verse. Book-level details live here too: "t" title, "b"
 subtitle, "w" author, "e" series, and "G" a book epigraph. All of it is kept in
 front matter or the manifest, out of the prose, and shown as a badge beside the
 chapter (the status badge is D / R / F).
@@ -473,6 +474,18 @@ stress in the wrong place. Totals per stanza and for the whole piece sit at the
 top, with the most common fault. Words Quill didn't know and had to guess are
 listed under their line. It only reports; the verse stays yours.
 
+For rhyme, press "H" in the browser and give the scheme as letters, with spaces
+between groups ("ABAB CDCD EFEF GG", "ABCB", "X" for a line that needn't rhyme),
+or by name ("shakespearean sonnet", "petrarchan sonnet", "terza rima", "couplets",
+"ballad stanza", "limerick", "villanelle"). A single group like "ABCB" repeats down
+every stanza; several groups run through the poem in order. The Verse report then
+hears each line's last word, gives it the letter its sound earns, and flags a line
+that should rhyme and doesn't, or rhymes where the scheme wants a new sound.
+Pairings that aren't perfect rhymes are named: slant (the vowel or the closing
+consonants match, not both), eye (spelled alike, said differently, like love and
+move), or identical (the same word or sound). Slant rhymes count against the
+scheme unless you put "slant" first ("slant ABAB").
+
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest
 writing streak (a day counts when its net words are positive; a streak survives a
@@ -730,7 +743,7 @@ KEY REFERENCE
                     s            cycle status (draft → revised → final)
                     m  v  g      summary / POV / chapter epigraph
                     l  S         word-count goal / section role (prologue, epilogue, …)
-                    V            target meter for verse (iambic pentameter, blank verse, …)
+                    V  H         verse: target meter / rhyme scheme (iambic pentameter, ABAB, …)
                     t b w e G    book title / subtitle / author / series / epigraph
                     Esc          clear the filter, then leave the browser
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading

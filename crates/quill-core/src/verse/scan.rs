@@ -20,10 +20,9 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::lines::verse_lines;
 use super::meter::{Foot, Meter};
 use super::pronounce::{is_function_word, pronounce, Sound, Stress};
-use crate::analysis::is_heading;
-use crate::export::is_thematic_break;
 
 /// A licence: a variation from the strict pattern that verse in the meter
 /// commonly takes. Accepted unless the meter is strict.
@@ -155,35 +154,16 @@ pub const BEAT: char = '/';
 
 /// Scan every line of verse in `text` (a chapter body, front matter already
 /// removed) against `meter`. Headings, scene breaks, fenced code, and blank
-/// lines are skipped; a blank line or a break ends a stanza.
+/// lines are skipped; a blank line or a break ends a stanza (see
+/// [`verse_lines`]).
 pub fn scan_meter(text: &str, meter: &Meter) -> Vec<LineScan> {
-    let mut out = Vec::new();
-    let mut stanza = 0;
-    let mut in_stanza = 0;
-    let mut fenced = false;
-    for (n, line) in text.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
-        }
-        let structural =
-            fenced || line.trim().is_empty() || is_heading(line) || is_thematic_break(line);
-        if structural {
-            if in_stanza > 0 {
-                stanza += 1;
-                in_stanza = 0;
-            }
-            continue;
-        }
-        let words = words(line);
-        if words.is_empty() {
-            continue;
-        }
-        let feet = meter.feet_for_line(in_stanza);
-        out.push(scan_line(n, stanza, line, &words, meter, feet));
-        in_stanza += 1;
-    }
-    out
+    verse_lines(text)
+        .into_iter()
+        .map(|l| {
+            let feet = meter.feet_for_line(l.position);
+            scan_line(l.line, l.stanza, l.text, &words(l.text), meter, feet)
+        })
+        .collect()
 }
 
 /// A word in a line, with how it sounds.

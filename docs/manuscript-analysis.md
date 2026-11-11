@@ -286,7 +286,7 @@ consistent. (The `-ly` non-adverb exceptions aren't configurable.)
 A chapter or short story written in verse can carry a **target meter** in its
 front matter (`meter: iambic pentameter`), set with **V** in the chapter browser.
 The **Verse report** (`report:verse`) scans every line of each such chapter
-against it. Prose chapters, with no target, never appear in it. Like the rest of
+against it (and checks its rhyme scheme, below, when it has one). Prose chapters, with no target, never appear in it. Like the rest of
 this document it's offline and algorithmic: it reports, and never offers a word
 or line that would fit.
 
@@ -362,6 +362,60 @@ in American English, on its own. It doesn't know an archaic stress (Shakespeare'
 out), or how a word shifts its stress in a phrase. Monosyllables are read as the
 line needs, so a line made only of them can fit almost anything. The report is a
 reader's ear for where to look, not a ruling.
+
+## Verse: rhyme scheme (#1325)
+
+A verse chapter can also carry a **target rhyme scheme** (`rhyme: ABAB CDCD EFEF
+GG`), set with **H** in the chapter browser. The Verse report then checks each
+line's ending against it, beside the meter when both are set.
+
+**The scheme.** Letters, case-insensitive, with spaces between groups; `X` marks
+a line that needn't rhyme. **One group** (`ABCB`, `AA`) repeats down the lines
+of each stanza with fresh sounds each time, so `ABCB` checks every ballad
+quatrain and `AA` every couplet. **Several groups** (`ABAB CDCD EFEF GG`) run
+through the poem's lines in order, across stanza breaks, and start over with
+fresh sounds if the poem runs past them. Named forms: shakespearean (or english)
+sonnet, petrarchan (or italian) sonnet (`ABBAABBA CDECDE`), spenserian sonnet,
+couplets, ballad stanza, limerick, rhyme royal, ottava rima, villanelle (its
+refrains aren't checked as refrains), and terza rima, whose tercets interlock
+(ABA BCB CDC …, a closing line rhyming with the last tercet's middle). A leading
+`slant` lets slant rhymes count.
+
+**How endings are heard.** The end word is the line's last word with a letter in
+it. Its rhyming part is its sound from the last stressed vowel to the end, from
+the same pronouncing dictionary as the meter (every pronunciation is tried). Two
+endings are:
+
+- **identical**: the same word, or the same sound throughout (*rite*, *right*);
+- **perfect**: the same rhyming part (*day*, *May*);
+- **eye**: spelled alike from the last vowel on, with a silent final *e* looked
+  past, but said differently (*love*, *move*);
+- **slant**: the stressed vowel matches or the closing consonants match, but not
+  both (*shape*, *keep*);
+- otherwise no rhyme.
+
+A word the dictionary lacks is compared by its spelled ending and listed as a
+guess. Identical and perfect rhymes count, slant ones count only under `slant`,
+and an eye rhyme never does.
+
+**What the report says.** Each line gets the letter its ending earns: the first
+ending of a block is A, a later ending that rhymes with an earlier one takes its
+letter, and anything else takes the next letter. Lines are flagged when:
+
+- the scheme pairs it with an earlier line and it rhymes with none of them; the
+  note names the first and how the two do sound (often a slant or eye rhyme);
+- the scheme wants a new sound and it rhymes perfectly with an earlier line of
+  another letter.
+
+A fitting line's pairing is named when it isn't perfect. Each chapter shows how
+many line endings fit, and each stanza's count beside the meter's.
+
+**Where it falls short.** The dictionary's American pronunciation decides, so a
+rhyme that holds in another accent (or held in Shakespeare's) can read as eye or
+slant. Shakespeare's *temperate* and *date* rhyme only by wrenching the last
+syllable onto the beat, and the report calls them an eye rhyme. Only the last
+word is heard, so a feminine rhyme on a stressed word plus an unstressed one
+(*knowing it*, *showing it*) is judged on its final word alone.
 
 ## Reading the report
 

@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::annotation::Annotation;
 use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
-use crate::verse::Meter;
+use crate::verse::{Meter, RhymeScheme};
 
 mod annotations;
 mod collection;
@@ -641,6 +641,14 @@ impl Project {
             .chapters
             .get(index)
             .and_then(|c| c.meter.as_ref())
+    }
+
+    /// The chapter's target rhyme scheme (#1325), if set.
+    pub fn chapter_rhyme(&self, index: usize) -> Option<&RhymeScheme> {
+        self.manifest
+            .chapters
+            .get(index)
+            .and_then(|c| c.rhyme.as_ref())
     }
 
     /// The ordering band a file sits in (#180): front matter, body, or back matter.

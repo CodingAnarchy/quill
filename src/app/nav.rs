@@ -240,6 +240,20 @@ impl App {
                     Some(sel),
                 );
             }
+            // Set the chapter's target rhyme scheme (#1325); blank clears it.
+            KeyCode::Char('H') => {
+                let prefill = self
+                    .project
+                    .chapter_rhyme(sel)
+                    .map(RhymeScheme::key)
+                    .unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Rhyme { at: sel }),
+                    "Rhyme scheme (e.g. ABAB CDCD EFEF GG, terza rima; blank = none): ",
+                    &prefill,
+                    Some(sel),
+                );
+            }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {
                 let cur = self.project.manifest.title.clone();
