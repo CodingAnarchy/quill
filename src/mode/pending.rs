@@ -388,6 +388,10 @@ pub enum MetaField {
     Meter {
         at: usize,
     },
+    /// The chapter's target rhyme scheme (#1325); blank clears it.
+    Rhyme {
+        at: usize,
+    },
     ChapterEpigraph {
         at: usize,
     },

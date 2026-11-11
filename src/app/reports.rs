@@ -25,14 +25,18 @@ impl App {
         self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
     }
 
-    /// Open the verse report overlay (#1324): each chapter with a target meter,
-    /// scanned line by line. With no target set anywhere, say how to set one
-    /// rather than open an empty report.
+    /// Open the verse report overlay (#1324, #1325): each chapter with a target
+    /// meter or rhyme scheme, checked line by line. With no target set anywhere,
+    /// say how to set one rather than open an empty report.
     pub(crate) fn open_verse_report(&mut self) {
         let active = self.project.active_index();
         let chapters: Vec<verse::ChapterVerse> = (0..self.chapter_count())
             .filter_map(|i| {
-                let meter = self.project.chapter_meter(i)?.clone();
+                let meter = self.project.chapter_meter(i).cloned();
+                let rhyme = self.project.chapter_rhyme(i).cloned();
+                if meter.is_none() && rhyme.is_none() {
+                    return None;
+                }
                 let text = self.chapter_text_with_active(i, active);
                 Some(verse::ChapterVerse {
                     title: self
@@ -40,14 +44,22 @@ impl App {
                         .chapter_title(i)
                         .unwrap_or("Untitled")
                         .to_string(),
-                    lines: verse::scan_meter(&text, &meter),
+                    scans: meter
+                        .as_ref()
+                        .map(|m| verse::scan_meter(&text, m))
+                        .unwrap_or_default(),
+                    rhymes: rhyme
+                        .as_ref()
+                        .map(|r| verse::check_rhyme(&text, r))
+                        .unwrap_or_default(),
                     meter,
+                    rhyme,
                 })
             })
             .collect();
         if chapters.is_empty() {
             self.message = Some(
-                "No chapter has a target meter. Set one with V in the chapter browser (Ctrl-G)."
+                "No chapter has a target meter or rhyme scheme. Set one with V or H in the chapter browser (Ctrl-G)."
                     .into(),
             );
             return;

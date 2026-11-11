@@ -80,6 +80,35 @@ impl App {
         }
     }
 
+    /// Set (or clear) the chapter's target rhyme scheme (#1325), the same way as
+    /// the meter: blank clears it, and a scheme Quill can't read is reported with
+    /// examples rather than stored.
+    fn set_chapter_rhyme(&mut self, index: usize, text: &str) {
+        let scheme = if text.trim().is_empty() {
+            None
+        } else if let Some(s) = RhymeScheme::parse(text) {
+            Some(s)
+        } else {
+            self.message = Some(format!(
+                "Unknown rhyme scheme '{}' ({RHYME_EXAMPLES})",
+                text.trim()
+            ));
+            return;
+        };
+        if self.edit_chapter_meta(index, |fm| fm.set_rhyme(scheme.as_ref())) {
+            let title = self.project.chapter_title(index).unwrap_or("Chapter");
+            self.message = Some(scheme.map_or_else(
+                || format!("{title}: no rhyme scheme"),
+                |s| {
+                    format!(
+                        "{title}: rhymed {} (Verse report shows how it holds)",
+                        s.letters()
+                    )
+                },
+            ));
+        }
+    }
+
     /// Apply a front-matter edit to chapter `index`. The active chapter is edited
     /// through its live buffer (persisted on the next save, like prose); any other
     /// chapter is edited on disk immediately. Either way the pane cache is updated.
@@ -142,6 +171,7 @@ impl App {
         match field {
             MetaField::Role { at } => return self.set_chapter_role(at, text),
             MetaField::Meter { at } => self.set_chapter_meter(at, text),
+            MetaField::Rhyme { at } => self.set_chapter_rhyme(at, text),
             MetaField::Summary { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_summary(text));
             }

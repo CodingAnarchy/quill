@@ -39,10 +39,12 @@ keystrokes that stay out of the way.
   the command palette or with `]s` / `[s` in Vim mode, and pick an offline
   correction from a suggestions list with `z=` / `Alt-=`. See
   [Spell-checking](#spell-checking).
-- **Verse meter** — give a chapter or short story a target meter ("iambic
-  pentameter", "blank verse", "common meter") with `V` in the chapter browser,
-  and the Verse report scans every line against it: its stresses, its
-  syllables, the licences it takes, and where it breaks the meter. Offline,
+- **Verse meter and rhyme** — give a chapter or short story a target meter
+  ("iambic pentameter", "blank verse", "common meter") with `V` in the chapter
+  browser, or a rhyme scheme ("ABAB CDCD EFEF GG", "terza rima") with `H`, and
+  the Verse report checks every line against them: its stresses, its syllables,
+  the licences it takes, where it breaks the meter, and which endings rhyme
+  (perfect, slant, eye, identical) and which break the scheme. Offline,
   from the bundled CMU Pronouncing Dictionary (`assets/pronouncing/`, with its
   license); it only reports, never rewrites. See `docs/manuscript-analysis.md`.
 - **Project as a folder of chapters** — a `book.toml` manifest plus one

@@ -68,7 +68,7 @@ fn the_verse_report_scans_only_chapters_with_a_target() {
     assert!(app
         .message
         .as_deref()
-        .is_some_and(|m| m.contains("No chapter has a target meter")));
+        .is_some_and(|m| m.contains("No chapter has a target meter or rhyme scheme")));
 
     // The active chapter is read live, unsaved edits and all.
     app.on_key(ctrl('g'));
@@ -99,4 +99,60 @@ fn the_verse_report_scans_only_chapters_with_a_target() {
         !text.iter().any(|l| l.starts_with("Two")),
         "Two has no target"
     );
+}
+
+#[test]
+fn a_rhyme_scheme_is_set_and_reported_beside_the_meter() {
+    let (mut app, _dir) = two_chapter_app("verse-rhyme");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('H')));
+    type_str(&mut app, "abab");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.project
+            .chapter_rhyme(0)
+            .map(RhymeScheme::key)
+            .as_deref(),
+        Some("ABAB")
+    );
+    app.on_key(key(KeyCode::Char('V')));
+    type_str(&mut app, "iambic trimeter");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Esc));
+    app.buffer = Buffer::from_text(
+        "The wind was on the bay\nThe gulls were in the sky\nThe boats came home by day\nAnd no one wondered when\n",
+    );
+    app.run_action(Action::VerseReport, false);
+    let text = overlay_text(&app);
+    assert!(
+        text.iter()
+            .any(|l| l == "One \u{b7} iambic trimeter \u{b7} rhymed ABAB"),
+        "{text:#?}"
+    );
+    assert!(
+        text.iter()
+            .any(|l| l.contains("Rhyme: 3 of 4 line endings fit (75%)")),
+        "{text:#?}"
+    );
+    assert!(
+        text.iter()
+            .any(|l| l.contains("\"when\" doesn't rhyme with line 2 (no rhyme)")),
+        "{text:#?}"
+    );
+    assert!(text.iter().any(|l| l.contains("\u{2717} C/B")), "{text:#?}");
+}
+
+#[test]
+fn an_unknown_rhyme_scheme_is_rejected_with_examples() {
+    let (mut app, _dir) = two_chapter_app("verse-rhyme-bad");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('H')));
+    type_str(&mut app, "A-B-A-B");
+    app.on_key(key(KeyCode::Enter));
+    let message = app.message.clone().unwrap_or_default();
+    assert!(
+        message.contains("Unknown rhyme scheme") && message.contains("terza rima"),
+        "{message}"
+    );
+    assert_eq!(app.project.chapter_rhyme(0), None);
 }
