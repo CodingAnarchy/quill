@@ -240,6 +240,9 @@ impl App {
                     Some(sel),
                 );
             }
+            // Mark the chapter as verse, or not (#1327): its lines keep their breaks
+            // on export.
+            KeyCode::Char('L') => self.toggle_verse(sel),
             // Set the chapter's target rhyme scheme (#1325); blank clears it.
             KeyCode::Char('H') => {
                 let prefill = self

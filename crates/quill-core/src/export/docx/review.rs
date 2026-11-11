@@ -127,7 +127,7 @@ fn review_body(doc: &Document, notes: &[ChapterNotes], w: &mut CommentWriter) ->
             Block::Chapter(ch) => {
                 body.push_str(&heading(&ch.title));
                 let chapter_notes = notes.get(chapter).unwrap_or(&empty);
-                for prose in prose_blocks(&ch.body) {
+                for prose in prose_blocks(&ch.body, ch.verse) {
                     body.push_str(&review_paragraph(&prose, chapter_notes, w));
                 }
                 chapter += 1;
@@ -160,6 +160,11 @@ fn review_paragraph(prose: &Prose, notes: &[ReviewNote], w: &mut CommentWriter) 
         }
         Prose::Preformatted(code) => para("", mono_runs(code)),
         Prose::Paragraph(text) => para("", annotated_runs(text, notes, w)),
+        // A stanza keeps its lines (#1327); an annotation anchors within a line.
+        Prose::Stanza(lines) => lines
+            .iter()
+            .map(|l| para("", annotated_runs(&l.text, notes, w)))
+            .collect(),
     }
 }
 

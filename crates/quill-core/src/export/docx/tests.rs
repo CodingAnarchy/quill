@@ -28,6 +28,7 @@ fn doc() -> Document {
         parts: vec![crate::export::Part {
             name: Some("Part One".into()),
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "The Find".into(),
                 epigraph: None,
                 body: "The locket *gleamed* and felt **heavy**.\n\n## A scene\n\nMore.".into(),
@@ -64,6 +65,7 @@ fn smart_typography_glyphs_pass_through_to_docx() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "C".into(),
                 epigraph: None,
                 body: "He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}".into(),
@@ -97,6 +99,7 @@ fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "C".into(),
                 epigraph: None,
                 body: "Before.\n\n```\nLOG one\nLOG two\n```\n\nAfter.".into(),
@@ -134,6 +137,7 @@ fn series_docx_carries_every_book_in_order() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "Ch".into(),
                 epigraph: None,
                 body: "prose".into(),
@@ -180,6 +184,7 @@ fn series_docx_reprints_each_books_copyright_not_just_the_first() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "Ch".into(),
                 epigraph: None,
                 body: "prose".into(),
@@ -328,6 +333,7 @@ fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "One".into(),
                 epigraph: None,
                 body: "Scene one.\n\n---\n\nScene two.".into(),
@@ -689,6 +695,7 @@ fn series_docx_carries_a_header_and_toc() {
         parts: vec![crate::export::Part {
             name: None,
             chapters: vec![crate::export::Chapter {
+                verse: false,
                 title: "Ch".into(),
                 epigraph: None,
                 body: "prose".into(),

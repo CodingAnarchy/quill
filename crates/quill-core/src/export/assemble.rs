@@ -16,7 +16,7 @@ use std::ops::{Range, RangeInclusive};
 
 use super::{pdf, strip_repeated_title, Chapter, Document, ExportStyle, Part, PubMeta, StoryMeta};
 use crate::config::AuthorConfig;
-use crate::frontmatter::{Band, Epigraph};
+use crate::frontmatter::{Band, Epigraph, FrontMatter};
 use crate::project::{front_chapter_count, part_at_body_position, Project};
 
 /// A chapter's text as an editor holds it, unsaved edits and all.
@@ -163,6 +163,7 @@ impl<'a> Assembly<'a> {
             title,
             epigraph,
             role: project.chapter_role(i),
+            verse: project.chapter_is_verse(i),
         }
     }
 
@@ -241,6 +242,7 @@ impl<'a> Assembly<'a> {
                     epigraph,
                     body,
                     role: None,
+                    verse: story.verse,
                 }
             })
             .collect()
@@ -262,6 +264,7 @@ impl<'a> Assembly<'a> {
             let (body, fm) = project.read_chapter_parts(&ce.file);
             let chapter = Chapter {
                 title: ce.title.clone(),
+                verse: fm.as_ref().is_some_and(FrontMatter::is_verse),
                 epigraph: fm.and_then(|f| f.epigraph()),
                 body: strip_repeated_title(&body, &ce.title),
                 role: ce.role,

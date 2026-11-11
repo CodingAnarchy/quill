@@ -162,7 +162,7 @@ fn to_rtf(chapter: &Chapter) -> String {
             |by| rtf_paragraph(&[Run::new(format!("— {by}"), TextStyle::Italic)]),
         ));
     }
-    for prose in prose_blocks(&chapter.body) {
+    for prose in prose_blocks(&chapter.body, chapter.verse) {
         match prose {
             // A centered scene divider, the conventional Scrivener separator.
             Prose::SceneBreak => {
@@ -176,6 +176,24 @@ fn to_rtf(chapter: &Chapter) -> String {
             Prose::Preformatted(code) => {
                 let lines: Vec<String> = code.lines().map(rtf_escape).collect();
                 let _ = writeln!(body, "\\pard\\sa180\\f1 {}\\f0\\par", lines.join("\\line "));
+            }
+            // A stanza (#1327): a hanging-indented paragraph a line, the space
+            // after on its last line.
+            Prose::Stanza(lines) => {
+                let last = lines.len().saturating_sub(1);
+                for (i, line) in lines.iter().enumerate() {
+                    let left = 720 + 360 * line.indent;
+                    let after = if i == last { 180 } else { 0 };
+                    let para = rtf_paragraph(&inline_runs(&line.text));
+                    // `rtf_paragraph` opens `\pard\sa180`; set this line's own
+                    // indent and spacing in its place.
+                    let para = para.replacen(
+                        "\\pard\\sa180",
+                        &format!("\\pard\\li{left}\\fi-720\\sa{after}"),
+                        1,
+                    );
+                    body.push_str(&para);
+                }
             }
         }
     }
@@ -265,6 +283,7 @@ mod tests {
 
     fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
         Chapter {
+            verse: false,
             title: title.to_string(),
             epigraph,
             body: body.to_string(),
@@ -478,5 +497,17 @@ mod tests {
         );
         assert!(scrivx.contains("<Title>One</Title>"));
         std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_verse_chapter_sets_a_paragraph_a_line() {
+        let mut ch = chapter("Tide", None, "one line\n  two line\n");
+        ch.verse = true;
+        let rtf = to_rtf(&ch);
+        assert!(rtf.contains("\\pard\\li720\\fi-720\\sa0 one line"), "{rtf}");
+        assert!(
+            rtf.contains("\\pard\\li1080\\fi-720\\sa180 two line"),
+            "{rtf}"
+        );
     }
 }

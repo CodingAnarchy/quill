@@ -10,6 +10,11 @@ use super::font::{glyph_run, glyph_run_mono, OBLIQUE_SHEAR};
 use super::layout::Layout;
 use super::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg, Word};
 use super::{Align, FontStyle, Pdf, Run, TextStyle, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
+use crate::export::inline_runs;
+use crate::export::verse::VerseLine;
+
+/// How far a wrapped verse line's continuation sits in from its start (#1327).
+const VERSE_HANG: f32 = 24.0;
 
 impl Pdf {
     /// A normal body paragraph: first-line indented, justified to both margins
@@ -24,6 +29,27 @@ impl Pdf {
             BODY_LEADING,
             Align::Justify,
         );
+    }
+
+    /// A stanza of verse (#1327): each line set flush left and unjustified, with a
+    /// hanging indent so a line too wide for the column wraps visibly inside
+    /// itself, indented lines set further in, and a line's space after the stanza.
+    pub(super) fn stanza(&mut self, lines: &[VerseLine]) {
+        for line in lines {
+            let words = words_of(&inline_runs(&line.text), false);
+            // Indent steps never push a line past half the column.
+            let step = (INDENT * line.indent as f32).min(self.layout.text_w() / 2.0);
+            let pad = step + VERSE_HANG;
+            self.flow(
+                &words,
+                self.layout.text_w() - pad,
+                -VERSE_HANG,
+                BODY_SIZE,
+                BODY_LEADING,
+                Align::Verse(pad),
+            );
+        }
+        self.y -= BODY_LEADING;
     }
 
     /// A single centered line (titles, headings, scene breaks) followed by a gap.
@@ -107,6 +133,7 @@ impl Pdf {
                     Align::Left | Align::Justify => left + indent,
                     Align::Center => left + (col - line_w) / 2.0,
                     Align::LeftInset(pad) => left + pad,
+                    Align::Verse(pad) => left + pad + indent,
                     Align::RightInset(pad) => left + col - pad - line_w,
                 };
                 let segs = segments(&line);

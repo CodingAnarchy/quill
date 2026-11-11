@@ -471,12 +471,14 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
             name: None,
             chapters: vec![
                 Chapter {
+                    verse: false,
                     title: "One".into(),
                     epigraph: None,
                     body: "The sea was *grey*.".into(),
                     role: None,
                 },
                 Chapter {
+                    verse: false,
                     title: "Two".into(),
                     epigraph: None,
                     body: "And it **ended**.".into(),
@@ -629,12 +631,14 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
             name: Some("Part One".into()),
             chapters: vec![
                 Chapter {
+                    verse: false,
                     title: "One".into(),
                     epigraph: None,
                     body: "The sea was *grey*.".into(),
                     role: None,
                 },
                 Chapter {
+                    verse: false,
                     title: "Two".into(),
                     epigraph: None,
                     body: "And it **ended**.".into(),

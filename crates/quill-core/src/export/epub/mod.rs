@@ -53,6 +53,10 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .epigraph .attribution { text-align: right; }
 .scene-break { text-align: center; margin: 1.5em 0; }
 pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent: 0; }
+.stanza { margin: 0 0 1em; }
+.stanza p { text-indent: -2em; margin: 0 0 0 2em; text-align: start; hyphens: none; }
+.stanza p.i1 { margin-left: 3em; } .stanza p.i2 { margin-left: 4em; } .stanza p.i3 { margin-left: 5em; } .stanza p.i4 { margin-left: 6em; }
+.stanza p.i5 { margin-left: 7em; } .stanza p.i6 { margin-left: 8em; } .stanza p.i7 { margin-left: 9em; } .stanza p.i8 { margin-left: 10em; }
 "#;
 
 /// Compile a [`Document`] to the bytes of an `.epub`. `modified` is the
@@ -665,9 +669,10 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle, heading: bool) -> String {
     }
     // With drop caps on, the chapter's first prose paragraph is marked `opening`.
     let mut opened = false;
-    for prose in prose_blocks(&ch.body) {
+    for prose in prose_blocks(&ch.body, ch.verse) {
         let opening = style.drop_cap() && !opened && matches!(prose, Prose::Paragraph(_));
-        opened |= opening;
+        // A verse chapter's opening is its first stanza, never a later paragraph.
+        opened |= opening || matches!(prose, Prose::Stanza(_));
         out.push_str(&prose_xhtml(&prose, style, opening));
         out.push('\n');
     }
@@ -691,6 +696,21 @@ fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
         }
         // Verbatim, monospaced, whitespace preserved — no emphasis parsing (#522).
         Prose::Preformatted(code) => format!("<pre>{}</pre>", xml_escape(code)),
+        // A stanza (#1327): a paragraph a line, hanging-indented by the stylesheet
+        // so a wrapped line reads as one, with an indent class for indented lines.
+        Prose::Stanza(lines) => {
+            let mut out = String::from("<div class=\"stanza\">");
+            for line in lines {
+                let class = if line.indent > 0 {
+                    format!(" class=\"i{}\"", line.indent)
+                } else {
+                    String::new()
+                };
+                let _ = write!(out, "<p{class}>{}</p>", inline_xhtml(&line.text));
+            }
+            out.push_str("</div>");
+            out
+        }
     }
 }
 

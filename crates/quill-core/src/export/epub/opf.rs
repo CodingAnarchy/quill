@@ -348,6 +348,7 @@ mod tests {
 
     fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
         Chapter {
+            verse: false,
             title: title.to_string(),
             epigraph,
             body: body.to_string(),

@@ -11,6 +11,7 @@ use crate::frontmatter::{Epigraph, Role};
 /// book epigraph, and an ISBN.
 fn novel() -> Document {
     let chapter = |title: &str, body: &str, role: Option<Role>| Chapter {
+        verse: false,
         title: title.into(),
         epigraph: None,
         body: body.into(),

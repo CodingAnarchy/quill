@@ -27,6 +27,7 @@ fn story() -> Document {
         half_title: false,
         series_books: Vec::new(),
         front: vec![Chapter {
+            verse: false,
             title: "For M".into(),
             epigraph: None,
             body: "For M.\n".into(),
@@ -35,6 +36,7 @@ fn story() -> Document {
         parts: vec![Part {
             name: None,
             chapters: vec![Chapter {
+                verse: false,
                 title: "The Drowned Bell".into(),
                 epigraph: None,
                 body: PROSE.into(),

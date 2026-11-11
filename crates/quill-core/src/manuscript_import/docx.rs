@@ -533,12 +533,14 @@ mod tests {
                 name: None,
                 chapters: vec![
                     Chapter {
+                        verse: false,
                         title: "One".into(),
                         epigraph: None,
                         body: "The night was *dark*.".into(),
                         role: None,
                     },
                     Chapter {
+                        verse: false,
                         title: "Two".into(),
                         epigraph: None,
                         body: "The **end**.".into(),
@@ -777,6 +779,7 @@ mod tests {
             parts: vec![Part {
                 name: None,
                 chapters: vec![Chapter {
+                    verse: false,
                     title: "One".into(),
                     epigraph: None,
                     body: "The sea was grey and it ended.".into(),
