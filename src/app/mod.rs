@@ -92,6 +92,7 @@ mod persistence;
 mod project_ops;
 mod project_search;
 mod prompts;
+mod pronounce; // setting how a word sounds for verse analysis (#1328)
 mod proximity_repeats; // the near-proximity word-repeat marking: toggle, dim-mark in place (#1002)
 mod quick_switch;
 mod saving;
@@ -190,6 +191,7 @@ impl App {
             proximity_repeats: Vec::new(),
             proximity_key: None,
             word_lists: RefCell::default(),
+            pronounce_word: None,
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),

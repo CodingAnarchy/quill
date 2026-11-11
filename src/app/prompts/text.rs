@@ -128,6 +128,7 @@ impl App {
                 };
                 self.select(sel);
             }
+            Pending::SetPronunciation => self.apply_pronunciation(text),
             Pending::SetMeta(field) => {
                 // Single-line metadata prompts (summary, POV, attribution, book
                 // fields). The multi-line epigraph quotations are edited in the

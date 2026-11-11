@@ -486,6 +486,19 @@ consonants match, not both), eye (spelled alike, said differently, like love and
 move), or identical (the same word or sound). Slant rhymes count against the
 scheme unless you put "slant" first ("slant ABAB").
 
+The report hears words the way a pronouncing dictionary says them, which won't
+always be your way: a character's name, an invented word, an archaic stress. Put
+the cursor on the word and run "Set how the word at the cursor sounds" from the
+Ctrl-K menu (or "verse:pronounce"). Type its stress, one digit a syllable (1
+stressed, 2 secondary, 0 unstressed, so "0100" for Hermione), and optionally
+"rhymes with" and a word that ends with the same sound ("0100 rhymes with Tony").
+It applies everywhere in the project from then on; a blank entry hands the word
+back to the dictionary. The words you've set live in pronunciations.txt at the
+project root, which "Edit pronunciations" opens in a pane to list, change, or
+remove them (closing the pane reloads it). Verse spellings scan as written: a
+grave accent sounds a syllable (belovèd is three), 'd is a silent -ed (dimm'd),
+and an elision counts its letters as written (heav'n, o'er, wand'ring).
+
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest
 writing streak (a day counts when its net words are positive; a streak survives a

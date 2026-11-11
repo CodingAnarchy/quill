@@ -20,9 +20,10 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::lexicon::Lexicon;
 use super::lines::verse_lines;
 use super::meter::{Foot, Meter};
-use super::pronounce::{is_function_word, pronounce, Sound, Stress};
+use super::pronounce::{is_function_word, pronounce_with, Sound, Stress};
 
 /// A licence: a variation from the strict pattern that verse in the meter
 /// commonly takes. Accepted unless the meter is strict.
@@ -157,11 +158,24 @@ pub const BEAT: char = '/';
 /// lines are skipped; a blank line or a break ends a stanza (see
 /// [`verse_lines`]).
 pub fn scan_meter(text: &str, meter: &Meter) -> Vec<LineScan> {
+    scan_meter_with(text, meter, &Lexicon::default())
+}
+
+/// [`scan_meter`], hearing words through the project's own pronunciations
+/// (#1328) before the dictionary.
+pub fn scan_meter_with(text: &str, meter: &Meter, lexicon: &Lexicon) -> Vec<LineScan> {
     verse_lines(text)
         .into_iter()
         .map(|l| {
             let feet = meter.feet_for_line(l.position);
-            scan_line(l.line, l.stanza, l.text, &words(l.text), meter, feet)
+            scan_line(
+                l.line,
+                l.stanza,
+                l.text,
+                &words(l.text, lexicon),
+                meter,
+                feet,
+            )
         })
         .collect()
 }
@@ -175,15 +189,41 @@ struct Word {
 
 /// The line's words: Unicode word segmentation, keeping only tokens with a
 /// letter in them (a bare number isn't scanned).
-fn words(line: &str) -> Vec<Word> {
+fn words(line: &str, lexicon: &Lexicon) -> Vec<Word> {
     line.unicode_word_indices()
         .filter(|(_, w)| w.chars().any(char::is_alphabetic))
-        .map(|(start, w)| Word {
-            range: start..start + w.len(),
-            sound: pronounce(w),
-            function: is_function_word(w),
+        .map(|(start, w)| {
+            let range = with_elision(line, start..start + w.len());
+            let word = &line[range.clone()];
+            Word {
+                sound: pronounce_with(word, lexicon),
+                function: is_function_word(word),
+                range,
+            }
         })
         .collect()
+}
+
+/// A word's range widened over an apostrophe the segmenter left outside it:
+/// the elided letters of *th'* or *'tis*. An apostrophe only counts when it
+/// touches the word and not another letter beyond it.
+pub(super) fn with_elision(line: &str, range: Range<usize>) -> Range<usize> {
+    let is_apostrophe = |c: char| c == '\'' || c == '\u{2019}';
+    let mut start = range.start;
+    let mut before = line[..start].chars().rev();
+    if let Some(c) = before.next().filter(|&c| is_apostrophe(c)) {
+        if !before.next().is_some_and(char::is_alphanumeric) {
+            start -= c.len_utf8();
+        }
+    }
+    let mut end = range.end;
+    let mut after = line[end..].chars();
+    if let Some(c) = after.next().filter(|&c| is_apostrophe(c)) {
+        if !after.next().is_some_and(char::is_alphanumeric) {
+            end += c.len_utf8();
+        }
+    }
+    start..end
 }
 
 /// How a syllable weighs in a line.

@@ -306,6 +306,8 @@ impl App {
             Action::AnalysisReport => self.open_analysis_report(),
             Action::WritingHistory => self.open_writing_history(),
             Action::VerseReport => self.open_verse_report(),
+            Action::SetPronunciation => self.prompt_pronunciation(),
+            Action::EditPronunciations => self.edit_pronunciations(),
             Action::RevisionPlan => self.export_revision_plan(),
             Action::HealthTrend => self.export_health_trend(),
             Action::Ai(a) => self.start_ai_action(a, force),

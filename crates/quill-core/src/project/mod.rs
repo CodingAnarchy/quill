@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::annotation::Annotation;
 use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
-use crate::verse::{Meter, RhymeScheme};
+use crate::verse::{Lexicon, Meter, RhymeScheme};
 
 mod annotations;
 mod collection;
@@ -34,6 +34,7 @@ mod goals;
 mod io;
 mod lock;
 mod manifest;
+mod pronunciations;
 mod series;
 mod structure;
 mod template;
@@ -139,6 +140,9 @@ pub struct Project {
     /// whenever the set changes (open, reload, accept) — the cheap key the idle
     /// spell pass uses to tell that an accepted word could change its flags.
     dictionary_gen: u64,
+    /// The author's own pronunciations for verse analysis (#1328), from
+    /// `pronunciations.txt` at the project root at open.
+    lexicon: Lexicon,
     /// Inline author annotations (#302): notes anchored to chapter byte ranges,
     /// keyed by chapter file name. Loaded from `annotations.toml` at the project
     /// root at open; kept out of the chapter `.md` files so exports stay clean.
@@ -266,6 +270,7 @@ impl Project {
         }
 
         let dictionary = load_dictionary(&root);
+        let lexicon = pronunciations::load(&root);
         let annotations = load_annotations(&root);
         // Take the advisory instance lock (#871). If another live instance already
         // holds the project, open read-only rather than racing its writes and
@@ -285,6 +290,7 @@ impl Project {
             active_book,
             dictionary,
             dictionary_gen: next_dictionary_gen(),
+            lexicon,
             annotations,
             annotations_unsaved: false,
             lock,
@@ -441,6 +447,7 @@ impl Project {
             active_book: 0,
             dictionary: HashSet::new(),
             dictionary_gen: next_dictionary_gen(),
+            lexicon: Lexicon::default(),
             annotations: Vec::new(),
             annotations_unsaved: false,
             lock,
@@ -822,6 +829,7 @@ impl Project {
             active_book: 0,
             dictionary: HashSet::new(),
             dictionary_gen: next_dictionary_gen(),
+            lexicon: Lexicon::default(),
             annotations: Vec::new(),
             annotations_unsaved: false,
             // An in-memory scratch project owns nothing on disk, so it holds no

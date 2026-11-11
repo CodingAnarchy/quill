@@ -254,7 +254,22 @@ const GROUPS: &[(&str, &[ActionSpec])] = &[
                 .key("Ctrl-T")
                 .runnable(),
             row(Action::WritingHistory, "report:history", "Writing history").runnable(),
-            row(Action::VerseReport, "report:verse", "Verse report (meter)").runnable(),
+            row(
+                Action::VerseReport,
+                "report:verse",
+                "Verse report (meter & rhyme)",
+            )
+            .runnable(),
+            row(
+                Action::SetPronunciation,
+                "verse:pronounce",
+                "Set how the word at the cursor sounds (verse)…",
+            ),
+            row(
+                Action::EditPronunciations,
+                "verse:pronunciations",
+                "Edit pronunciations (verse)",
+            ),
             row(
                 Action::HealthTrend,
                 "report:health-trend",
@@ -564,6 +579,8 @@ mod tests {
                 AnalysisReport,
                 WritingHistory,
                 VerseReport,
+                SetPronunciation,
+                EditPronunciations,
                 EnableAi,
                 UserGuide,
                 QuickStart,

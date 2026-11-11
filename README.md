@@ -44,7 +44,9 @@ keystrokes that stay out of the way.
   browser, or a rhyme scheme ("ABAB CDCD EFEF GG", "terza rima") with `H`, and
   the Verse report checks every line against them: its stresses, its syllables,
   the licences it takes, where it breaks the meter, and which endings rhyme
-  (perfect, slant, eye, identical) and which break the scheme. Offline,
+  (perfect, slant, eye, identical) and which break the scheme. Names and
+  invented words scan the way you say them once you set how they sound
+  (`pronunciations.txt`). Offline,
   from the bundled CMU Pronouncing Dictionary (`assets/pronouncing/`, with its
   license); it only reports, never rewrites. See `docs/manuscript-analysis.md`.
 - **Project as a folder of chapters** — a `book.toml` manifest plus one

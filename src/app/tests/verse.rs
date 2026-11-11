@@ -156,3 +156,107 @@ fn an_unknown_rhyme_scheme_is_rejected_with_examples() {
     );
     assert_eq!(app.project.chapter_rhyme(0), None);
 }
+
+/// Put the cursor at the start of `word` in the active buffer.
+fn cursor_on(app: &mut App, word: &str) {
+    let at = app
+        .buffer
+        .text()
+        .find(word)
+        .expect("the word is in the buffer");
+    app.buffer.cursor = app.buffer.cursor_at_byte(at + 1);
+}
+
+#[test]
+fn the_word_at_the_cursor_gets_the_authors_pronunciation() {
+    let (mut app, dir) = two_chapter_app("verse-pronounce");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('V')));
+    type_str(&mut app, "iambic pentameter");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Esc));
+    app.buffer = Buffer::from_text("And every fair from fair sometime declines,\n");
+    app.run_action(Action::VerseReport, false);
+    assert!(overlay_text(&app).iter().any(|l| l.contains("(sometime)")));
+    app.overlay = None;
+
+    // The prompt opens on the word, prefilled with the dictionary's stress.
+    cursor_on(&mut app, "sometime");
+    app.run_action(Action::SetPronunciation, false);
+    match &app.mode {
+        Mode::Prompt(p) => {
+            assert_eq!(p.input, "12", "the dictionary's SOME-time");
+            assert!(p.label.contains("'sometime'"), "{}", p.label);
+        }
+        _ => panic!("the pronunciation prompt is open"),
+    }
+    for _ in 0..2 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    type_str(&mut app, "01");
+    app.on_key(key(KeyCode::Enter));
+    let file = fs::read_to_string(dir.join("pronunciations.txt")).unwrap();
+    assert!(file.starts_with("# How words sound"), "{file}");
+    assert!(file.ends_with("sometime = 01\n"), "{file}");
+
+    // The report now hears some-TIME, and the line fits.
+    app.run_action(Action::VerseReport, false);
+    let text = overlay_text(&app);
+    assert!(
+        text.iter().any(|l| l.contains("1 of 1 lines fit")),
+        "{text:#?}"
+    );
+    app.overlay = None;
+
+    // Reopened, the project still hears it that way.
+    let reopened = Project::open(&dir).unwrap();
+    assert!(reopened.lexicon().get("Sometime").is_some());
+
+    // Blank hands the word back to the dictionary.
+    cursor_on(&mut app, "sometime");
+    app.run_action(Action::SetPronunciation, false);
+    for _ in 0..2 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.project.lexicon().is_empty());
+    assert!(!fs::read_to_string(dir.join("pronunciations.txt"))
+        .unwrap()
+        .contains("sometime ="));
+}
+
+#[test]
+fn a_bad_pronunciation_is_refused_with_a_reason() {
+    let (mut app, dir) = two_chapter_app("verse-pronounce-bad");
+    app.buffer = Buffer::from_text("Hermione walked\n");
+    cursor_on(&mut app, "Hermione");
+    app.run_action(Action::SetPronunciation, false);
+    type_str(&mut app, "x");
+    app.on_key(key(KeyCode::Enter));
+    let message = app.message.clone().unwrap_or_default();
+    assert!(message.contains("isn't a stress digit"), "{message}");
+    assert!(!dir.join("pronunciations.txt").exists());
+}
+
+#[test]
+fn editing_the_pronunciations_pane_reloads_them_on_close() {
+    let (mut app, _dir) = two_chapter_app("verse-pronounce-pane");
+    app.run_action(Action::EditPronunciations, false);
+    assert!(app.split_view().is_some(), "the pane opened");
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('w')));
+    type_str(&mut app, "Quessaly = 102\nbroken\n");
+    app.on_key(ctrl('s'));
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('c')));
+    assert!(app.split_view().is_none(), "the pane closed");
+    assert!(
+        app.project.lexicon().get("quessaly").is_some(),
+        "reloaded on close"
+    );
+    let message = app.message.clone().unwrap_or_default();
+    assert!(
+        message.contains("line 2"),
+        "the bad line is reported: {message}"
+    );
+}

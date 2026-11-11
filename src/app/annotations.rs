@@ -902,8 +902,8 @@ impl App {
 
     /// The byte range of the word under the cursor (letters/digits/apostrophes),
     /// or `None` when the cursor isn't on a word. Used when annotating without a
-    /// selection.
-    fn word_at_cursor(&self) -> Option<(usize, usize)> {
+    /// selection, and for the word whose pronunciation the author sets (#1328).
+    pub(super) fn word_at_cursor(&self) -> Option<(usize, usize)> {
         let buf = self.edit_buffer();
         let text = buf.text();
         let cur = buf.cursor_byte().min(text.len());
