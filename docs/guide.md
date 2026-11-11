@@ -80,8 +80,8 @@ delete ("d") chapters, split the open chapter at the cursor into two ("x"), merg
 a chapter into the one above it ("M"), and duplicate a chapter ("c"). The same
 pane sets each chapter's metadata — press "s" to cycle its status (draft →
 revised → final), "m" for a one-line summary, "v" for the POV, "g" for a chapter
-epigraph, "l" for a word-count goal, and "S" for a section role (prologue,
-epilogue, appendix, …). Book-level details live here too: "t" title, "b"
+epigraph, "l" for a word-count goal, "S" for a section role (prologue,
+epilogue, appendix, …), and "V" for a target meter when the chapter is verse. Book-level details live here too: "t" title, "b"
 subtitle, "w" author, "e" series, and "G" a book epigraph. All of it is kept in
 front matter or the manifest, out of the prose, and shown as a badge beside the
 chapter (the status badge is D / R / F).
@@ -460,6 +460,19 @@ overused words and phrases. Both are scrollable; press s to save the report you'
 reading to a dated Markdown snapshot (export/progress-<date>.md or
 export/analysis-<date>.md) for your records or to share; any other key closes them.
 
+Writing verse? Give the chapter (or the short story) a target meter with "V" in
+the chapter browser: a foot and a length like "iambic pentameter" or "trochaic
+tetrameter", lengths that alternate like "iambic tetrameter/trimeter", or a named
+form like "blank verse" or "common meter". Put "strict" first to count the usual
+licences against a line. Then run "Verse report" from the Ctrl-K menu (or
+"report:verse"). For each chapter with a target it lists every line with a mark
+(a tick when it fits, ~ when it fits with a licence such as a feminine ending, a
+cross when it breaks the meter), its syllables against the pattern, its stress
+reading, and what went wrong: extra or missing syllables, an inverted foot, or a
+stress in the wrong place. Totals per stanza and for the whole piece sit at the
+top, with the most common fault. Words Quill didn't know and had to guess are
+listed under their line. It only reports; the verse stays yours.
+
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest
 writing streak (a day counts when its net words are positive; a streak survives a
@@ -717,6 +730,7 @@ KEY REFERENCE
                     s            cycle status (draft → revised → final)
                     m  v  g      summary / POV / chapter epigraph
                     l  S         word-count goal / section role (prologue, epilogue, …)
+                    V            target meter for verse (iambic pentameter, blank verse, …)
                     t b w e G    book title / subtitle / author / series / epigraph
                     Esc          clear the filter, then leave the browser
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading

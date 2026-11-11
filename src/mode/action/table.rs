@@ -254,6 +254,7 @@ const GROUPS: &[(&str, &[ActionSpec])] = &[
                 .key("Ctrl-T")
                 .runnable(),
             row(Action::WritingHistory, "report:history", "Writing history").runnable(),
+            row(Action::VerseReport, "report:verse", "Verse report (meter)").runnable(),
             row(
                 Action::HealthTrend,
                 "report:health-trend",
@@ -562,6 +563,7 @@ mod tests {
                 ProgressReport,
                 AnalysisReport,
                 WritingHistory,
+                VerseReport,
                 EnableAi,
                 UserGuide,
                 QuickStart,
