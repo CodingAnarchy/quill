@@ -36,4 +36,5 @@ pub mod syntax;
 pub mod testutil;
 pub mod text;
 pub mod vcs;
+pub mod verse;
 pub mod wrap;

@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::annotation::Annotation;
 use crate::atomic;
 use crate::frontmatter::{Band, FrontMatter, Role, Status};
+use crate::verse::Meter;
 
 mod annotations;
 mod collection;
@@ -632,6 +633,14 @@ impl Project {
     /// The file's section role (#179), if set; `None` is a plain body chapter.
     pub fn chapter_role(&self, index: usize) -> Option<Role> {
         self.manifest.chapters.get(index).and_then(|c| c.role)
+    }
+
+    /// The chapter's target meter for verse analysis (#1324), if set.
+    pub fn chapter_meter(&self, index: usize) -> Option<&Meter> {
+        self.manifest
+            .chapters
+            .get(index)
+            .and_then(|c| c.meter.as_ref())
     }
 
     /// The ordering band a file sits in (#180): front matter, body, or back matter.

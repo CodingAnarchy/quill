@@ -281,6 +281,88 @@ empty) the built-in defaults apply, unchanged. The same effective lists drive
 both the style-flags section and the most-used-words list, so the report stays
 consistent. (The `-ly` non-adverb exceptions aren't configurable.)
 
+## Verse: meter (#1324)
+
+A chapter or short story written in verse can carry a **target meter** in its
+front matter (`meter: iambic pentameter`), set with **V** in the chapter browser.
+The **Verse report** (`report:verse`) scans every line of each such chapter
+against it. Prose chapters, with no target, never appear in it. Like the rest of
+this document it's offline and algorithmic: it reports, and never offers a word
+or line that would fit.
+
+**The target.** A foot (iambic, trochaic, anapestic, dactylic, amphibrachic,
+spondaic) and a length (monometer through octameter). Lengths separated by `/`
+alternate down a stanza (`iambic tetrameter/trimeter`). Named forms: blank verse
+and heroic couplets (iambic pentameter), alexandrines (iambic hexameter), common
+meter (alternating 4 and 3 feet; also "ballad meter"), long meter (4), and short
+meter (3, 3, 4, 3). A leading `strict` counts the licences below as faults.
+
+**Lines and stanzas.** A line is a source line. Blank lines, headings, scene
+breaks, and fenced code end a stanza and aren't scanned.
+
+**How a word sounds.** Syllables and stress come from the CMU Pronouncing
+Dictionary (about 134,000 words, BSD licence, bundled in
+`assets/pronouncing/`). A possessive the dictionary lacks is its base word plus
+the `s`, a syllable after a hiss (*Rose's*). Any other missing word gets the
+spelling-based syllable estimate above with its stress left open, and is listed
+as a guess under its line.
+
+**Reading a line.** Words don't scan the same in every line, so Quill reads each
+line the way a reader resolves it. A polysyllable's primary stress is fixed, and
+so is an unstressed syllable next to it. Everything else can go either way:
+monosyllables, function words (*the*, *of*, *into*), secondary stresses, and an
+unstressed syllable two away from the main stress (the last syllable of
+*temperate* commonly takes a beat). Those leaning syllables still lean (a content
+word towards a beat, a function word away from one), and reading against the
+lean costs a little.
+
+Each line is matched against templates built from the target: the strict
+pattern, plus the **licences** verse in that meter commonly takes.
+
+- Iambic: a **feminine ending** (an extra offbeat at the end), a **headless
+  line** (no first offbeat), and an **inverted first foot** (opening on a
+  trochee).
+- Anapestic: a headless line, a **substituted foot** (one offbeat of a foot left
+  out), and a feminine ending.
+- Trochaic: a **catalectic ending** (the last offbeat dropped) and **anacrusis**
+  (an extra offbeat before the first beat).
+- Dactylic: catalectic (one or both final offbeats dropped), a substituted foot,
+  and anacrusis.
+- Amphibrachic: headless and catalectic.
+
+A small dynamic program chooses each word's pronunciation (where the dictionary
+has more than one, like *record*) and each syllable's place, scoring a fixed
+stress on the wrong beat at 3, a licence at 2, and a syllable read against its
+lean at 1. The cheapest reading wins. A line **fits** when that reading puts no
+fixed stress on the wrong beat. Weighing faults rather than forbidding them
+matters: a line of small words can nearly always be forced into the pattern by
+straining every one of them and stacking licences, and the honest reading with
+one foot inverted is what a reader hears.
+
+**What the report says.** Each line shows its number, a verdict (✓ fits, ~ fits
+with a licence, ✗ breaks the meter), its syllables against the strict pattern,
+its reading (`˘` unstressed, `/` stressed, a space between feet), and the text.
+Under it come the faults, the licences, and any guessed words. A fault is one
+of:
+
+- **N extra syllables** or **N syllables short**: no reading of the meter, licences
+  included, holds that many syllables. The count is against the strict pattern.
+- **Foot N inverted**: a foot whose fixed stresses read it backwards (a trochee
+  where an iamb belongs).
+- **Stress out of place in foot N**: a fixed stress on an offbeat, or an offbeat
+  syllable on a beat, that isn't a simple inversion.
+
+Each chapter opens with how many lines fit (and how many of those take a
+licence), each stanza's count when there's more than one, and the most common
+fault.
+
+**Where it falls short.** The dictionary says a word the way it's said today,
+in American English, on its own. It doesn't know an archaic stress (Shakespeare's
+*some-TIME*), an elision a poet intends (*th'*, *heav'n* aside, which are spelled
+out), or how a word shifts its stress in a phrase. Monosyllables are read as the
+line needs, so a line made only of them can fit almost anything. The report is a
+reader's ear for where to look, not a ruling.
+
 ## Reading the report
 
 Each chapter is one row — Ease, F–K, Fog, SMOG — with the whole-manuscript total

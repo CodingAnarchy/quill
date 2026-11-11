@@ -36,6 +36,7 @@ use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PE
 use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 use crate::typography;
+use crate::verse::{self, Meter, METER_EXAMPLES};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod annotation_remove;

@@ -56,6 +56,30 @@ impl App {
         moved
     }
 
+    /// Set (or clear) the chapter's target meter for verse analysis (#1324). A
+    /// blank value clears it; a meter Quill doesn't know is reported with
+    /// examples rather than stored, so the report never silently skips it.
+    fn set_chapter_meter(&mut self, index: usize, text: &str) {
+        let meter = if text.trim().is_empty() {
+            None
+        } else if let Some(m) = Meter::parse(text) {
+            Some(m)
+        } else {
+            self.message = Some(format!(
+                "Unknown meter '{}' ({METER_EXAMPLES})",
+                text.trim()
+            ));
+            return;
+        };
+        if self.edit_chapter_meta(index, |fm| fm.set_meter(meter.as_ref())) {
+            let title = self.project.chapter_title(index).unwrap_or("Chapter");
+            self.message = Some(meter.map_or_else(
+                || format!("{title}: no target meter"),
+                |m| format!("{title}: {m} (Verse report shows how it scans)"),
+            ));
+        }
+    }
+
     /// Apply a front-matter edit to chapter `index`. The active chapter is edited
     /// through its live buffer (persisted on the next save, like prose); any other
     /// chapter is edited on disk immediately. Either way the pane cache is updated.
@@ -117,6 +141,7 @@ impl App {
         let optional = (!text.is_empty()).then(|| text.to_string());
         match field {
             MetaField::Role { at } => return self.set_chapter_role(at, text),
+            MetaField::Meter { at } => self.set_chapter_meter(at, text),
             MetaField::Summary { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_summary(text));
             }

@@ -384,6 +384,10 @@ pub enum MetaField {
     Role {
         at: usize,
     },
+    /// The chapter's target meter for verse analysis (#1324); blank clears it.
+    Meter {
+        at: usize,
+    },
     ChapterEpigraph {
         at: usize,
     },

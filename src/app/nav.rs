@@ -225,6 +225,21 @@ impl App {
                     Some(sel),
                 );
             }
+            // Set the chapter's target meter for verse analysis (#1324); blank
+            // clears it.
+            KeyCode::Char('V') => {
+                let prefill = self
+                    .project
+                    .chapter_meter(sel)
+                    .map(Meter::key)
+                    .unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Meter { at: sel }),
+                    "Target meter (e.g. iambic pentameter, blank verse; blank = none): ",
+                    &prefill,
+                    Some(sel),
+                );
+            }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {
                 let cur = self.project.manifest.title.clone();

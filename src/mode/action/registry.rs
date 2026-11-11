@@ -29,6 +29,9 @@ pub enum Action {
     /// Open the writing-history view — daily net-words graph, streaks, and
     /// totals from the recorded per-day log (#586).
     WritingHistory,
+    /// Open the verse report (#1324): every chapter with a target meter, scanned
+    /// line by line.
+    VerseReport,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
     /// Turn on the opt-in AI features in-app (#602): write `[ai] enabled = true`

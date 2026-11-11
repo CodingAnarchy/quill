@@ -19,6 +19,7 @@ mod startup;
 mod theme;
 mod typography;
 mod ui;
+mod verse;
 mod workflow;
 
 // The UI-free editing core (#1229). Imported by name at the crate root so the

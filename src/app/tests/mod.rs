@@ -129,6 +129,7 @@ mod typography;
 mod vcs;
 mod vcs_concurrency;
 mod verify_idle;
+mod verse;
 mod vim;
 mod vim_case;
 mod vim_dot;

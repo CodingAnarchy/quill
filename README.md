@@ -39,6 +39,12 @@ keystrokes that stay out of the way.
   the command palette or with `]s` / `[s` in Vim mode, and pick an offline
   correction from a suggestions list with `z=` / `Alt-=`. See
   [Spell-checking](#spell-checking).
+- **Verse meter** — give a chapter or short story a target meter ("iambic
+  pentameter", "blank verse", "common meter") with `V` in the chapter browser,
+  and the Verse report scans every line against it: its stresses, its
+  syllables, the licences it takes, and where it breaks the meter. Offline,
+  from the bundled CMU Pronouncing Dictionary (`assets/pronouncing/`, with its
+  license); it only reports, never rewrites. See `docs/manuscript-analysis.md`.
 - **Project as a folder of chapters** — a `book.toml` manifest plus one
   Markdown file per chapter; create, rename, reorder, and delete chapters from
   the chapter browser (Ctrl-G) without touching the filesystem.

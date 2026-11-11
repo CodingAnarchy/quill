@@ -485,6 +485,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "report:progress",
         "report:analysis",
         "report:history",
+        "report:verse",
         "guide",
         "dict:accept",
         "spell:next",

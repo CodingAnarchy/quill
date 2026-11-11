@@ -1,6 +1,6 @@
 //! Typed chapter metadata over the raw block: the `Epigraph`/`SceneMeta` value
 //! types and the [`FrontMatter`] accessors that read and write the fields Quill
-//! manages (status, summary, pov, goal, role, epigraph, scenes). Each accessor
+//! manages (status, summary, pov, goal, role, meter, epigraph, scenes). Each accessor
 //! is surgical — it goes through the [`super::yaml`] layer, so a write touches
 //! only its own key and leaves an author's other keys and formatting untouched.
 //!
@@ -15,6 +15,7 @@ use super::FrontMatter;
 use super::Role;
 use super::SceneStatus;
 use super::Status;
+use crate::verse::Meter;
 
 /// An epigraph: a quotation with an optional attribution, shown above a book or
 /// chapter body. Stored as two keys (`epigraph` / `epigraph_by`) in front
@@ -116,6 +117,20 @@ impl FrontMatter {
         match role {
             Some(r) => self.set("role", r.key()),
             None => self.remove("role"),
+        }
+    }
+
+    /// The chapter's target meter for verse analysis (#1324), if one is set and
+    /// Quill knows it. An unknown value reads as no meter.
+    pub fn meter(&self) -> Option<Meter> {
+        self.get("meter").as_deref().and_then(Meter::parse)
+    }
+
+    /// Set the target meter; `None` clears it.
+    pub fn set_meter(&mut self, meter: Option<&Meter>) {
+        match meter {
+            Some(m) => self.set("meter", &m.key()),
+            None => self.remove("meter"),
         }
     }
 
