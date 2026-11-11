@@ -68,7 +68,7 @@ fn the_verse_report_scans_only_chapters_with_a_target() {
     assert!(app
         .message
         .as_deref()
-        .is_some_and(|m| m.contains("No chapter has a target meter or rhyme scheme")));
+        .is_some_and(|m| m.contains("Nothing to check: set a target meter or rhyme scheme")));
 
     // The active chapter is read live, unsaved edits and all.
     app.on_key(ctrl('g'));
@@ -223,6 +223,23 @@ fn the_word_at_the_cursor_gets_the_authors_pronunciation() {
     assert!(!fs::read_to_string(dir.join("pronunciations.txt"))
         .unwrap()
         .contains("sometime ="));
+}
+
+#[test]
+fn enter_closes_the_pronunciation_prompt_and_typing_goes_on() {
+    // The prompt used to stay open after Enter with its input taken and its
+    // caret left past the end, so the next letter typed crashed Quill.
+    let (mut app, _dir) = two_chapter_app("verse-pronounce-closes");
+    app.buffer = Buffer::from_text("And every fair from fair sometime declines,\n");
+    cursor_on(&mut app, "sometime");
+    app.run_action(Action::SetPronunciation, false);
+    app.on_key(key(KeyCode::Enter));
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "Enter closes the prompt"
+    );
+    app.on_key(key(KeyCode::Char('x')));
+    assert!(app.buffer.text().contains('x'), "the key reaches the text");
 }
 
 #[test]

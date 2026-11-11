@@ -32,13 +32,19 @@ static DICT: LazyLock<Dictionary> = LazyLock::new(|| {
 /// lives in `Project` (durable in `dictionary.txt`, viewable/editable in-app) and
 /// reaches this pure function only through the `accept` predicate, so the bundled
 /// engine here stays global and stateless. Tokens containing digits aren't
-/// spell-checkable and are skipped, not flagged. Pure: the caller runs it on idle
-/// and caches the result per chapter.
+/// spell-checkable and are skipped, not flagged. A fence line's words (a code
+/// block's language, a verse block's meter and scheme, #1337) are markup, not
+/// prose, so they're skipped too. Pure: the caller runs it on idle and caches the
+/// result per chapter.
 pub fn misspellings(text: &str, accept: impl Fn(&str) -> bool) -> Vec<(usize, usize)> {
     let dict = &*DICT;
+    let fences = fence_lines(text);
     let mut flags = Vec::new();
     for_each_word(text, |start, word| {
         if accept(word) || dict.check(word) {
+            return;
+        }
+        if fences.iter().any(|&(s, e)| s <= start && start < e) {
             return;
         }
         // Smart-quote contractions ("don’t") may be stored with an ASCII
@@ -49,6 +55,22 @@ pub fn misspellings(text: &str, accept: impl Fn(&str) -> bool) -> Vec<(usize, us
         flags.push((start, start + word.len()));
     });
     flags
+}
+
+/// The byte ranges of the fence lines (```` ``` ````) in `text`.
+fn fence_lines(text: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    if !text.contains("```") {
+        return out;
+    }
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") {
+            out.push((at, at + line.len()));
+        }
+        at += line.len();
+    }
+    out
 }
 
 /// Offline correction candidates for a misspelled `word` (#647), from the same
@@ -121,6 +143,14 @@ mod tests {
         assert_eq!(flags.len(), 1, "{flags:?}");
         let (s, e) = flags[0];
         assert_eq!(&text[s..e], "quikc");
+    }
+
+    #[test]
+    fn a_fence_lines_words_are_markup_not_prose() {
+        let text = "```verse iambic tetrameter abab\nThe quikc fox\n```\n";
+        let flags = misspellings(text, nothing);
+        let words: Vec<&str> = flags.iter().map(|&(s, e)| &text[s..e]).collect();
+        assert_eq!(words, ["quikc"]);
     }
 
     #[test]

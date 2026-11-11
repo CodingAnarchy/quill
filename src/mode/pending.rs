@@ -52,6 +52,9 @@ pub enum Pending {
     /// Text input: how the word at the cursor sounds, for verse analysis
     /// (#1328). The word itself waits in `App::pronounce_word`.
     SetPronunciation,
+    /// Text input: the meter and rhyme scheme to check the chosen lines
+    /// against (#1337). The lines wait in `App::verse_check`.
+    CheckVerse,
     /// y/N: delete the chapter at `at`.
     Delete { at: usize },
     /// y/N: merge the chapter at `at` into the one above it (#585).

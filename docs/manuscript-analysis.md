@@ -386,6 +386,49 @@ like the other revision aids. The toggle is remembered per project by a file in
 the `.quill/` state folder. When the terminal has no room left of the prose, the
 gutter isn't drawn; the in-text marks still are.
 
+## Verse: inside prose (#1337)
+
+Verse often sits inside prose: a song in a fantasy novel, a hymn, a nursery
+rhyme a scene turns on. A chapter-level target would scan every paragraph
+around it, so a passage can carry its own instead:
+
+````markdown
+```verse common meter / abcb
+The king sat in Dunfermline town,
+Drinking the blood-red wine;
+```
+````
+
+- **The fence line.** The first word of the info string is `verse` (any case);
+  the rest is the targets, a meter then a rhyme scheme, either optional,
+  separated by spaces and optionally `/`, `;`, or `,`. The longest prefix that
+  reads as a meter is the meter. A scheme in letters has to read like one
+  (starting at A, each new letter the next, X aside), so a misspelled meter
+  isn't silently taken for a scheme. Targets Quill can't read are reported, not
+  guessed at.
+- **Which targets apply.** A block that names a target uses only its own. One
+  that names none uses the chapter's, and with neither it's reported as having
+  nothing to check. The chapter's own scan skips fenced lines, as it always has,
+  so a block is never counted twice.
+- **The report and the marks.** Each block is a section of the Verse report
+  titled with its chapter and first line, numbered as lines of the chapter.
+  The scansion gutter and marks cover blocks the same way, and `]m` / `[m`
+  step through their faults, crossing into a chapter that has only blocks.
+- **The editor.** The block reads as text, not code: no code color, no
+  paragraph indent, and the fence lines hide until the cursor enters the block.
+  Emphasis inside a block shows its raw markers in the editor (it's still a
+  fenced block to the Markdown parser) but exports as emphasis. The fence
+  line's words aren't spell-checked. They do count toward the chapter's word
+  count, as a code fence's language does.
+- **Export.** Every format sets the block as verse, as a verse chapter is set
+  (see `docs/export.md`), and drops the fence lines.
+
+"Check the selected lines as verse" (`verse:check`) checks a passage once,
+without markup: the Visual selection the Ctrl-K menu was opened over, or the
+stanza at the cursor. It prompts for targets in the fence line's syntax,
+offering the last ones used (else the chapter's), and opens the result as a
+Verse report section numbered as lines of the chapter. It writes nothing.
+
 ## Verse: the author's pronunciations (#1328)
 
 The dictionary is a reader with an American accent and no context. When it hears

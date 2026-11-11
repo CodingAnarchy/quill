@@ -486,6 +486,8 @@ fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
             HighlightKind::Emphasis => style.add_modifier(Modifier::ITALIC),
             // Verbatim, set apart by color; the fence markers show literally (#522).
             HighlightKind::Code => style.fg(theme.code),
+            // Verse fenced in prose (#1337) reads as the prose around it.
+            HighlightKind::Verse => style,
             // Only reached when the break is revealed (cursor on the line): the raw
             // `---` markers show dimmed so they read as the divider they'll become
             // once the cursor leaves (#908). Concealed breaks never enter this path.

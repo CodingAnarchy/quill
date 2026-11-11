@@ -1,7 +1,7 @@
 //! The verse report (#1324, #1325): each chapter with a target meter or rhyme
-//! scheme, its totals, and every line with its scansion, its rhyme, and its
-//! verdicts. The checking lives in the core; this is the half that depends on
-//! `ratatui`.
+//! scheme, and each fenced verse block (#1337), with its totals and every line
+//! with its scansion, its rhyme, and its verdicts. The checking lives in the
+//! core; this is the half that depends on `ratatui`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -15,9 +15,14 @@ use super::{
 };
 use crate::theme;
 
-/// One chapter's checks, gathered by the editor and handed to [`lines`].
+/// One section of the report, gathered by the editor and handed to [`lines`]:
+/// a chapter checked against its targets, a fenced verse block (#1337), or lines
+/// the author chose to check.
 pub struct ChapterVerse {
     pub title: String,
+    /// A line to show under the title: what the section was checked against,
+    /// or why it couldn't be.
+    pub note: Option<String>,
     pub meter: Option<Meter>,
     pub rhyme: Option<RhymeScheme>,
     /// The meter scan, empty without a meter.
@@ -60,6 +65,12 @@ fn chapter_lines(chapter: &ChapterVerse) -> Vec<Line<'static>> {
         }
     }
     let mut out = vec![bold(title)];
+    if let Some(note) = &chapter.note {
+        out.push(dim(format!("  {note}")));
+    }
+    if chapter.meter.is_none() && chapter.rhyme.is_none() {
+        return out;
+    }
     if chapter.scans.is_empty() && chapter.rhymes.is_empty() {
         out.push(dim("  No lines to check yet."));
         return out;

@@ -261,6 +261,9 @@ What they assert:
   pronunciations. The one idle pass over 1,500 lines of rhymed pentameter stays
   under 50ms (~16ms). Keep the scan off the keystroke and draw paths; the
   gutter reads the cache by binary search.
+- `scansion_refresh_is_fast_for_prose_with_songs` (`app/tests/verse_blocks.rs`)
+  — the same idle pass over a ~13k-word prose chapter with six fenced
+  ```` ```verse ```` songs (#1337) scans only the songs, under 10ms (~0.4ms).
 - `a_keystroke_is_fast_in_a_long_chapter` (`crates/quill-ffi/src/session/tests.rs`)
   — the iPhone editor's per-keystroke work through the FFI (#1232): apply the
   UTF-16 edit, restyle the edited paragraph, read the live count. It stays far

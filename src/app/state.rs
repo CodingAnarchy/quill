@@ -119,6 +119,14 @@ pub struct App {
     pub(super) word_lists: RefCell<Option<reports::WordListsCache>>,
     /// The word whose pronunciation the open prompt sets (#1328).
     pub(super) pronounce_word: Option<String>,
+    /// The Visual selection the action menu was opened over, so an action run
+    /// from it can act on the selection (#1337).
+    pub(super) palette_selection: Option<(usize, usize)>,
+    /// The lines the open "check as verse" prompt will check (#1337), as buffer
+    /// bytes, whole lines.
+    pub(super) verse_check: Option<(usize, usize)>,
+    /// The targets the last "check as verse" used, to offer again (#1337).
+    pub(super) verse_check_last: String,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.

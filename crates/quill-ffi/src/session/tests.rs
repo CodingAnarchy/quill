@@ -100,6 +100,34 @@ fn an_annotation_stays_on_its_phrase() {
 }
 
 #[test]
+fn a_verse_fence_is_verse_and_a_code_fence_is_code() {
+    let dir = scratch_dir("ffi-session", "verse");
+    let text =
+        "She sang.\n\n```verse iambic tetrameter abab\nThe wind was loud\n```\n\n```\nlog\n```\n";
+    let session = project(&dir, text).edit_chapter(0).unwrap();
+    let spans = session.styles(0, session.utf16_length());
+    let at = |kind: StyleKind| {
+        spans
+            .iter()
+            .find(|s| s.kind == kind)
+            .map(|s| &text[s.start as usize..(s.start + s.length) as usize])
+    };
+    assert!(at(StyleKind::Verse).is_some_and(|t| t.contains("The wind was loud")));
+    assert!(at(StyleKind::Code).is_some_and(|t| t.contains("log") && !t.contains("wind")));
+    // The fence lines, meter words and all, come through as markers to dim.
+    let markers: Vec<&str> = spans
+        .iter()
+        .filter(|s| s.kind == StyleKind::Marker)
+        .map(|s| &text[s.start as usize..(s.start + s.length) as usize])
+        .collect();
+    assert!(
+        markers.contains(&"```verse iambic tetrameter abab\n"),
+        "{markers:?}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn styles_are_reported_in_utf16() {
     let dir = scratch_dir("ffi-session", "styles");
     let session = project(&dir, "# Night\n\n🙂 a *dark* sky\n")

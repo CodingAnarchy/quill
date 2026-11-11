@@ -21,6 +21,9 @@ pub enum StyleKind {
     Strong,
     Emphasis,
     Code,
+    /// A fenced verse block (#1337, #1341): a poem or song inside the prose,
+    /// set as text a line at a time, never as code.
+    Verse,
     SceneBreak,
     /// An emphasis delimiter (`*`, `_`, `**`), which the desktop hides and the
     /// phone shows dimmed so the author can still edit it.
@@ -267,6 +270,7 @@ const fn style_kind(kind: HighlightKind) -> StyleKind {
         HighlightKind::Strong => StyleKind::Strong,
         HighlightKind::Emphasis => StyleKind::Emphasis,
         HighlightKind::Code => StyleKind::Code,
+        HighlightKind::Verse => StyleKind::Verse,
         HighlightKind::SceneBreak => StyleKind::SceneBreak,
     }
 }
