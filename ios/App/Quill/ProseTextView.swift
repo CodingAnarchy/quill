@@ -331,6 +331,15 @@ enum ProseStyle {
             return [.font: UIFont(descriptor: bold, size: font.pointSize), .foregroundColor: UIColor.systemTeal]
         case .code:
             return [.font: UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 2, weight: .regular)]
+        case .verse:
+            // A poem or song in the prose (#1341): the body font, a line at a
+            // time with no gap between lines, and a line too long for the
+            // screen wraps under a hanging indent so it still reads as one.
+            let lines = NSMutableParagraphStyle()
+            lines.lineSpacing = 4
+            lines.paragraphSpacing = 0
+            lines.headIndent = 24
+            return [.paragraphStyle: lines]
         case .sceneBreak:
             let centered = NSMutableParagraphStyle()
             centered.alignment = .center
