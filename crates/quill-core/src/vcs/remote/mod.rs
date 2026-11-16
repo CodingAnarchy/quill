@@ -25,6 +25,7 @@ mod clone;
 mod divert;
 mod error;
 pub(in crate::vcs) mod merge;
+mod origin;
 mod sync;
 mod token;
 
@@ -40,6 +41,7 @@ pub use sync::{finalize_sync, sync, ChapterConflict};
 pub use token::set_token;
 
 pub(in crate::vcs) use error::classify;
+use origin::{bare_user, fetch_spec, note_pushed, origin, origin_user, without_bare_user};
 
 /// Point the project at a hosted remote (#134). Stores it as `origin`, replacing
 /// any existing one, so reconfiguring is just calling this again. The URL can be
@@ -80,9 +82,7 @@ pub fn push(root: &Path) -> Result<String, String> {
 /// Push the local branch `branch` to the branch of the same name on `origin`,
 /// never forcing. Shared by [`push`] and the phone's draft diversion (#1233).
 fn push_branch(repo: &git2::Repository, branch: &str) -> Result<(), String> {
-    let mut remote = repo
-        .find_remote("origin")
-        .map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = origin(repo)?;
 
     // A rejected ref (e.g. non-fast-forward) is reported through this callback,
     // not always as an error from push() — capture it so we never silently
@@ -90,7 +90,7 @@ fn push_branch(repo: &git2::Repository, branch: &str) -> Result<(), String> {
     let rejected = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
     let captured = rejected.clone();
     let mut cbs = git2::RemoteCallbacks::new();
-    cbs.credentials(credentials);
+    cbs.credentials(credentials_for(Some(repo)));
     cbs.push_update_reference(move |_refname, status| {
         if let Some(reason) = status {
             *captured.borrow_mut() = Some(reason.to_string());
@@ -109,6 +109,7 @@ fn push_branch(repo: &git2::Repository, branch: &str) -> Result<(), String> {
     if rejected.borrow_mut().take().is_some() {
         return Err(RemoteError::rejected().message());
     }
+    note_pushed(repo, branch);
     Ok(())
 }
 
@@ -141,16 +142,14 @@ pub fn pull(root: &Path) -> Result<String, String> {
     }
 
     let branch = current_branch(&repo)?;
-    let mut remote = repo
-        .find_remote("origin")
-        .map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = origin(&repo)?;
 
     let mut cbs = git2::RemoteCallbacks::new();
-    cbs.credentials(credentials);
+    cbs.credentials(credentials_for(Some(&repo)));
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(cbs);
     remote
-        .fetch(&[&branch], Some(&mut opts), None)
+        .fetch(&[&fetch_spec(&branch)], Some(&mut opts), None)
         .map_err(|e| classify(&e).message())?;
 
     let fetch_head = repo
@@ -287,12 +286,50 @@ fn current_branch(repo: &git2::Repository) -> Result<String, String> {
         .ok_or_else(|| "Not on a branch.".to_string())
 }
 
-/// git2 credential callback: reuse whatever the author already has, rather than
-/// inventing key management. SSH URLs use the ssh-agent; HTTPS uses a token the
-/// front end supplied ([`set_token`], the iPhone app's Keychain, #1231), then one
-/// from the environment, otherwise the system git credential helper (e.g. the
-/// macOS keychain or `gh`). Documented in `docs/git-integration-spike.md`.
+/// The git2 credential callback for remote work in `repo`: reuse whatever the
+/// author already has, rather than inventing key management. SSH URLs use the
+/// ssh-agent; HTTPS uses a token the front end supplied ([`set_token`], the iPhone
+/// app's Keychain, #1231), then one from the environment, otherwise the git
+/// credential helper (e.g. the macOS keychain or `gh`). Documented in
+/// `docs/git-integration-spike.md`.
+///
+/// The helper is looked up in the repository's own config, the way `git push`
+/// does, so a `credential.helper` set in the project's `.git/config` counts. The
+/// global-only config missed it, and a push `git` made fine was refused as an
+/// authentication failure. A clone, with no repository yet, passes `None` and
+/// reads the global config.
+pub(super) fn credentials_for(
+    repo: Option<&git2::Repository>,
+) -> impl FnMut(&str, Option<&str>, git2::CredentialType) -> Result<git2::Cred, git2::Error> {
+    // A user taken out of the URL (see `origin`) still picks the helper's entry.
+    credentials_with(remote_config(repo), repo.and_then(origin_user))
+}
+
+/// [`credentials_for`] over a given config, with `url_user` standing in for a
+/// user taken out of the URL (see `origin`).
+pub(super) fn credentials_with(
+    config: Result<git2::Config, git2::Error>,
+    url_user: Option<String>,
+) -> impl FnMut(&str, Option<&str>, git2::CredentialType) -> Result<git2::Cred, git2::Error> {
+    move |url, username, allowed| {
+        let config = config
+            .as_ref()
+            .map_err(|e| git2::Error::from_str(e.message()))?;
+        credentials(config, url, username.or(url_user.as_deref()), allowed)
+    }
+}
+
+/// The config a credential helper is looked up in: the repository's own (its
+/// `.git/config` layered over the global and system files), or the global one when
+/// there's no repository yet.
+pub(in crate::vcs) fn remote_config(
+    repo: Option<&git2::Repository>,
+) -> Result<git2::Config, git2::Error> {
+    repo.map_or_else(git2::Config::open_default, git2::Repository::config)
+}
+
 fn credentials(
+    config: &git2::Config,
     url: &str,
     username: Option<&str>,
     allowed: git2::CredentialType,
@@ -305,8 +342,7 @@ fn credentials(
         if let Some(token) = token::supplied().or_else(token_from_env) {
             return git2::Cred::userpass_plaintext(username.unwrap_or("git"), &token);
         }
-        let config = git2::Config::open_default()?;
-        return git2::Cred::credential_helper(&config, url, username);
+        return git2::Cred::credential_helper(config, url, username);
     }
     if allowed.contains(Type::USERNAME) {
         return git2::Cred::username(username.unwrap_or("git"));

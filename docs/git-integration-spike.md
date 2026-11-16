@@ -131,7 +131,18 @@ management — git2's credential callback resolves, in order:
 2. **HTTPS URLs** → a **token from the environment** if set
    (`QUILL_GIT_TOKEN`, then `GITHUB_TOKEN` / `GH_TOKEN`), else the **system git
    credential helper** (`Cred::credential_helper` — the macOS keychain, `gh`,
-   `git-credential-store`, etc.).
+   `git-credential-store`, etc.), looked up in the **repository's own config**
+   the way `git push` does, so a `credential.helper` set only in the project's
+   `.git/config` counts. A clone, with no repository yet, reads the global
+   config.
+
+An HTTPS URL that names a user but no password (`https://matt@host/…`) is
+reached without the user, which goes to the credential helper instead. Given
+such a URL, libgit2 first answers the server with that user and an empty
+password, without calling the callback; Forgejo and Gitea refuse that with a
+bare 401 that carries no new challenge, so libgit2 gave up with an
+authentication error that `git push` never hit. The `origin` URL itself is
+left as the author set it (`vcs/remote/origin.rs`).
 
 When none of these produce a credential, the push/pull fails with author-facing
 guidance ("set up an SSH key, a credential helper, or a `QUILL_GIT_TOKEN`")

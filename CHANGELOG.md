@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Pushing, pulling, and syncing over HTTPS no longer fail as an authentication
+  error when `git push` works. Quill now finds a credential helper set in the
+  project's own git config, and reaches a remote whose URL names a user
+  (`https://you@host/…`) on Forgejo or Gitea.
+
 ## [1.4.0] - 2026-11-11
 
 Verse comes to Quill. A chapter, a short story, or a poem inside prose can now

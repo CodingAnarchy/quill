@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::local::exclude_editor_state;
-use super::{classify, credentials};
+use super::{bare_user, classify, credentials_with, without_bare_user};
 
 /// Clone the repository at `url` into the new folder `dest`. Fails, leaving
 /// nothing behind, when `dest` already exists, the remote can't be reached or
@@ -34,14 +34,22 @@ pub fn clone(url: &str, dest: &Path) -> Result<(), String> {
 }
 
 fn clone_into(url: &str, staging: &Path) -> Result<(), String> {
+    // A URL naming a user but no password is cloned without the user, which goes
+    // to the credential callback instead (see `origin`), and kept as `origin`.
+    let bare = without_bare_user(url);
+    let user = bare_user(url).map(|(user, _)| user.to_string());
     let mut callbacks = git2::RemoteCallbacks::new();
-    callbacks.credentials(credentials);
+    callbacks.credentials(credentials_with(git2::Config::open_default(), user));
     let mut fetch = git2::FetchOptions::new();
     fetch.remote_callbacks(callbacks);
-    git2::build::RepoBuilder::new()
+    let repo = git2::build::RepoBuilder::new()
         .fetch_options(fetch)
-        .clone(url, staging)
+        .clone(bare.as_deref().unwrap_or(url), staging)
         .map_err(|e| classify(&e).message())?;
+    if bare.is_some() {
+        repo.remote_set_url("origin", url)
+            .map_err(|e| format!("Couldn't record the remote: {e}"))?;
+    }
     if !staging.join(crate::project::MANIFEST_NAME).exists() {
         return Err(format!(
             "That repository isn't a Quill project: it has no {} at its top level.",
