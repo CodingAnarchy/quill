@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A status message too long to fit beside the status bar's tags, such as a
+  failed push, now gets its own row above the bar at full brightness. It used
+  to be dimmed, crowded against the tags, and cut off at the edge of the screen.
+
 ## [1.4.0] - 2026-11-11
 
 Verse comes to Quill. A chapter, a short story, or a poem inside prose can now

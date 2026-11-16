@@ -9,7 +9,9 @@ any other key to close it.
 WRITING
 
 Just type. Text flows into a centered column sized like a printed page; the
-status bar shows the live word count and your position. Editing is Unicode-
+status bar shows the live word count and your position, and a short message in
+their place after an action. A message too long for that spot, like a failed
+push, gets a row of its own just above the bar until your next key. Editing is Unicode-
 correct — movement and deletion work on whole characters. Ctrl-Z undoes a burst
 of typing and Ctrl-Y redoes it. Ctrl-+ and Ctrl-- widen and narrow the column.
 
