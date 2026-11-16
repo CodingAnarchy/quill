@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-16
+
+A patch release. Quill now pushes and pulls over HTTPS wherever `git` itself
+can, and a long status message, such as a failed push, is now readable.
+
 ### Changed
 
 - A status message too long to fit beside the status bar's tags, such as a
@@ -848,6 +853,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.4.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.4.1
 [1.4.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.4.0
 [1.3.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.3.0
 [1.2.1]: https://github.com/CodingAnarchy/quill/releases/tag/v1.2.1
