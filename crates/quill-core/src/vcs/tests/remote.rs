@@ -6,6 +6,7 @@
 use std::fs;
 
 use super::temp_dir;
+use crate::vcs::remote::remote_config;
 use crate::vcs::*;
 
 #[test]
@@ -332,5 +333,29 @@ fn push_without_a_remote_explains() {
     commit(&dir, "first").unwrap();
     let err = push(&dir).unwrap_err();
     assert!(err.contains("No remote"), "{err}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_credential_helper_in_the_projects_own_config_is_used() {
+    // A helper set only in the project's `.git/config` (as `git config
+    // credential.helper osxkeychain` does) answers HTTPS auth, the way `git push`
+    // finds it. Reading only the global config missed it, and Quill refused a push
+    // git made fine.
+    let dir = temp_dir("remote-helper");
+    init(&dir).expect("init");
+    let repo = git2::Repository::open(&dir).expect("open");
+    repo.config()
+        .expect("config")
+        .set_str(
+            "credential.helper",
+            "!f() { echo username=quill; echo password=secret; }; f",
+        )
+        .expect("set the helper");
+
+    let config = remote_config(Some(&repo)).expect("the repo's config");
+    let cred = git2::Cred::credential_helper(&config, "https://example.invalid/a.git", None)
+        .expect("the project's helper answers");
+    assert!(cred.has_username());
     fs::remove_dir_all(&dir).ok();
 }

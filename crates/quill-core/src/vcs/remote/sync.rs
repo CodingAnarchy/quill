@@ -14,7 +14,8 @@ use std::path::Path;
 
 use super::super::local::signature;
 use super::merge::{adopt, blob_text, collect_blobs, index_from_tree, stage_blob};
-use super::{classify, credentials, current_branch, DIRTY_PULL, NO_REMOTE, PHONE_DRAFT_PREFIX};
+use super::origin::{fetch_spec, origin};
+use super::{classify, credentials_for, current_branch, DIRTY_PULL, PHONE_DRAFT_PREFIX};
 use crate::vcs::local::is_dirty;
 
 /// One chapter changed on both machines since the shared ancestor — a per-chapter
@@ -99,16 +100,14 @@ pub(super) fn sync_fetched(root: &Path) -> Result<(SyncOutcome, git2::Oid), Stri
     }
 
     let branch = current_branch(&repo)?;
-    let mut remote = repo
-        .find_remote("origin")
-        .map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = origin(&repo)?;
 
     let mut cbs = git2::RemoteCallbacks::new();
-    cbs.credentials(credentials);
+    cbs.credentials(credentials_for(Some(&repo)));
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(cbs);
     remote
-        .fetch(&[&branch], Some(&mut opts), None)
+        .fetch(&[&fetch_spec(&branch)], Some(&mut opts), None)
         .map_err(|e| classify(&e).message())?;
 
     let fetch_head = repo
@@ -168,7 +167,7 @@ pub(super) fn sync_fetched(root: &Path) -> Result<(SyncOutcome, git2::Oid), Stri
 /// Returns the drafts it created.
 fn adopt_phone_drafts(repo: &git2::Repository, remote: &mut git2::Remote) -> Vec<String> {
     let mut cbs = git2::RemoteCallbacks::new();
-    cbs.credentials(credentials);
+    cbs.credentials(credentials_for(Some(repo)));
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(cbs);
     let spec =
@@ -414,15 +413,13 @@ pub fn finalize_sync(
     // and fall back to the prior behavior rather than refuse spuriously.
     let prior_theirs = tracking_blobs(&repo, &branch);
 
-    let mut remote = repo
-        .find_remote("origin")
-        .map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = origin(&repo)?;
     let mut cbs = git2::RemoteCallbacks::new();
-    cbs.credentials(credentials);
+    cbs.credentials(credentials_for(Some(&repo)));
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(cbs);
     remote
-        .fetch(&[&branch], Some(&mut opts), None)
+        .fetch(&[&fetch_spec(&branch)], Some(&mut opts), None)
         .map_err(|e| classify(&e).message())?;
 
     let fetch_head = repo
