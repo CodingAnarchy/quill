@@ -22,7 +22,16 @@ use crate::buffer::count_words;
 use crate::mode::{Mode, PromptState, Search, SearchStage};
 use crate::project::length_category;
 use crate::theme::Theme;
-use crate::wrap::{row_starts_first_indent, visual_pos};
+use crate::wrap::{row_starts, row_starts_first_indent, visual_pos};
+
+/// The most rows a status message too long for the status line takes above it.
+/// Past this the last row ends in an ellipsis; a message is one or two sentences,
+/// so three rows hold it on any usable terminal.
+const MAX_MESSAGE_ROWS: usize = 3;
+
+/// The fewest blank cells kept between the status tags and a message beside
+/// them, so the message reads as its own thing rather than one more tag.
+const MESSAGE_GAP: usize = 4;
 
 /// The most rows a wrapped prompt grows to. A long annotation note wraps upward
 /// over the dimmed editor instead of running off the right edge; past this cap it
@@ -304,6 +313,7 @@ pub(super) fn nav_status_bar(
     selected: usize,
     filter: &str,
     typing: bool,
+    message: Option<&str>,
 ) -> (String, String) {
     let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
     // A quick-jump filter (#410) takes over the bar: the live query and a
@@ -324,7 +334,7 @@ pub(super) fn nav_status_bar(
         };
         (format!(" /{filter}{count}"), format!("{title}{hint}  "))
     } else {
-        let right = app.message.as_ref().map_or_else(
+        let right = message.map_or_else(
             || {
                 let mut parts = Vec::new();
                 if let Some(s) = app.project.chapter_summary(selected) {
@@ -351,7 +361,11 @@ pub(super) fn nav_status_bar(
 /// The editor bar: the active chapter's name and save state, the persistent
 /// AI / version-control / sprint tags, and a word/line count (or a transient
 /// message) on the right.
-pub(super) fn editor_status_bar(app: &App, active: usize) -> (String, String) {
+pub(super) fn editor_status_bar(
+    app: &App,
+    active: usize,
+    message: Option<&str>,
+) -> (String, String) {
     let buffer = app.edit_buffer();
     // The chapter the cursor is in: in continuous view that's the segment
     // under the cursor (with a marker); otherwise the single active chapter.
@@ -362,7 +376,7 @@ pub(super) fn editor_status_bar(app: &App, active: usize) -> (String, String) {
         |m| (format!("≡ {}", m.current_title()), m.dirty()),
     );
     let dirty = dirty_marker(dirtied);
-    let right = app.message.as_ref().map_or_else(
+    let right = message.map_or_else(
         || {
             // In Visual mode, tally the selection itself (#824) — "how long is
             // this passage I'm about to cut?" — scoped to the selected bytes
@@ -434,4 +448,87 @@ pub(super) fn mode_chip(app: &App) -> Option<Span<'static>> {
                 .add_modifier(Modifier::BOLD),
         )
     })
+}
+
+/// What the status line shows outside a prompt or find: the Vim mode chip, the
+/// left-hand tags, the right-hand count or message, and the transient message's
+/// own rows when it's too long to sit beside the tags.
+pub(super) struct StatusText {
+    pub(super) chip: Option<Span<'static>>,
+    pub(super) left: String,
+    pub(super) right: String,
+    /// The message, word-wrapped to its own rows above the status line. Empty
+    /// when the message fits on the right (or there is none). A long message
+    /// used to be squeezed in after the tags with one space between, dimmed and
+    /// cut off at the screen's edge.
+    pub(super) message: Vec<String>,
+}
+
+impl StatusText {
+    /// The rows the status area needs: the status line plus the message's own.
+    pub(super) fn height(&self) -> u16 {
+        u16::try_from(self.message.len() + 1).unwrap_or(u16::MAX)
+    }
+}
+
+/// The status line's text at `width` cells, or `None` while a prompt or find owns
+/// the line. Builds the bar once, and again without the message only when the
+/// message has to move to its own rows.
+pub(super) fn status_text(app: &App, active: usize, width: u16) -> Option<StatusText> {
+    let bar = |message: Option<&str>| match &app.mode {
+        Mode::Nav { selected, filter } => {
+            nav_status_bar(app, *selected, &filter.text, filter.typing, message)
+        }
+        _ => editor_status_bar(app, active, message),
+    };
+    let message = match &app.mode {
+        Mode::Prompt(_) | Mode::Search(_) => return None,
+        // A quick-jump filter takes over the bar and shows no message.
+        Mode::Nav { filter, .. } if filter.typing || !filter.text.is_empty() => None,
+        _ => app.message.as_deref(),
+    };
+    let chip = mode_chip(app);
+    let chip_w = chip.as_ref().map_or(0, |s| s.content.width());
+    let (left, right) = bar(message);
+    let width = usize::from(width);
+    let fits = chip_w + left.width() + MESSAGE_GAP + right.width() <= width;
+    let Some(message) = message.filter(|_| !fits) else {
+        return Some(StatusText {
+            chip,
+            left,
+            right,
+            message: Vec::new(),
+        });
+    };
+    let (left, right) = bar(None);
+    Some(StatusText {
+        chip,
+        left,
+        right,
+        message: message_rows(message, width),
+    })
+}
+
+/// `message` word-wrapped to rows of `width` cells, each set in by a space to line
+/// up with the status line's text, at most [`MAX_MESSAGE_ROWS`] of them.
+fn message_rows(message: &str, width: usize) -> Vec<String> {
+    let text_w = width.saturating_sub(2).max(1);
+    let message = message.trim();
+    let starts = row_starts(message, text_w);
+    let mut rows: Vec<String> = starts
+        .iter()
+        .enumerate()
+        .map(|(i, &start)| {
+            let end = starts.get(i + 1).copied().unwrap_or(message.len());
+            format!(" {}", message[start..end].trim_end())
+        })
+        .collect();
+    if rows.len() > MAX_MESSAGE_ROWS {
+        rows.truncate(MAX_MESSAGE_ROWS);
+        if let Some(last) = rows.last_mut() {
+            while last.width() + 1 > text_w + 1 && last.pop().is_some() {}
+            last.push('…');
+        }
+    }
+    rows
 }

@@ -26,9 +26,7 @@ pub use assistant::AssistantWrapCache;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
 use nav_pane::NavPane;
-use status::{
-    draw_prompt, editor_status_bar, mode_chip, nav_status_bar, prompt_height, search_status,
-};
+use status::{draw_prompt, prompt_height, search_status, status_text, StatusText};
 // Galley proofreading pagination (#1003): the read-only paged view's page-advance math,
 // shared with the app-layer Space/Backspace paging so render and paging step in lockstep.
 pub use editor::{galley_last_top, galley_next_top, galley_prev_top};
@@ -56,7 +54,7 @@ trait Pane {
 struct Editor<'a>(&'a App, usize);
 /// The bottom line: chapter name / counts, or the active prompt. The second field
 /// is the active chapter's index, resolved once per draw.
-struct StatusBar<'a>(&'a App, usize);
+struct StatusBar<'a>(&'a App, Option<StatusText>);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     // The render path styles from the active theme (#300); affirm it each frame.
@@ -165,9 +163,13 @@ fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App, active: usize) {
         return;
     }
 
+    // A message too long for the status line gets rows of its own above it, so
+    // the editor gives up those rows while it shows.
+    let status = status_text(app, active, area.width);
+    let status_h = status.as_ref().map_or(1, StatusText::height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints([Constraint::Min(1), Constraint::Length(status_h)])
         .split(area);
 
     // The outline pane takes a left strip when toggled on (Ctrl-O); the editor
@@ -185,7 +187,7 @@ fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App, active: usize) {
     };
 
     draw_editor_region(frame, editor_area, app, active);
-    StatusBar(app, active).render(frame, chunks[1]);
+    StatusBar(app, status).render(frame, chunks[1]);
 }
 
 /// Layer a floating modal over the already-drawn editor (#349): dim the editor as
@@ -369,31 +371,46 @@ impl Pane for StatusBar<'_> {
             return;
         }
 
-        let (left, right) = if let Mode::Nav { selected, filter } = &app.mode {
-            nav_status_bar(app, *selected, &filter.text, filter.typing)
-        } else {
-            editor_status_bar(app, self.1)
+        let Some(text) = &self.1 else {
+            return;
+        };
+        let bar_style = Style::default().bg(theme.status_bg);
+
+        // A long message reads on its own rows above the bar, at full brightness,
+        // rather than dimmed and clipped after the tags.
+        let rows = u16::try_from(text.message.len()).unwrap_or(0);
+        if rows > 0 {
+            let above = Rect {
+                height: rows.min(area.height.saturating_sub(1)),
+                ..area
+            };
+            let lines: Vec<Line> = text.message.iter().map(|r| Line::raw(r.as_str())).collect();
+            frame.render_widget(Paragraph::new(lines).style(bar_style), above);
+        }
+        let line_area = Rect {
+            y: area.bottom().saturating_sub(1),
+            height: 1,
+            ..area
         };
 
-        let chip = mode_chip(app);
-        let chip_w = chip.as_ref().map_or(0, |s| s.content.width());
-
+        let chip_w = text.chip.as_ref().map_or(0, |s| s.content.width());
         let pad = (area.width as usize)
-            .saturating_sub(chip_w + left.width() + right.width())
+            .saturating_sub(chip_w + text.left.width() + text.right.width())
             .max(1);
         let mut spans = Vec::new();
-        spans.extend(chip);
+        spans.extend(text.chip.clone());
         spans.push(Span::styled(
-            left,
+            text.left.as_str(),
             Style::default().add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" ".repeat(pad)));
-        spans.push(Span::styled(right, Style::default().fg(theme.dim)));
-        let line = Line::from(spans);
-
+        spans.push(Span::styled(
+            text.right.as_str(),
+            Style::default().fg(theme.dim),
+        ));
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(theme.status_bg)),
-            area,
+            Paragraph::new(Line::from(spans)).style(bar_style),
+            line_area,
         );
     }
 }

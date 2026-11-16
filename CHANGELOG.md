@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A status message too long to fit beside the status bar's tags, such as a
+  failed push, now gets its own row above the bar at full brightness. It used
+  to be dimmed, crowded against the tags, and cut off at the edge of the screen.
+
 ### Fixed
 
 - Pushing, pulling, and syncing over HTTPS no longer fail as an authentication
