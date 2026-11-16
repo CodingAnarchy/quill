@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.1] - 2026-11-16
 
-A patch release. Quill now pushes and pulls over HTTPS wherever `git` itself
-can, and a long status message, such as a failed push, is now readable.
+Quill now pushes and pulls over HTTPS wherever `git` itself can, and a long
+status message, such as a failed push, is now readable.
 
 ### Changed
 
