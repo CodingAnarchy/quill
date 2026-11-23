@@ -116,6 +116,8 @@ pub struct WordScan {
     pub guessed: bool,
     /// Whether the word is where the line breaks the meter.
     pub off: bool,
+    /// Whether one of its syllables is a double offbeat's extra one (#1349).
+    pub loose: bool,
 }
 
 /// One line of verse, scanned.
@@ -662,8 +664,10 @@ fn read_fit(
         let pron = &word.sound.prons[reading.prons[w]];
         let mut stresses = Vec::new();
         let mut off = false;
+        let mut loose = false;
         for weight in weights(word, &pron.stresses) {
             let slot = slots[reading.slots[syllable]];
+            loose |= slot.kind == Kind::Loose;
             let stressed = match weight {
                 Weight::Fixed(s) if s != slot.stressed => {
                     off = true;
@@ -687,6 +691,7 @@ fn read_fit(
             stresses,
             guessed: word.sound.guessed,
             off,
+            loose,
         });
     }
     scan.syllables = syllable;
@@ -753,6 +758,7 @@ fn read_misfit(scan: &mut LineScan, words: &[Word], templates: &[Template]) {
             stresses,
             guessed: word.sound.guessed,
             off: false,
+            loose: false,
         });
     }
     // A loose offbeat only takes an unstressed syllable, so it doesn't make a

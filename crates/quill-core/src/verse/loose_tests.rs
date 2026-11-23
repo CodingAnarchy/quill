@@ -97,3 +97,29 @@ fn the_editor_marks_no_fault_on_a_loose_line() {
     let loose = m.lines[0].meter.as_ref().expect("a meter cell");
     assert!(loose.fits && loose.licence);
 }
+
+#[test]
+fn the_editor_colors_each_double_offbeats_extra_syllable() {
+    let first = "And he rode to the gate of the town";
+    let text = |(s, e): (usize, usize)| &first[s..e];
+    let m = marks(
+        first,
+        0,
+        Some(&meter("iambic trimeter")),
+        None,
+        &Lexicon::default(),
+    );
+    let licences: Vec<&str> = m.licences.iter().map(|&r| text(r)).collect();
+    assert_eq!(licences, ["And", "to", "of"]);
+
+    // Under strict, the same words are the faults.
+    let m = marks(
+        first,
+        0,
+        Some(&meter("strict iambic trimeter")),
+        None,
+        &Lexicon::default(),
+    );
+    let faults: Vec<&str> = m.faults.iter().map(|&r| text(r)).collect();
+    assert_eq!(faults, ["And", "to", "of"]);
+}

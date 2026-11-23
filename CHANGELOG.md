@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the meter has one (*and he RODE to the GATE*), now fits the meter with a
   licence instead of being flagged, the way ballad verse loosens. Under
   `strict` it counts as a fault, and a line with the wrong number of beats is
-  still flagged (#1349).
+  still flagged (#1349). With scansion shown, the word holding each extra
+  syllable is colored like the other licences, so you can see where a passage
+  loosens.
 
 ## [1.4.1] - 2026-11-16
 
