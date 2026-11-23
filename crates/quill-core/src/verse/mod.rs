@@ -35,9 +35,13 @@ pub mod rhyme;
 mod rhyme_tests;
 pub mod scan;
 #[cfg(test)]
+mod stretch_tests;
+#[cfg(test)]
 mod tests;
 
-pub use blocks::{fence_targets, shift_lines, verse_blocks, Targets, VerseBlock};
+pub use blocks::{
+    companion_meter, companion_rhyme, fence_targets, shift_lines, verse_blocks, Targets, VerseBlock,
+};
 pub use lexicon::{Entry, Lexicon, PRONUNCIATIONS_NAME};
 pub use marks::{chapter_marks, marks, GutterLine, Marks, MeterCell, RhymeCell};
 pub use meter::{Foot, Meter, METER_EXAMPLES};

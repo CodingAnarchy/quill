@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Verse stanzas can stretch through the middle. A meter length or a rhyme
+  letter marked `+` repeats through every stanza's middle, however long it runs
+  (`iambic tetrameter/trimeter/tetrameter+/trimeter`, `ABC+B`), so a ballad
+  stanza extended by extra lines before its closing rhyme is checked as written.
+  `extended ballad stanza` names that form and sets both the meter and the
+  rhyme scheme (#1348).
+
 ## [1.4.1] - 2026-11-16
 
 Quill now pushes and pulls over HTTPS wherever `git` itself can, and a long

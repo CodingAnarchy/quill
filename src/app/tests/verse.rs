@@ -46,6 +46,52 @@ fn a_target_meter_is_set_from_the_browser_and_survives_reopen() {
 }
 
 #[test]
+fn the_extended_ballad_sets_a_chapters_meter_and_rhyme_together() {
+    // A form that is both a meter and a scheme (#1348) sets both from the one
+    // field, but never replaces a scheme the chapter already has.
+    let (mut app, dir) = two_chapter_app("verse-extended");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('V')));
+    type_str(&mut app, "extended ballad stanza");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.project.chapter_meter(1).map(Meter::key).as_deref(),
+        Some("extended ballad stanza")
+    );
+    assert_eq!(
+        app.project
+            .chapter_rhyme(1)
+            .map(RhymeScheme::letters)
+            .as_deref(),
+        Some("ABC+B")
+    );
+    let file = fs::read_to_string(dir.join("two.md")).expect("the chapter");
+    assert!(file.contains("meter: extended ballad stanza"), "{file}");
+    assert!(file.contains("rhyme: extended ballad stanza"), "{file}");
+
+    // The other chapter rhymes ABAB already: the form sets only its meter.
+    app.on_key(key(KeyCode::Up));
+    app.on_key(key(KeyCode::Char('H')));
+    type_str(&mut app, "abab");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Char('V')));
+    type_str(&mut app, "extended ballad");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.project.chapter_meter(0).map(Meter::key).as_deref(),
+        Some("extended ballad stanza")
+    );
+    assert_eq!(
+        app.project
+            .chapter_rhyme(0)
+            .map(RhymeScheme::key)
+            .as_deref(),
+        Some("ABAB")
+    );
+}
+
+#[test]
 fn an_unknown_meter_is_rejected_with_examples() {
     let (mut app, _dir) = two_chapter_app("verse-bad");
     app.on_key(ctrl('g'));

@@ -36,8 +36,9 @@ impl Targets {
     /// A `/`, `;`, or `,` between the two is allowed. The longest reading of the
     /// meter wins, and a scheme written in letters has to read like one, starting
     /// at A and bringing each new letter in order, so a misspelled meter isn't
-    /// taken for a scheme. Blank text is no targets; anything else Quill can't
-    /// read is `None`.
+    /// taken for a scheme. A form that names both a meter and a scheme
+    /// (`extended ballad stanza`) sets both on its own. Blank text is no targets;
+    /// anything else Quill can't read is `None`.
     pub fn parse(text: &str) -> Option<Self> {
         let words: Vec<&str> = text
             .split_whitespace()
@@ -62,6 +63,9 @@ impl Targets {
                     _ => continue,
                 }
             };
+            // A form that is both a meter and a scheme, named alone, sets both.
+            let rhyme = rhyme.or_else(|| meter.as_ref().and_then(companion_rhyme));
+            let meter = meter.or_else(|| rhyme.as_ref().and_then(companion_meter));
             return Some(Self { meter, rhyme });
         }
         None
@@ -83,6 +87,12 @@ impl Targets {
 
     /// The targets in the author's words, as the fence line takes them.
     pub fn key(&self) -> String {
+        // A form that sets both is written once (`strict extended ballad stanza`).
+        if let (Some(m), Some(r)) = (&self.meter, &self.rhyme) {
+            if m.named.is_some() && m.named == r.named && !r.slant {
+                return m.key();
+            }
+        }
         let mut parts = Vec::new();
         if let Some(m) = &self.meter {
             parts.push(m.key());
@@ -95,6 +105,18 @@ impl Targets {
     }
 }
 
+/// The rhyme scheme a named meter brings with it, for a form that is both
+/// (`extended ballad stanza`, #1348). `None` for a meter that's only a meter.
+pub fn companion_rhyme(meter: &Meter) -> Option<RhymeScheme> {
+    RhymeScheme::parse(meter.named?).filter(|r| r.named == meter.named)
+}
+
+/// The meter a named rhyme scheme brings with it, the other way round from
+/// [`companion_rhyme`].
+pub fn companion_meter(rhyme: &RhymeScheme) -> Option<Meter> {
+    Meter::parse(rhyme.named?).filter(|m| m.named == rhyme.named)
+}
+
 /// Whether a scheme reads as one an author would write: a named form, or
 /// letters that start at A and bring each new letter in turn (X, unrhymed,
 /// aside). `ABAB CDCD` does; `iambik`, a misspelled meter, doesn't.
@@ -105,7 +127,7 @@ fn reads_as_scheme(scheme: &RhymeScheme) -> bool {
     let mut next = 'A';
     for c in scheme.letters().chars() {
         match c {
-            'X' | ' ' => {}
+            'X' | ' ' | '+' => {}
             c if c == next => {
                 next = match next {
                     'W' => 'Y',

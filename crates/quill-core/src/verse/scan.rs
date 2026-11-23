@@ -21,7 +21,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::lexicon::Lexicon;
-use super::lines::verse_lines;
+use super::lines::{stanza_lengths, verse_lines};
 use super::meter::{Foot, Meter};
 use super::pronounce::{is_function_word, pronounce_with, Sound, Stress};
 
@@ -164,10 +164,14 @@ pub fn scan_meter(text: &str, meter: &Meter) -> Vec<LineScan> {
 /// [`scan_meter`], hearing words through the project's own pronunciations
 /// (#1328) before the dictionary.
 pub fn scan_meter_with(text: &str, meter: &Meter, lexicon: &Lexicon) -> Vec<LineScan> {
-    verse_lines(text)
+    let lines = verse_lines(text);
+    let places: Vec<(usize, usize)> = lines.iter().map(|l| (l.stanza, l.position)).collect();
+    let stanza_len = stanza_lengths(&places);
+    lines
         .into_iter()
         .map(|l| {
-            let feet = meter.feet_for_line(l.position);
+            let len = stanza_len.get(l.stanza).copied().unwrap_or(l.position + 1);
+            let feet = meter.feet_for_line(l.position, len);
             scan_line(
                 l.line,
                 l.stanza,
