@@ -14,7 +14,7 @@ use super::blocks::{verse_blocks, Targets};
 use super::lexicon::Lexicon;
 use super::meter::Meter;
 use super::rhyme::{check_rhyme_with, letter_name, RhymeScheme};
-use super::scan::{scan_meter_with, Deviation, LineScan, Variation};
+use super::scan::{scan_meter_with, Deviation, LineScan, Variation, WordScan};
 use crate::atomic;
 use crate::synced::state_dir;
 
@@ -213,29 +213,33 @@ fn meter_spans(scan: &LineScan) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     for deviation in &scan.deviations {
         match deviation {
             Deviation::ExtraSyllables(_) | Deviation::MissingSyllables(_) => faults.extend(whole()),
-            Deviation::Licence(v) => faults.extend(licence_word(scan, *v)),
+            Deviation::Licence(v) => faults.extend(licence_words(scan, *v)),
             Deviation::InvertedFoot { .. } | Deviation::MisplacedStress { .. } => {}
         }
     }
     let licences = scan
         .variations
         .iter()
-        .filter_map(|v| licence_word(scan, *v))
+        .flat_map(|v| licence_words(scan, *v))
         .collect();
     (faults, licences)
 }
 
-/// The word a licence sits on: the first word for one at the start of the line,
-/// the last for one at the end. A substituted foot has no one word to point at.
-fn licence_word(scan: &LineScan, v: Variation) -> Option<Range<usize>> {
-    let word = match v {
+/// The words a licence sits on: the first word for one at the start of the
+/// line, the last for one at the end, and each word holding a double offbeat's
+/// extra syllable. A substituted foot has no one word to point at.
+fn licence_words(scan: &LineScan, v: Variation) -> Vec<Range<usize>> {
+    let words: Vec<&WordScan> = match v {
         Variation::Headless | Variation::InitialInversion | Variation::Anacrusis => {
-            scan.words.first()
+            scan.words.first().into_iter().collect()
         }
-        Variation::FeminineEnding | Variation::Catalectic => scan.words.last(),
-        Variation::Substitution | Variation::DoubleOffbeat => None,
+        Variation::FeminineEnding | Variation::Catalectic => {
+            scan.words.last().into_iter().collect()
+        }
+        Variation::DoubleOffbeat => scan.words.iter().filter(|w| w.loose).collect(),
+        Variation::Substitution => Vec::new(),
     };
-    word.map(|w| w.range.clone())
+    words.into_iter().map(|w| w.range.clone()).collect()
 }
 
 /// Spans sorted and merged where they touch or overlap.

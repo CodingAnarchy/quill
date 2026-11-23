@@ -411,9 +411,9 @@ text, faults are red and underlined: a word with a fixed stress on the wrong
 beat, a whole line whose syllable count no reading holds, a rhyme word that
 breaks the scheme, and, under `strict`, a licence's word. An accepted licence's
 word (the last word of a feminine or catalectic ending, the first of a headless
-or inverted line or anacrusis) is in the "revised" color instead. A substituted
-foot or a double offbeat has no single word to mark, so only its gutter verdict
-shows it.
+or inverted line or anacrusis, and each word holding a double offbeat's extra
+syllable) is in the "revised" color instead. A substituted foot has no single
+word to mark, so only its gutter verdict shows it.
 
 `]m` / `[m` (and `verse:next` / `verse:prev`) step between lines off the meter
 or the scheme, wrapping in the continuous view and crossing chapters in the
