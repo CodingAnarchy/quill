@@ -294,8 +294,37 @@ or line that would fit.
 spondaic) and a length (monometer through octameter). Lengths separated by `/`
 alternate down a stanza (`iambic tetrameter/trimeter`). Named forms: blank verse
 and heroic couplets (iambic pentameter), alexandrines (iambic hexameter), common
-meter (alternating 4 and 3 feet; also "ballad meter"), long meter (4), and short
-meter (3, 3, 4, 3). A leading `strict` counts the licences below as faults.
+meter (alternating 4 and 3 feet; also "ballad meter"), long meter (4), short
+meter (3, 3, 4, 3), and the extended ballad stanza (below). A leading `strict`
+counts the licences below as faults.
+
+**Stretching a stanza's middle (#1348).** One length may end in `+` to repeat
+through the middle of every stanza, however long it runs. With `iambic
+tetrameter/trimeter/tetrameter+/trimeter`, the lengths before the `+` take a
+stanza's first lines, the ones after it take its last lines, and every line
+between is tetrameter: 4 3 4 3, 4 3 4 4 3, 4 3 4 4 4 3, and so on. A stanza too
+short to hold a middle line takes the lengths in order from the start, so the
+line that's missing from the shape is flagged.
+
+**The extended ballad stanza.** Some poets stretch the ballad stanza with extra
+tetrameter lines before the closing trimeter, the middle lines rhyming with each
+other:
+
+```
+The queen sat waiting by the fire,        A  4
+Her hands upon her knee,                  B  3
+She watched the shadows on the wall,      C  4
+She heard the falcon in the hall,         C  4
+And saw the candles gutter, fall,         C  4
+And waited for the sea.                   B  3
+```
+
+`extended ballad stanza` (or `extended ballad`) is both a meter (`iambic
+tetrameter/trimeter/tetrameter+/trimeter`) and a rhyme scheme (`ABC+B`).
+Setting either one on a chapter sets the other too, unless the chapter already
+has one. On a fence (`` ```verse extended ballad stanza ``) or in the check
+for selected lines, the one name sets both. Plain quatrains and stretched
+stanzas can mix in the same poem.
 
 **Lines and stanzas.** A line is a source line. Blank lines, headings, scene
 breaks, and fenced code end a stanza and aren't scanned.
@@ -480,9 +509,16 @@ through the poem's lines in order, across stanza breaks, and start over with
 fresh sounds if the poem runs past them. Named forms: shakespearean (or english)
 sonnet, petrarchan (or italian) sonnet (`ABBAABBA CDECDE`), spenserian sonnet,
 couplets, ballad stanza, limerick, rhyme royal, ottava rima, villanelle (its
-refrains aren't checked as refrains), and terza rima, whose tercets interlock
-(ABA BCB CDC …, a closing line rhyming with the last tercet's middle). A leading
-`slant` lets slant rhymes count.
+refrains aren't checked as refrains), terza rima, whose tercets interlock
+(ABA BCB CDC …, a closing line rhyming with the last tercet's middle), and the
+extended ballad stanza (`ABC+B`, see the meter above). A leading `slant` lets
+slant rhymes count.
+
+**A stretching letter (#1348).** In a single group, one letter may end in `+` to
+repeat through the middle of every stanza: `ABC+B` checks ABCB, ABCCB, ABCCCB,
+with the middle lines rhyming with each other and the last line with the second.
+`ABX+B` leaves the middle lines unrhymed, so only the second and last lines must
+rhyme. Only one letter may stretch, and only in a scheme of one group.
 
 **How endings are heard.** The end word is the line's last word with a letter in
 it. Its rhyming part is its sound from the last stressed vowel to the end, from

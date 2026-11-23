@@ -15,7 +15,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::lexicon::Lexicon;
-use super::lines::verse_lines;
+use super::lines::{stanza_lengths, stanza_slot, verse_lines};
 use super::pronounce::pronounce_with;
 use super::scan::with_elision;
 
@@ -26,6 +26,12 @@ enum Pattern {
     /// ballad quatrain, `AA` for every couplet); several groups run in order
     /// across the poem's lines, whatever its stanza breaks (a sonnet).
     Letters(Vec<Vec<Option<u32>>>),
+    /// One stanza's letters with one that repeats through its middle (#1348):
+    /// `ABC+B` is ABCB, ABCCB, ABCCCB. `at` is the repeating letter's slot.
+    Stretch {
+        letters: Vec<Option<u32>>,
+        at: usize,
+    },
     /// Terza rima's interlocking tercets: ABA BCB CDC …
     TerzaRima,
 }
@@ -41,6 +47,9 @@ const NAMED: &[(&str, &str)] = &[
     ("rhyme royal", "ABABBCC"),
     ("ottava rima", "ABABABCC"),
     ("villanelle", "ABA ABA ABA ABA ABA ABAA"),
+    // The ballad stanza stretched by lines before its closing rhyme. Also a
+    // meter (4 3 4+ 3), so the one name sets both.
+    ("extended ballad stanza", "ABC+B"),
 ];
 
 /// Other spellings of the named schemes.
@@ -51,6 +60,7 @@ const ALIASES: &[(&str, &str)] = &[
     ("rhyming couplets", "couplets"),
     ("ballad", "ballad stanza"),
     ("limericks", "limerick"),
+    ("extended ballad", "extended ballad stanza"),
 ];
 
 /// A target rhyme scheme.
@@ -67,7 +77,9 @@ impl RhymeScheme {
     /// Read a scheme from the author's words: letters with spaces between
     /// groups (`ABAB CDCD EFEF GG`, case doesn't matter, `X` for an unrhymed
     /// line), a named form (`shakespearean sonnet`, `terza rima`, `limerick`), and
-    /// an optional leading `slant` to count slant rhymes as matches.
+    /// an optional leading `slant` to count slant rhymes as matches. One stanza's
+    /// letters may mark one letter with `+` to repeat it through the stanza's
+    /// middle (`ABC+B`, `ABX+B`).
     pub fn parse(text: &str) -> Option<Self> {
         let lower = text.trim().to_lowercase();
         let mut words: Vec<&str> = lower.split_whitespace().collect();
@@ -92,13 +104,13 @@ impl RhymeScheme {
         }
         if let Some(&(named, letters)) = NAMED.iter().find(|(n, _)| *n == name) {
             return Some(Self {
-                pattern: Pattern::Letters(letter_groups(letters)?),
+                pattern: letter_pattern(letters)?,
                 slant,
                 named: Some(named),
             });
         }
         Some(Self {
-            pattern: Pattern::Letters(letter_groups(&rest)?),
+            pattern: letter_pattern(&rest)?,
             slant,
             named: None,
         })
@@ -108,12 +120,8 @@ impl RhymeScheme {
     pub fn key(&self) -> String {
         let body = match (&self.pattern, self.named) {
             (_, Some(name)) => name.to_string(),
-            (Pattern::Letters(groups), None) => groups
-                .iter()
-                .map(|g| g.iter().map(|l| letter_name(*l)).collect::<String>())
-                .collect::<Vec<_>>()
-                .join(" "),
             (Pattern::TerzaRima, None) => "terza rima".into(),
+            (_, None) => self.letters(),
         };
         if self.slant {
             format!("slant {body}")
@@ -130,6 +138,18 @@ impl RhymeScheme {
                 .map(|g| g.iter().map(|l| letter_name(*l)).collect::<String>())
                 .collect::<Vec<_>>()
                 .join(" "),
+            Pattern::Stretch { letters, at } => letters
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let name = letter_name(*l);
+                    if i == *at {
+                        format!("{name}+")
+                    } else {
+                        name
+                    }
+                })
+                .collect(),
             Pattern::TerzaRima => "ABA BCB CDC \u{2026}".into(),
         }
     }
@@ -146,6 +166,17 @@ impl RhymeScheme {
                     (0, Some(letter))
                 })
                 .collect(),
+            Pattern::Stretch { letters, at } => {
+                let stanza_len = stanza_lengths(lines);
+                lines
+                    .iter()
+                    .map(|&(stanza, position)| {
+                        let len = stanza_len.get(stanza).copied().unwrap_or(position + 1);
+                        let slot = stanza_slot(position, len, letters.len(), Some(*at));
+                        (block_id((stanza, 0)), letters.get(slot).copied().flatten())
+                    })
+                    .collect()
+            }
             Pattern::Letters(groups) if groups.len() == 1 => {
                 let group = &groups[0];
                 lines
@@ -173,12 +204,36 @@ impl fmt::Display for RhymeScheme {
 }
 
 /// Examples to show an author who typed a scheme Quill doesn't know.
-pub const RHYME_EXAMPLES: &str = "e.g. ABAB CDCD EFEF GG, ABCB, AABBA, shakespearean sonnet, terza rima, couplets; X for an unrhymed line; prefix slant to accept slant rhymes";
+pub const RHYME_EXAMPLES: &str = "e.g. ABAB CDCD EFEF GG, ABCB, AABBA, ABC+B, shakespearean sonnet, terza rima, couplets, extended ballad stanza; X for an unrhymed line; + after a letter to repeat it through a stanza's middle; prefix slant to accept slant rhymes";
 
 /// A stanza and a group number as one block id, so lines in different stanzas
 /// never share a letter.
 const fn block_id((stanza, group): (usize, usize)) -> usize {
     stanza.wrapping_mul(1 << 16).wrapping_add(group)
+}
+
+/// A letter scheme's pattern: groups of letters (`abab cdcd`), or one stanza's
+/// letters with one marked `+` to repeat through the middle (`abc+b`). Only one
+/// letter may repeat, and only in a scheme of a single group.
+fn letter_pattern(text: &str) -> Option<Pattern> {
+    if !text.contains('+') {
+        return letter_groups(text).map(Pattern::Letters);
+    }
+    let mut words = text.split_whitespace();
+    let (Some(word), None) = (words.next(), words.next()) else {
+        return None;
+    };
+    let at = word.find('+')?;
+    // The `+` follows a letter, and there's only one.
+    if at == 0 || word[at + 1..].contains('+') {
+        return None;
+    }
+    let plain = word.replacen('+', "", 1);
+    let letters = letter_groups(&plain)?.into_iter().next()?;
+    Some(Pattern::Stretch {
+        letters,
+        at: word[..at].chars().count() - 1,
+    })
 }
 
 /// Letter groups from text like `abab cdcd`: each letter numbered in order

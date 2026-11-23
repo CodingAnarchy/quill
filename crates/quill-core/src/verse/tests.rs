@@ -32,7 +32,11 @@ fn a_meter_reads_from_the_authors_words() {
     let m = Meter::parse("iambic tetrameter/trimeter").expect("parses");
     assert_eq!(m.lengths, [4, 3]);
     assert_eq!(
-        (m.feet_for_line(0), m.feet_for_line(1), m.feet_for_line(2)),
+        (
+            m.feet_for_line(0, 4),
+            m.feet_for_line(1, 4),
+            m.feet_for_line(2, 4)
+        ),
         (4, 3, 4)
     );
 

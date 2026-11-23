@@ -489,6 +489,13 @@ consonants match, not both), eye (spelled alike, said differently, like love and
 move), or identical (the same word or sound). Slant rhymes count against the
 scheme unless you put "slant" first ("slant ABAB").
 
+A stanza can stretch through the middle. Put "+" after one letter ("ABC+B") or
+one meter length ("iambic tetrameter/trimeter/tetrameter+/trimeter") and it
+repeats through every stanza's middle, however long the stanza runs, so ABCB,
+ABCCB, and ABCCCB all fit. "extended ballad stanza" names that form: a ballad
+stanza that adds tetrameter lines, rhyming with each other, before its closing
+trimeter. Setting it as either the meter or the rhyme sets both.
+
 The report hears words the way a pronouncing dictionary says them, which won't
 always be your way: a character's name, an invented word, an archaic stress. Put
 the cursor on the word and run "Set how the word at the cursor sounds" from the

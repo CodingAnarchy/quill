@@ -58,7 +58,9 @@ impl App {
 
     /// Set (or clear) the chapter's target meter for verse analysis (#1324). A
     /// blank value clears it; a meter Quill doesn't know is reported with
-    /// examples rather than stored, so the report never silently skips it.
+    /// examples rather than stored, so the report never silently skips it. A form
+    /// that is also a rhyme scheme (`extended ballad stanza`, #1348) sets the
+    /// chapter's scheme too, unless the chapter already has one.
     fn set_chapter_meter(&mut self, index: usize, text: &str) {
         let meter = if text.trim().is_empty() {
             None
@@ -71,18 +73,33 @@ impl App {
             ));
             return;
         };
-        if self.edit_chapter_meta(index, |fm| fm.set_meter(meter.as_ref())) {
+        let rhyme = meter
+            .as_ref()
+            .and_then(verse::companion_rhyme)
+            .filter(|_| self.project.chapter_rhyme(index).is_none());
+        let edited = self.edit_chapter_meta(index, |fm| {
+            fm.set_meter(meter.as_ref());
+            if rhyme.is_some() {
+                fm.set_rhyme(rhyme.as_ref());
+            }
+        });
+        if edited {
             let title = self.project.chapter_title(index).unwrap_or("Chapter");
-            self.message = Some(meter.map_or_else(
-                || format!("{title}: no target meter"),
-                |m| format!("{title}: {m} (Verse report shows how it scans)"),
-            ));
+            self.message = Some(match (meter, rhyme) {
+                (None, _) => format!("{title}: no target meter"),
+                (Some(m), Some(r)) => format!(
+                    "{title}: {m}, rhymed {} (Verse report shows how it holds)",
+                    r.letters()
+                ),
+                (Some(m), None) => format!("{title}: {m} (Verse report shows how it scans)"),
+            });
         }
     }
 
     /// Set (or clear) the chapter's target rhyme scheme (#1325), the same way as
     /// the meter: blank clears it, and a scheme Quill can't read is reported with
-    /// examples rather than stored.
+    /// examples rather than stored. A form that is also a meter sets the chapter's
+    /// meter too, unless it already has one.
     fn set_chapter_rhyme(&mut self, index: usize, text: &str) {
         let scheme = if text.trim().is_empty() {
             None
@@ -95,17 +112,29 @@ impl App {
             ));
             return;
         };
-        if self.edit_chapter_meta(index, |fm| fm.set_rhyme(scheme.as_ref())) {
+        let meter = scheme
+            .as_ref()
+            .and_then(verse::companion_meter)
+            .filter(|_| self.project.chapter_meter(index).is_none());
+        let edited = self.edit_chapter_meta(index, |fm| {
+            fm.set_rhyme(scheme.as_ref());
+            if meter.is_some() {
+                fm.set_meter(meter.as_ref());
+            }
+        });
+        if edited {
             let title = self.project.chapter_title(index).unwrap_or("Chapter");
-            self.message = Some(scheme.map_or_else(
-                || format!("{title}: no rhyme scheme"),
-                |s| {
-                    format!(
-                        "{title}: rhymed {} (Verse report shows how it holds)",
-                        s.letters()
-                    )
-                },
-            ));
+            self.message = Some(match (scheme, meter) {
+                (None, _) => format!("{title}: no rhyme scheme"),
+                (Some(s), Some(m)) => format!(
+                    "{title}: {m}, rhymed {} (Verse report shows how it holds)",
+                    s.letters()
+                ),
+                (Some(s), None) => format!(
+                    "{title}: rhymed {} (Verse report shows how it holds)",
+                    s.letters()
+                ),
+            });
         }
     }
 
