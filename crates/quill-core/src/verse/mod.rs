@@ -25,6 +25,8 @@ pub mod lexicon;
 #[cfg(test)]
 mod lexicon_tests;
 pub mod lines;
+#[cfg(test)]
+mod loose_tests;
 pub mod marks;
 #[cfg(test)]
 mod marks_tests;

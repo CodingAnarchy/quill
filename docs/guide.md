@@ -470,8 +470,8 @@ tetrameter", lengths that alternate like "iambic tetrameter/trimeter", or a name
 form like "blank verse" or "common meter". Put "strict" first to count the usual
 licences against a line. Then run "Verse report" from the Ctrl-K menu (or
 "report:verse"). For each chapter with a target it lists every line with a mark
-(a tick when it fits, ~ when it fits with a licence such as a feminine ending, a
-cross when it breaks the meter), its syllables against the pattern, its stress
+(a tick when it fits, ~ when it fits with a licence such as a feminine ending or
+a ballad's double offbeat, a cross when it breaks the meter), its syllables against the pattern, its stress
 reading, and what went wrong: extra or missing syllables, an inverted foot, or a
 stress in the wrong place. Totals per stanza and for the whole piece sit at the
 top, with the most common fault. Words Quill didn't know and had to guess are

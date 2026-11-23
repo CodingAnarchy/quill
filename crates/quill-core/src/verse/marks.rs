@@ -233,7 +233,7 @@ fn licence_word(scan: &LineScan, v: Variation) -> Option<Range<usize>> {
             scan.words.first()
         }
         Variation::FeminineEnding | Variation::Catalectic => scan.words.last(),
-        Variation::Substitution => None,
+        Variation::Substitution | Variation::DoubleOffbeat => None,
     };
     word.map(|w| w.range.clone())
 }
