@@ -350,8 +350,15 @@ Each line is matched against templates built from the target: the strict
 pattern, plus the **licences** verse in that meter commonly takes.
 
 - Iambic: a **feminine ending** (an extra offbeat at the end), a **headless
-  line** (no first offbeat), and an **inverted first foot** (opening on a
-  trochee).
+  line** (no first offbeat), an **inverted first foot** (opening on a
+  trochee), and a **double offbeat** (two unstressed syllables where the
+  pattern has one, before any beat). Ballad verse loosens this way, often on
+  purpose in a slower, more meditative passage: *And she WALKED to the EDGE of
+  the SI-lent SEA* is a tetrameter with three. A line may take several. In a
+  reading that uses one, every syllable that leans stressed must fall on a
+  beat, so a line with an extra beat can't hide it in the looser offbeats and
+  pass: *She heard the falcon in the hall*, checked as a trimeter, is still a
+  fault.
 - Anapestic: a headless line, a **substituted foot** (one offbeat of a foot left
   out), and a feminine ending.
 - Trochaic: a **catalectic ending** (the last offbeat dropped) and **anacrusis**
@@ -362,7 +369,8 @@ pattern, plus the **licences** verse in that meter commonly takes.
 
 A small dynamic program chooses each word's pronunciation (where the dictionary
 has more than one, like *record*) and each syllable's place, scoring a fixed
-stress on the wrong beat at 3, a licence at 2, and a syllable read against its
+stress on the wrong beat at 3, a licence at 2 (a double offbeat at 3, so a line
+an older licence explains keeps that reading), and a syllable read against its
 lean at 1. The cheapest reading wins. A line **fits** when that reading puts no
 fixed stress on the wrong beat. Weighing faults rather than forbidding them
 matters: a line of small words can nearly always be forced into the pattern by
@@ -404,7 +412,8 @@ beat, a whole line whose syllable count no reading holds, a rhyme word that
 breaks the scheme, and, under `strict`, a licence's word. An accepted licence's
 word (the last word of a feminine or catalectic ending, the first of a headless
 or inverted line or anacrusis) is in the "revised" color instead. A substituted
-foot has no single word to mark, so only its gutter verdict shows it.
+foot or a double offbeat has no single word to mark, so only its gutter verdict
+shows it.
 
 `]m` / `[m` (and `verse:next` / `verse:prev`) step between lines off the meter
 or the scheme, wrapping in the continuous view and crossing chapters in the

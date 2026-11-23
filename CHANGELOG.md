@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stanza extended by extra lines before its closing rhyme is checked as written.
   `extended ballad stanza` names that form and sets both the meter and the
   rhyme scheme (#1348).
+- An iambic line loosened by a double offbeat, two unstressed syllables where
+  the meter has one (*and he RODE to the GATE*), now fits the meter with a
+  licence instead of being flagged, the way ballad verse loosens. Under
+  `strict` it counts as a fault, and a line with the wrong number of beats is
+  still flagged (#1349).
 
 ## [1.4.1] - 2026-11-16
 

@@ -3,7 +3,8 @@
 //! Each line is matched against templates built from the meter: the strict
 //! pattern (`˘/˘/˘/˘/˘/` for iambic pentameter) with the usual licences as
 //! optional slots: a feminine ending's extra offbeat, a headless line's missing
-//! first offbeat, an inverted first foot, a catalectic ending. A small dynamic
+//! first offbeat, an inverted first foot, a catalectic ending, a ballad's double
+//! offbeat between beats (#1349). A small dynamic
 //! program picks, for every word, the pronunciation and the stress reading that
 //! fit best, the way a reader resolves an ambiguous line. A polysyllable's
 //! dictionary stress is fixed, so putting it on an offbeat is a real fault. A
@@ -41,6 +42,9 @@ pub enum Variation {
     Anacrusis,
     /// A triple foot with one of its unstressed syllables left out.
     Substitution,
+    /// Two unstressed syllables where an iambic line has one, the loosening
+    /// ballad verse takes (*and he RODE to the GATE*) (#1349).
+    DoubleOffbeat,
 }
 
 impl fmt::Display for Variation {
@@ -52,6 +56,7 @@ impl fmt::Display for Variation {
             Self::Catalectic => "catalectic ending",
             Self::Anacrusis => "anacrusis",
             Self::Substitution => "substituted foot",
+            Self::DoubleOffbeat => "double offbeat",
         })
     }
 }
@@ -283,6 +288,10 @@ enum Kind {
     Extra(Variation),
     /// A slot the licence leaves empty.
     Droppable(Variation),
+    /// An extra offbeat that loosens the line (a double offbeat). Unlike
+    /// [`Kind::Extra`] it only takes a syllable that leans unstressed, so a
+    /// line can't hide an extra beat in it and pass with the wrong beat count.
+    Loose,
 }
 
 #[derive(Clone, Copy)]
@@ -297,6 +306,11 @@ struct Slot {
 struct Template {
     slots: Vec<Slot>,
     licence: Option<Variation>,
+    /// A loosened reading (#1349): it has double offbeats to fill, and holds
+    /// every syllable that leans stressed to a beat. Without that rule a loose
+    /// reading could tuck a line's extra beat into an offbeat and pass a
+    /// tetrameter as a trimeter.
+    loose: bool,
 }
 
 /// The templates for a line of `feet` feet.
@@ -334,9 +348,32 @@ fn templates(foot: Foot, feet: usize) -> Vec<Template> {
                 inverted[1].stressed = false;
             }
             inverted.push(feminine);
+            // The loose readings keep the first offbeat (a headless line read
+            // loose would only shift the pattern along the same syllables). An
+            // inverted line's own offbeat already follows its first beat, so
+            // its second foot takes no double offbeat: / ˘ ˘ ˘ / isn't a ballad
+            // line.
+            let mut loose = slots.clone();
+            if let Some(first) = loose.first_mut() {
+                first.kind = Kind::Required;
+            }
+            loosen(&mut loose, 0);
+            let mut inverted_loose = inverted.clone();
+            loosen(&mut inverted_loose, 2);
             out.push(Template {
                 slots: inverted,
                 licence: Some(Variation::InitialInversion),
+                loose: false,
+            });
+            out.push(Template {
+                slots: loose,
+                licence: None,
+                loose: true,
+            });
+            out.push(Template {
+                slots: inverted_loose,
+                licence: Some(Variation::InitialInversion),
+                loose: true,
             });
         }
         Foot::Anapest => {
@@ -379,9 +416,31 @@ fn templates(foot: Foot, feet: usize) -> Vec<Template> {
         Template {
             slots,
             licence: None,
+            loose: false,
         },
     );
     out
+}
+
+/// Give an iambic template a loose offbeat before the offbeat of every foot
+/// from `from_foot` on: a double offbeat between two beats, or before the
+/// first (*and he RODE*).
+fn loosen(slots: &mut Vec<Slot>, from_foot: usize) {
+    let mut out = Vec::with_capacity(slots.len() * 3 / 2);
+    let mut last_foot = None;
+    for &slot in slots.iter() {
+        let opens_foot = last_foot != Some(slot.foot);
+        if opens_foot && slot.foot >= from_foot && !slot.stressed {
+            out.push(Slot {
+                stressed: false,
+                foot: slot.foot,
+                kind: Kind::Loose,
+            });
+        }
+        last_foot = Some(slot.foot);
+        out.push(slot);
+    }
+    *slots = out;
 }
 
 /// What a reading costs: its faults (a fixed stress on the wrong beat), its
@@ -390,6 +449,8 @@ fn templates(foot: Foot, feet: usize) -> Vec<Template> {
 struct Cost {
     faults: u32,
     licences: u32,
+    /// Double offbeats, each also counted among the licences.
+    loose: u32,
     strain: u32,
 }
 
@@ -398,9 +459,14 @@ impl Cost {
     /// weighs most, but not infinitely: a reading that fits only by straining
     /// every small word against its lean and stacking licences loses to the
     /// plain reading with one foot inverted, which is what a reader would hear.
+    ///
+    /// A double offbeat weighs a point more than another licence, so a line
+    /// that one of the older licences explains (a feminine ending, say) keeps
+    /// that reading, and a line with a fixed stress on the wrong beat stays a
+    /// fault rather than being read loose around it.
     const fn score(self) -> (u32, u32) {
         (
-            self.faults * 3 + self.licences * 2 + self.strain,
+            self.faults * 3 + self.licences * 2 + self.loose + self.strain,
             self.faults,
         )
     }
@@ -462,7 +528,7 @@ fn fit(words: &[Word], template: &Template) -> Option<Reading> {
                     let mut step: Vec<Option<Reading>> = vec![None; slots.len() + 1];
                     for (j, r) in cur.iter().enumerate() {
                         let Some(r) = r else { continue };
-                        place(slots, j, r.clone(), weight, &mut step);
+                        place(template, j, r.clone(), weight, &mut step);
                     }
                     cur = step;
                 }
@@ -490,13 +556,27 @@ fn fit(words: &[Word], template: &Template) -> Option<Reading> {
 /// Place one syllable of weight `weight` at slot `j` or a later one, skipping
 /// the slots between when they may be left empty.
 fn place(
-    slots: &[Slot],
+    template: &Template,
     mut j: usize,
     mut r: Reading,
     weight: Weight,
     step: &mut [Option<Reading>],
 ) {
+    let slots = &template.slots;
     while let Some(slot) = slots.get(j) {
+        if slot.kind == Kind::Loose {
+            if !weight.lean() {
+                let mut filled = r.clone();
+                filled.licence(Variation::DoubleOffbeat);
+                filled.cost.loose += 1;
+                filled.slots.push(j);
+                keep(&mut step[j + 1], filled);
+            }
+            j += 1;
+            continue;
+        }
+        // A loose reading never puts a stressed syllable on an offbeat.
+        let demoted = template.loose && weight.lean() && !slot.stressed;
         let mut filled = r.clone();
         match weight {
             Weight::Fixed(s) if s != slot.stressed => filled.cost.faults += 1,
@@ -507,10 +587,12 @@ fn place(
             filled.licence(v);
         }
         filled.slots.push(j);
-        keep(&mut step[j + 1], filled);
+        if !demoted {
+            keep(&mut step[j + 1], filled);
+        }
         match slot.kind {
             Kind::Required => return,
-            Kind::Extra(_) => {}
+            Kind::Extra(_) | Kind::Loose => {}
             Kind::Droppable(v) => r.licence(v),
         }
         j += 1;
@@ -522,7 +604,7 @@ fn skip_to_end(slots: &[Slot], j: usize, r: &mut Reading) -> bool {
     for slot in slots.iter().skip(j) {
         match slot.kind {
             Kind::Required => return false,
-            Kind::Extra(_) => {}
+            Kind::Extra(_) | Kind::Loose => {}
             Kind::Droppable(v) => r.licence(v),
         }
     }
@@ -673,7 +755,13 @@ fn read_misfit(scan: &mut LineScan, words: &[Word], templates: &[Template]) {
             off: false,
         });
     }
-    let longest = templates.iter().map(|t| t.slots.len()).max().unwrap_or(0);
+    // A loose offbeat only takes an unstressed syllable, so it doesn't make a
+    // line of the wrong shape merely long: count the line against the rest.
+    let longest = templates
+        .iter()
+        .map(|t| t.slots.iter().filter(|s| s.kind != Kind::Loose).count())
+        .max()
+        .unwrap_or(0);
     let deviation = if scan.syllables > longest {
         Deviation::ExtraSyllables(scan.syllables.saturating_sub(scan.expected).max(1))
     } else {
